@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>租户登录 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body class="auth-page">
+    <main class="shell auth-shell">
+      <section class="auth-layout">
+        <div class="auth-copy">
+          <p class="eyebrow">TENANT LOGIN</p>
+          <h1 class="page-title">{{ port.note or ('租户端口 ' ~ port.listen_port) }}</h1>
+          <p class="page-subtitle">
+            使用管理员分配的随机用户名和密码登录当前租户面板。该面板只显示当前端口的数据和订阅地址。
+          </p>
+
+          <div class="auth-highlights">
+            <div class="info-tile">
+              <span>监听端口</span>
+              <strong>{{ port.listen_port }}</strong>
+            </div>
+            <div class="info-tile">
+              <span>到期时间</span>
+              <strong>{{ port.expires_at_display }}</strong>
+            </div>
+          </div>
+        </div>
+
+        <section class="auth-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-eyebrow">ACCESS</p>
+              <h2>登录租户面板</h2>
+              <p>账号密码由管理员为当前端口单独生成；重置后旧凭据立即失效。</p>
+            </div>
+          </div>
+
+          {% if message %}
+          <section class="banner {{ message_level }}">
+            <div class="banner-row">
+              <span>{{ message }}</span>
+            </div>
+          </section>
+          {% endif %}
+
+          {% if error_message %}
+          <section class="banner error">
+            <div class="banner-row">
+              <span>{{ error_message }}</span>
+            </div>
+          </section>
+          {% endif %}
+
+          <form class="auth-form" method="post" action="{{ url_for('tenant_login', tenant_token=port.tenant_token) }}">
+            <label>
+              <span>用户名</span>
+              <input
+                type="text"
+                name="username"
+                value="{{ form_username }}"
+                autocomplete="username"
+                autocapitalize="off"
+                spellcheck="false"
+                autofocus
+              >
+            </label>
+            <label>
+              <span>密码</span>
+              <input
+                type="password"
+                name="password"
+                autocomplete="current-password"
+              >
+            </label>
+            <div class="actions">
+              <button class="primary" type="submit">登录</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

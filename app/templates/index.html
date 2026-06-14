@@ -136,7 +136,7 @@
               <input v-model="createForm.traffic_limit" type="text" placeholder="例如 10G / 500MB / 1048576">
             </label>
             <label class="full">
-              <span>备注</span>
+              <span>租户备注</span>
               <input v-model="createForm.note" type="text" maxlength="200" placeholder="例如：客户A / 北京节点 / 测试口">
             </label>
             <div class="actions">
@@ -150,33 +150,28 @@
         <section class="panel workspace-card">
           <div class="panel-head subscription-panel-head">
             <div>
-              <p class="section-eyebrow">SUBSCRIPTION</p>
-              <h2>订阅中心</h2>
-              <p>统一查看 token、客户端目标和导入路径，必要时立即重置。</p>
+              <p class="section-eyebrow">TENANT ACCESS</p>
+              <h2>租户面板与订阅</h2>
+              <p>每个有效端口独立生成登录地址、随机用户名密码和订阅地址；过期端口会自动清理。</p>
             </div>
-            <button
-              v-if="subscription.available"
-              class="secondary"
-              type="button"
-              :disabled="isBusy('rotate-subscription')"
-              @click="rotateSubscription"
-            >
-              <span v-text="isBusy('rotate-subscription') ? '处理中...' : '重置 token'"></span>
-            </button>
           </div>
 
           <div v-if="subscription.available" class="subscription-overview">
             <div class="info-tile">
-              <span>订阅 token</span>
-              <strong v-text="subscription.token"></strong>
+              <span>租户数量</span>
+              <strong v-text="subscription.tenant_count"></strong>
             </div>
             <div class="info-tile">
               <span>客户端目标</span>
               <strong v-text="subscription.server"></strong>
             </div>
             <div class="info-tile">
-              <span>路径示例</span>
-              <strong v-text="subscription.path_example"></strong>
+              <span>登录路径示例</span>
+              <strong v-text="subscription.tenant_panel_path_example"></strong>
+            </div>
+            <div class="info-tile">
+              <span>订阅路径示例</span>
+              <strong v-text="subscription.tenant_subscription_path_example"></strong>
             </div>
           </div>
 
@@ -282,7 +277,7 @@
                 <template v-if="selectedPort.note">
                   <span v-text="selectedPort.note + ' · '"></span>
                 </template>
-                <span v-text="'固定转发到 ' + selectedPort.upstream_host + ':' + selectedPort.upstream_port"></span>
+                <span v-text="'租户固定转发到 ' + selectedPort.upstream_host + ':' + selectedPort.upstream_port"></span>
               </p>
             </div>
 
@@ -363,7 +358,7 @@
                   <input v-model="selectedPort.form.traffic_limit" type="text" placeholder="例如 10G / 500MB / 1048576">
                 </label>
                 <label class="full">
-                  <span>备注</span>
+                  <span>租户备注</span>
                   <input v-model="selectedPort.form.note" type="text" maxlength="200">
                 </label>
                 <div class="actions">
@@ -375,22 +370,84 @@
             </section>
           </div>
 
-          <section v-if="subscription.available && selectedPort.subscription" class="inner-panel subscription-shell">
+          <section v-if="selectedPort.access" class="inner-panel subscription-shell">
             <div class="subscription-shell-head">
               <div>
-                <h4>订阅输出</h4>
-                <p>专属路径：<span v-text="'/' + subscription.token + '/' + selectedPort.listen_port"></span></p>
+                <h4>租户面板与订阅输出</h4>
+                <p>每个端口就是一个独立租户，下面的登录地址、账号密码和订阅地址只对应当前端口。</p>
+              </div>
+              <div class="button-row compact-row">
+                <button
+                  class="secondary"
+                  type="button"
+                  :disabled="isBusy('rotate-tenant:' + selectedPort.id)"
+                  @click="rotateTenantToken(selectedPort)"
+                >
+                  <span v-text="isBusy('rotate-tenant:' + selectedPort.id) ? '处理中...' : '重置面板地址'"></span>
+                </button>
+                <button
+                  class="secondary"
+                  type="button"
+                  :disabled="isBusy('rotate-credentials:' + selectedPort.id)"
+                  @click="rotateTenantCredentials(selectedPort)"
+                >
+                  <span v-text="isBusy('rotate-credentials:' + selectedPort.id) ? '处理中...' : '重置账号密码'"></span>
+                </button>
+                <button
+                  class="secondary"
+                  type="button"
+                  :disabled="isBusy('rotate-subscription:' + selectedPort.id)"
+                  @click="rotatePortSubscription(selectedPort)"
+                >
+                  <span v-text="isBusy('rotate-subscription:' + selectedPort.id) ? '处理中...' : '重置订阅地址'"></span>
+                </button>
               </div>
             </div>
             <div class="subscription-grid">
               <label class="full">
-                <span>Clash 订阅</span>
+                <span>租户登录地址</span>
                 <div class="copy-row">
-                  <input :value="selectedPort.subscription.clash_url" type="text" readonly @focus="$event.target.select()">
+                  <input :value="selectedPort.access.tenant_login_url" type="text" readonly @focus="$event.target.select()">
                   <button
                     class="secondary copy-button"
                     type="button"
-                    @click="copy(selectedPort.subscription.clash_url, 'clash-' + selectedPort.id)"
+                    @click="copy(selectedPort.access.tenant_login_url, 'tenant-panel-' + selectedPort.id)"
+                    v-text="copyLabel('tenant-panel-' + selectedPort.id)"
+                  ></button>
+                </div>
+              </label>
+              <label>
+                <span>租户用户名</span>
+                <div class="copy-row">
+                  <input :value="selectedPort.access.tenant_username" type="text" readonly @focus="$event.target.select()">
+                  <button
+                    class="secondary copy-button"
+                    type="button"
+                    @click="copy(selectedPort.access.tenant_username, 'tenant-user-' + selectedPort.id)"
+                    v-text="copyLabel('tenant-user-' + selectedPort.id)"
+                  ></button>
+                </div>
+              </label>
+              <label>
+                <span>租户密码</span>
+                <div class="copy-row">
+                  <input :value="selectedPort.access.tenant_password" type="text" readonly @focus="$event.target.select()">
+                  <button
+                    class="secondary copy-button"
+                    type="button"
+                    @click="copy(selectedPort.access.tenant_password, 'tenant-pass-' + selectedPort.id)"
+                    v-text="copyLabel('tenant-pass-' + selectedPort.id)"
+                  ></button>
+                </div>
+              </label>
+              <label class="full">
+                <span>Clash 订阅</span>
+                <div class="copy-row">
+                  <input :value="selectedPort.access.tenant_subscription_clash_url" type="text" readonly @focus="$event.target.select()">
+                  <button
+                    class="secondary copy-button"
+                    type="button"
+                    @click="copy(selectedPort.access.tenant_subscription_clash_url, 'clash-' + selectedPort.id)"
                     v-text="copyLabel('clash-' + selectedPort.id)"
                   ></button>
                 </div>
@@ -398,11 +455,11 @@
               <label class="full">
                 <span>V2Ray 订阅</span>
                 <div class="copy-row">
-                  <input :value="selectedPort.subscription.v2ray_url" type="text" readonly @focus="$event.target.select()">
+                  <input :value="selectedPort.access.tenant_subscription_v2ray_url" type="text" readonly @focus="$event.target.select()">
                   <button
                     class="secondary copy-button"
                     type="button"
-                    @click="copy(selectedPort.subscription.v2ray_url, 'v2ray-' + selectedPort.id)"
+                    @click="copy(selectedPort.access.tenant_subscription_v2ray_url, 'v2ray-' + selectedPort.id)"
                     v-text="copyLabel('v2ray-' + selectedPort.id)"
                   ></button>
                 </div>
@@ -410,11 +467,11 @@
               <label class="full">
                 <span>VLESS 直连分享</span>
                 <div class="copy-row">
-                  <input :value="selectedPort.subscription.share_link" type="text" readonly @focus="$event.target.select()">
+                  <input :value="selectedPort.access.share_link" type="text" readonly @focus="$event.target.select()">
                   <button
                     class="secondary copy-button"
                     type="button"
-                    @click="copy(selectedPort.subscription.share_link, 'share-' + selectedPort.id)"
+                    @click="copy(selectedPort.access.share_link, 'share-' + selectedPort.id)"
                     v-text="copyLabel('share-' + selectedPort.id)"
                   ></button>
                 </div>

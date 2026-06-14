@@ -992,6 +992,18 @@ button:disabled {
   background: var(--surface-soft);
 }
 
+.compact-row {
+  flex-wrap: wrap;
+}
+
+.tenant-shell .page-title {
+  max-width: 16ch;
+}
+
+.tenant-detail-grid {
+  margin-top: 0;
+}
+
 @keyframes surface-in {
   from {
     opacity: 0;

@@ -286,12 +286,36 @@ function createPanelApp(initialState) {
         });
       },
 
-      async rotateSubscription() {
-        if (!window.confirm("确认重新生成订阅链接吗？旧链接会立即失效。")) {
+      async rotateTenantToken(port) {
+        if (!window.confirm(`确认重置端口 ${port.listen_port} 的租户面板地址吗？旧地址会立即失效。`)) {
           return;
         }
-        await this.runAction("rotate-subscription", async () => {
-          const data = await this.requestJson("/api/subscriptions/rotate", {
+        await this.runAction(`rotate-tenant:${port.id}`, async () => {
+          const data = await this.requestJson(`/api/ports/${port.id}/rotate-tenant-token`, {
+            method: "POST",
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async rotateTenantCredentials(port) {
+        if (!window.confirm(`确认重置端口 ${port.listen_port} 的租户登录账号和密码吗？旧凭据会立即失效。`)) {
+          return;
+        }
+        await this.runAction(`rotate-credentials:${port.id}`, async () => {
+          const data = await this.requestJson(`/api/ports/${port.id}/rotate-tenant-credentials`, {
+            method: "POST",
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async rotatePortSubscription(port) {
+        if (!window.confirm(`确认重置端口 ${port.listen_port} 的订阅地址吗？旧地址会立即失效。`)) {
+          return;
+        }
+        await this.runAction(`rotate-subscription:${port.id}`, async () => {
+          const data = await this.requestJson(`/api/ports/${port.id}/rotate-subscription-token`, {
             method: "POST",
           });
           this.applyResponse(data);

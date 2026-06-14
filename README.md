@@ -137,6 +137,14 @@ cp .env.example .env
 
 然后按需填写 `PANEL_PUBLIC_URL`、`PANEL_USERNAME`、`PANEL_PASSWORD`、`PANEL_SECRET_KEY`。
 
+补充说明：
+
+- 根目录 `.env` 只用于覆盖面板和 `docker compose` 的运行参数，不负责 REALITY 密钥和 Xray 路由参数
+- `deploy/xray-reality/.env` 才是 `xray-reality` 和 `xray-ai-domain-manager` 的主要配置来源
+- 首次启动时如果 `data/panel.db` 不存在，程序会自动建表
+- 如果数据库里还没有任何端口记录，会按 `SEED_LISTEN_PORT` 自动创建一条初始监听端口，默认是 `31098`
+- 只有在 `deploy/xray-reality/runtime/client-test.json` 已生成并成功挂载后，页面里的 `Clash / V2Ray / VLESS` 订阅与分享链接才会可用
+
 ### 4. 验证 AI routing 是否已经生效
 
 默认按一小时窗口执行。想立刻跑一轮分类，可以手动执行：
@@ -214,30 +222,35 @@ AI routing 相关内容主要集中在：
 - Vue 3 单页方式加载初始状态，不再依赖整页刷新
 - 本地搜索端口、备注、上游地址和状态
 - 在同一页内展开或收起端口详情
-- 新增监听端口
+- 新增监听端口；每个有效端口会自动生成一个独立租户登录地址、一组随机用户名密码和独立订阅地址
 - 默认固定转发到 `127.0.0.1:443`
-- 查看每个端口专属的 `V2Ray / Clash` 订阅链接
+- 查看每个端口专属的租户登录地址、随机用户名密码、`V2Ray / Clash` 订阅链接和 `VLESS` 直连分享
 - 一键复制 `Clash / V2Ray / VLESS` 订阅与分享链接
-- 默认订阅路径是 `/<token>/<listen_port>`，当前返回 Clash 配置；显式路径还有 `/<token>/<listen_port>/clash` 和 `/<token>/<listen_port>/v2ray`
+- 租户登录路径是 `/tenant/<tenant_token>/login`；登录成功后进入 `/tenant/<tenant_token>`
+- 租户专属订阅路径是 `/tenant-subscriptions/<subscription_token>`，显式格式还有 `/tenant-subscriptions/<subscription_token>/clash` 和 `/tenant-subscriptions/<subscription_token>/v2ray`
+- 管理员仍可继续使用旧的全局订阅路径 `/<token>/<listen_port>*` 兼容历史客户端
 - 设置到期时间
 - 设置流量上限，例如 `10G`、`500MB`、`1048576`
 - 编辑备注
 - 手动启用或停用端口
 - 删除端口
+- 按端口重置租户面板地址、租户账号密码或租户订阅地址，使旧凭据立即失效
 - 在启用探针时跳转到独立监控页查看后端连通性
 
 当前首页前端实现说明：
 
 - 页面模板在 `app/templates/index.html`
+- 租户登录页模板在 `app/templates/tenant_login.html`
+- 租户只读页面模板在 `app/templates/tenant_panel.html`
 - 交互状态和 API 调用逻辑在 `app/static/panel.js`
-- 浏览器端通过 Vue 3 挂载，直接调用 `/api/dashboard`、`/api/ports*`、`/api/subscriptions/rotate`
+- 浏览器端通过 Vue 3 挂载，直接调用 `/api/dashboard`、`/api/ports*`
 - 后端仍然保留原来的表单路由，便于兼容旧调用或手工请求
 
 状态说明：
 
 - `运行中`：端口启用，且未过期、未达到流量上限
 - `已停用`：手动停用
-- `已过期`：到达过期时间后自动停用
+- `已过期`：当前版本不会长期保留；端口一旦过期会在维护流程中自动清理删除
 - `已达流量上限`：累计收发流量超过上限后自动停用
 
 流量重置说明：
@@ -245,6 +258,13 @@ AI routing 相关内容主要集中在：
 - 对 `已达流量上限` 的端口，页面会显示“重置流量并启用”
 - 该操作会清零该端口的累计流量和按天流量统计
 - 累计连接次数不会被重置
+
+租户登录说明：
+
+- 每个有效端口都会随机生成一组 `tenant_username` / `tenant_password`
+- 租户访问流程是“登录地址 + 用户名 + 密码”，不是只靠 URL 直接进入
+- 管理员可以随时重置租户面板地址，也可以单独重置租户账号密码
+- 端口过期后会自动删除，同时清理该端口的流量统计和探针记录
 
 ## 探针监控
 
@@ -256,6 +276,71 @@ AI routing 相关内容主要集中在：
 - 记录内容：最近状态、成功率、最近 12 次检测结果、最近 7 天内的历史时间线
 
 这个页面只用来观察“固定上游是否可达”，不替代业务级可用性监控。
+
+## 认证与 API
+
+认证规则如下：
+
+- 未设置 `PANEL_USERNAME` 和 `PANEL_PASSWORD` 时，首页和 `/api/*` 默认无需登录
+- 只要两者任意一个被设置，首页、探针页和 `/api/*` 就会启用登录校验
+- Web 页面支持表单登录；API 同时支持 `Authorization: Basic ...`
+- `GET /healthz` 永远不要求登录
+- `/tenant/<tenant_token>/login`、`/tenant/<tenant_token>`、`/tenant-subscriptions/<subscription_token>*`、`/<token>/<listen_port>*` 这些租户或订阅链接默认不走全局管理员登录
+- 其中租户面板本身还需要租户自己的随机用户名和密码；订阅链接仍然依赖各自 token 控制访问
+
+如果你把租户登录地址或订阅链接发给别人，这些链接本身就属于访问入口。需要失效旧链接时，可以在页面里执行“重置租户面板地址”；需要失效旧账号时，可以执行“重置账号密码”；需要失效旧订阅链接时，可以执行“重置租户订阅地址”。
+
+常用 JSON API：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/dashboard` | 获取首页完整状态，包括汇总、端口列表、订阅可用性和探针信息 |
+| `POST` | `/api/ports` | 新建监听端口 |
+| `PUT` | `/api/ports/<port_id>` | 更新端口的监听端口、备注、到期时间、流量上限 |
+| `POST` | `/api/ports/<port_id>/toggle` | 启用或停用端口 |
+| `DELETE` | `/api/ports/<port_id>` | 删除端口及对应累计统计 |
+| `POST` | `/api/ports/<port_id>/reset-traffic` | 清零该端口流量；若此前因超额被停用，会自动恢复启用 |
+| `POST` | `/api/ports/<port_id>/rotate-tenant-token` | 重置租户面板 token |
+| `POST` | `/api/ports/<port_id>/rotate-tenant-credentials` | 重置租户登录用户名和密码 |
+| `POST` | `/api/ports/<port_id>/rotate-subscription-token` | 重置租户订阅 token |
+| `POST` | `/api/subscriptions/rotate` | 重置旧的全局订阅 token；仅兼容历史 `/<token>/<listen_port>*` 链接 |
+
+创建和更新端口时，请求体字段与页面表单一致：
+
+- `listen_port`：必填，`1-65535`
+- `expires_at`：可选，支持 `2026-06-30T20:00` 这种格式；如果不带时区，按服务所在机器本地时区解释
+- `traffic_limit`：可选，支持 `10G`、`500MB`、`1048576`
+- `note`：可选，最大 `200` 个字符
+
+最小示例：
+
+```bash
+curl -u admin:secret http://127.0.0.1:18080/api/dashboard
+
+curl -u admin:secret \
+  -H 'Content-Type: application/json' \
+  -X POST http://127.0.0.1:18080/api/ports \
+  -d '{
+    "listen_port": 32001,
+    "expires_at": "2026-06-30T20:00",
+    "traffic_limit": "20G",
+    "note": "demo-tenant"
+  }'
+```
+
+大部分写操作成功后都会返回：
+
+```json
+{
+  "ok": true,
+  "message": "...",
+  "dashboard": {
+    "...": "最新首页状态"
+  }
+}
+```
+
+如果启用了登录校验但没有带认证信息，`/api/*` 会返回 `401`，并带上 `login_url` 字段，前端据此跳转登录页。
 
 ## 环境变量
 
@@ -280,6 +365,10 @@ AI routing 相关内容主要集中在：
 | `SEED_LISTEN_PORT` | `31098` | 首次启动且数据库为空时自动创建的监听端口 |
 | `PROXY_CONNECT_TIMEOUT` | `5s` | Nginx `proxy_connect_timeout` |
 | `PROXY_TIMEOUT` | `600s` | Nginx `proxy_timeout` |
+| `STREAM_LISTEN_BACKLOG` | `4096` | Nginx `listen backlog` 参数，影响排队连接上限 |
+| `STREAM_LISTEN_FASTOPEN` | `256` | Nginx `listen fastopen` 参数；设为 `0` 可关闭 |
+| `STREAM_LISTEN_SO_KEEPALIVE` | `on` | Nginx `listen so_keepalive` 参数 |
+| `STREAM_PROXY_SOCKET_KEEPALIVE` | `1` | 是否为到上游的代理连接启用 `proxy_socket_keepalive` |
 | `MAINTENANCE_INTERVAL` | `10` | 后台维护线程扫描日志和自动停用的间隔，单位秒 |
 | `PROBE_ENABLED` | `0` | 是否启用后端连通性探针，默认关闭，设为 `1` 可恢复 |
 | `PROBE_INTERVAL` | `60` | 探针执行间隔，单位秒 |
@@ -306,6 +395,8 @@ AI routing 相关内容主要集中在：
 | `OPENAI_MODEL` | `gpt-5.5` | OpenAI 回退分类时使用的模型 |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1/responses` | OpenAI Responses API 地址 |
 | `PANEL_ROUTE_LISTEN_PORT` | `0` | 可选；指定某个面板监听端口作为模板里 `__PANEL_*__` 占位符的优先来源 |
+| `SUBSCRIPTION_NAME_PREFIX` | `reality` | 生成订阅名称和分享备注时使用的默认前缀 |
+| `XRAY_CLIENT_CONFIG_PATH` | `/xray-runtime/client-test.json` | 订阅内容和 `vless://` 分享链接所依赖的客户端配置路径 |
 
 代码里还有一些偏内部用途的路径变量，例如：
 
@@ -321,10 +412,13 @@ AI routing 相关内容主要集中在：
 
 ```text
 .
+├── .env.example              # docker compose 覆盖示例
 ├── app/
 │   ├── panel.py              # Flask 应用和 Nginx 管理逻辑
 │   ├── templates/index.html  # Vue 单页面板模板
+│   ├── templates/login.html
 │   ├── templates/probe_dashboard.html
+│   ├── templates/tenant_panel.html
 │   └── static/
 │       ├── panel.js          # Vue 前端状态和 API 调用
 │       └── style.css         # 页面样式
@@ -334,6 +428,8 @@ AI routing 相关内容主要集中在：
 ├── deploy/
 │   └── xray-reality/
 │       ├── README.md         # Xray REALITY 和 AI 域名管理详细说明
+│       ├── .env.example      # REALITY 参数和 AI 管理器配置模板
+│       ├── ai-proxy-outbound.example.json
 │       ├── logs/             # Xray 访问日志，AI 管理器从这里读入域名
 │       ├── reports/          # 按小时输出 AI 域名报告
 │       ├── runtime/          # 渲染配置、分类缓存、动态路由片段
@@ -411,6 +507,19 @@ python3 ./scripts/backup_db.py --db-path ./data/panel.db --backup-dir ./backups
 - 程序依赖 `nginx-full` 的 `stream` 能力，镜像里已经安装好。
 - 如果你手动修改 `/etc/nginx/streams-enabled/ports.conf`，下次面板操作会被重新生成覆盖。
 - 首页默认从 `https://cdn.jsdelivr.net/npm/vue@3.5.16/dist/vue.global.prod.js` 加载 Vue 运行时；如果你的浏览器环境无法访问 jsDelivr，需要改成自托管静态资源。
+
+## 常见排障
+
+- `GET /healthz` 返回 `500`：
+  先执行 `docker compose logs -f xray-routing-panel`，再进入容器运行 `nginx -t`，最后检查 `/etc/nginx/streams-enabled/ports.conf` 是否生成了非法端口配置。
+- 页面里订阅链接显示不可用：
+  先确认你已经执行过 `python3 deploy/xray-reality/scripts/render_config.py`，并且 `deploy/xray-reality/runtime/client-test.json` 在容器里可见。
+- AI 域名始终没有新增分类结果：
+  先看 `docker compose --profile xray logs -f xray-ai-domain-manager`，再手动执行一次 `--once`；同时确认 `deploy/xray-reality/logs/access.log` 有新日志，以及宿主机 `codex login status` 或 `OPENAI_API_KEY` 可用。
+- 面板重启后登录状态全部失效：
+  根目录 `.env` 里显式设置 `PANEL_SECRET_KEY`，不要依赖进程启动时随机生成的值。
+- 第一次启动后没有出现默认端口：
+  检查是否把 `SEED_LISTEN_PORT` 清空了，或者数据库 `data/panel.db` 里已经有旧记录，程序不会重复插入初始化端口。
 
 ## 常用命令
 
