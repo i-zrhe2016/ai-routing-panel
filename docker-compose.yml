@@ -12,13 +12,14 @@ services:
         hard: 65535
     environment:
       PANEL_PORT: "18080"
-      PANEL_PUBLIC_URL: "http://64.186.224.96:18080"
+      PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-http://your-node-or-domain:18080}"
       DEFAULT_UPSTREAM_HOST: "127.0.0.1"
       DEFAULT_UPSTREAM_PORT: "443"
       SEED_LISTEN_PORT: "31098"
       XRAY_CLIENT_CONFIG_PATH: "/xray-runtime/client-test.json"
-      PANEL_USERNAME: ""
-      PANEL_PASSWORD: ""
+      PANEL_USERNAME: "${PANEL_USERNAME:-}"
+      PANEL_PASSWORD: "${PANEL_PASSWORD:-}"
+      PANEL_SECRET_KEY: "${PANEL_SECRET_KEY:-}"
       PROBE_ENABLED: "1"
       PROBE_INTERVAL: "180"
       PROBE_TEST_LISTEN_PORT: "31098"

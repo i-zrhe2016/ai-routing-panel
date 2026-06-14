@@ -117,8 +117,9 @@ docker compose --profile xray up -d --build xray-reality xray-ai-domain-manager
 仓库当前已经带有一份可直接使用的 `ai-proxy-outbound.json`：
 
 - 命中的 AI 域名会通过 `VLESS + Reality` 出站转发到 `AI_UPSTREAM_HOST:AI_UPSTREAM_PORT`
-- 当前默认上游仍是 `nat.qq.pw:31098`
-- 模板里的 UUID、`flow`、`publicKey`、`shortId` 代表 AI 后端参数；如果你更换 AI 后端，需要同步修改这个文件
+- 当前默认上游仍是 `upstream.example.com:27166`
+- 如果配置了多个 AI 上游，管理器会在每轮执行时按顺序做 TCP 探测，首个不可达时自动切换到下一个可达上游
+- 模板里的 UUID、`flow`、`publicKey`、`shortId` 代表共享的 AI 后端参数；多上游模式默认只切换地址和端口，如果不同上游需要不同凭据，你也需要同步调整模板
 
 如果你删除这个文件，或者把 `AI_PROXY_OUTBOUND_TEMPLATE_PATH` 指向不存在的路径，管理器才会回退到内建的 Xray `freedom redirect`。
 
@@ -141,6 +142,44 @@ cp ai-proxy-outbound.example.json ai-proxy-outbound.json
 - `__PANEL_LISTEN_PORT__`
 
 替换成当前 AI 上游和当前面板规则对应的值。
+
+如果要配置多个 AI 上游，推荐两种方式二选一：
+
+- 保留 `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 作为主上游，再用 `AI_UPSTREAM_FALLBACKS` 追加备用上游
+- 直接使用 `AI_UPSTREAMS` 写完整优先级列表；设置后会覆盖 `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`
+
+如果第二上游不是同一套 Reality 参数，而是另一条完整的分享链接：
+
+- 使用 `AI_UPSTREAM_FALLBACK_URL`
+- 当前支持直接粘贴 `vless://...` 的 TCP + Reality 链接
+- 切换到这个备用上游时，管理器会直接使用链接里的 UUID、`pbk`、`sid`、`sni`、`spx`、`pqv`
+
+列表格式支持逗号或换行分隔，例如：
+
+```env
+AI_UPSTREAM_HOST=upstream.example.com
+AI_UPSTREAM_PORT=27166
+AI_UPSTREAM_FALLBACKS=backup-1.example.com:27166,backup-2.example.com:27166
+AI_UPSTREAM_PROBE_TIMEOUT_SECONDS=3
+```
+
+或者：
+
+```env
+AI_UPSTREAMS=upstream.example.com:27166,backup-1.example.com:27166,backup-2.example.com:27166
+AI_UPSTREAM_PROBE_TIMEOUT_SECONDS=3
+```
+
+如果备用上游参数不同，可以这样写：
+
+```env
+AI_UPSTREAM_HOST=upstream.example.com
+AI_UPSTREAM_PORT=27166
+AI_UPSTREAM_FALLBACK_URL=vless://uuid@backup.example.com:42994?encryption=none&security=reality&sni=www.amazon.com&fp=chrome&pbk=replace_me&sid=2f8deb&spx=%2Fpath&type=tcp
+AI_UPSTREAM_PROBE_TIMEOUT_SECONDS=3
+```
+
+注意：多上游切换是在 `xray-ai-domain-manager` 每轮执行时完成的；如果你希望切换更快，把 `AI_DOMAIN_INTERVAL_SECONDS` 调小即可。
 
 ## 常用命令
 
@@ -240,8 +279,12 @@ accepted tcp:chatgpt.com:443 [ai_proxy]
 | `XRAY_FINGERPRINT` | 客户端指纹，默认 `chrome` |
 | `XRAY_LOGLEVEL` | 日志级别 |
 | `XRAY_NODE_TAG` | 分享链接备注名称 |
-| `AI_UPSTREAM_HOST` | AI 域名专用上游主机，默认 `nat.qq.pw` |
-| `AI_UPSTREAM_PORT` | AI 域名专用上游端口，默认 `31098` |
+| `AI_UPSTREAM_HOST` | AI 主上游主机，默认 `upstream.example.com` |
+| `AI_UPSTREAM_PORT` | AI 主上游端口，默认 `27166` |
+| `AI_UPSTREAM_FALLBACK_URL` | 可选；第二上游的完整 `vless://` Reality 链接，适用于备用上游有独立 UUID / `pbk` / `sid` / `sni` |
+| `AI_UPSTREAM_FALLBACKS` | 可选；在主上游后追加备用上游列表，格式为逗号或换行分隔的 `host[:port]` |
+| `AI_UPSTREAMS` | 可选；完整覆盖 AI 上游优先级列表，格式为逗号或换行分隔的 `host:port` |
+| `AI_UPSTREAM_PROBE_TIMEOUT_SECONDS` | AI 上游 TCP 探测超时，默认 `3` 秒 |
 | `PANEL_DB_PATH` | 共享面板数据库路径，默认 `/panel-data/panel.db` |
 | `AI_PROXY_OUTBOUND_TEMPLATE_PATH` | AI 专用出站模板路径，默认 `/workspace/ai-proxy-outbound.json` |
 | `AI_DOMAIN_INTERVAL_SECONDS` | AI 域名分析执行周期，默认 `3600` 秒 |

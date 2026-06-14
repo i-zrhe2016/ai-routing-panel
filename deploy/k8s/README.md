@@ -101,7 +101,7 @@ kubectl label node <your-node> xray-routing-panel/edge=true
 
 ## 配置准备
 
-1. 复制 `secret-runtime.example.yaml`
+1. 复制 `secret-runtime.example.yaml` 为 `secret-runtime.yaml`
 2. 填写：
    - `XRAY_PUBLIC_HOST`
    - `XRAY_CLIENT_UUID`
@@ -112,6 +112,8 @@ kubectl label node <your-node> xray-routing-panel/edge=true
    - `XRAY_DEST`
    - `AI_UPSTREAM_HOST`
    - `AI_UPSTREAM_PORT`
+   - `AI_UPSTREAM_FALLBACK_URL`、`AI_UPSTREAM_FALLBACKS` 或 `AI_UPSTREAMS`（如果要启用多上游切换）
+   - `PANEL_USERNAME`、`PANEL_PASSWORD`、`PANEL_SECRET_KEY`（如果要启用面板登录）
    - `OPENAI_API_KEY`
    - `ai-proxy-outbound.json` 里的 Reality 出站参数
 3. 修改 `configmap-app.yaml` 里的：
@@ -143,6 +145,7 @@ kubectl apply -k deploy/k8s
 
 - `kustomization.yaml` 默认不包含示例 secret
 - 你需要把 `secret-runtime.example.yaml` 复制成 `secret-runtime.yaml` 后再 apply
+- 仓库默认已经忽略 `deploy/k8s/secret-runtime.yaml`，避免你本地填写的真实密钥被误提交
 
 ## 持久化映射
 

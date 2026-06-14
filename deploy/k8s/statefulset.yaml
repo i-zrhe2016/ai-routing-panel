@@ -71,6 +71,25 @@ spec:
           envFrom:
             - configMapRef:
                 name: xray-routing-panel-config
+          env:
+            - name: PANEL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: xray-routing-panel-runtime
+                  key: PANEL_USERNAME
+                  optional: true
+            - name: PANEL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: xray-routing-panel-runtime
+                  key: PANEL_PASSWORD
+                  optional: true
+            - name: PANEL_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: xray-routing-panel-runtime
+                  key: PANEL_SECRET_KEY
+                  optional: true
           ports:
             - name: panel-http
               containerPort: 18080

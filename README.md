@@ -7,7 +7,7 @@
 - `xray-routing-panel` 用 Nginx `stream` 管理入口端口，把公网 TCP 入口稳定转发到本机 Xray
 - `xray-reality` 负责实际代理连接和路由命中
 - `xray-ai-domain-manager` 按小时分析 Xray 访问日志，识别 AI 域名并生成动态路由片段
-- 命中的 AI 域名自动改走 `AI_UPSTREAM_HOST:AI_UPSTREAM_PORT`
+- 命中的 AI 域名自动改走已探测可达的 AI 上游，默认首选 `upstream.example.com:27166`
 - 面板数据库 `data/panel.db` 同时保存端口规则、流量统计和 AI 域名聚合结果
 
 如果不启用 `xray` profile，它仍然可以单独作为轻量 TCP 转发面板使用；但仓库当前最有价值的部分，是这条基于真实访问日志做动态 AI 分流的链路。
@@ -129,11 +129,13 @@ docker compose --profile xray up -d --build
 - 面板日志持久化到 `./logs`
 - Xray 日志持久化到 `./deploy/xray-reality/logs`
 
-仓库当前 `docker-compose.yml` 还带了一个示例值：
+如果你要固定页面展示地址或启用登录认证，先复制根目录模板：
 
-- `PANEL_PUBLIC_URL=http://64.186.224.96:18080`
+```bash
+cp .env.example .env
+```
 
-正式部署前建议改成你自己的公网地址，否则页面里的面板地址和订阅链接会继续指向这个示例 URL。
+然后按需填写 `PANEL_PUBLIC_URL`、`PANEL_USERNAME`、`PANEL_PASSWORD`、`PANEL_SECRET_KEY`。
 
 ### 4. 验证 AI routing 是否已经生效
 
@@ -209,9 +211,13 @@ AI routing 相关内容主要集中在：
 
 面板首页可以直接完成这些操作：
 
+- Vue 3 单页方式加载初始状态，不再依赖整页刷新
+- 本地搜索端口、备注、上游地址和状态
+- 在同一页内展开或收起端口详情
 - 新增监听端口
 - 默认固定转发到 `127.0.0.1:443`
 - 查看每个端口专属的 `V2Ray / Clash` 订阅链接
+- 一键复制 `Clash / V2Ray / VLESS` 订阅与分享链接
 - 默认订阅路径是 `/<token>/<listen_port>`，当前返回 Clash 配置；显式路径还有 `/<token>/<listen_port>/clash` 和 `/<token>/<listen_port>/v2ray`
 - 设置到期时间
 - 设置流量上限，例如 `10G`、`500MB`、`1048576`
@@ -219,6 +225,13 @@ AI routing 相关内容主要集中在：
 - 手动启用或停用端口
 - 删除端口
 - 在启用探针时跳转到独立监控页查看后端连通性
+
+当前首页前端实现说明：
+
+- 页面模板在 `app/templates/index.html`
+- 交互状态和 API 调用逻辑在 `app/static/panel.js`
+- 浏览器端通过 Vue 3 挂载，直接调用 `/api/dashboard`、`/api/ports*`、`/api/subscriptions/rotate`
+- 后端仍然保留原来的表单路由，便于兼容旧调用或手工请求
 
 状态说明：
 
@@ -259,8 +272,9 @@ AI routing 相关内容主要集中在：
 | `PANEL_HOST` | `0.0.0.0` | Flask 面板监听地址 |
 | `PANEL_PORT` | `18080` | Flask 面板监听端口 |
 | `PANEL_PUBLIC_URL` | 空 | 面板对外展示地址；设置后页面中的“面板地址”和生成的订阅链接会固定使用这个公开 URL |
-| `PANEL_USERNAME` | 空 | Basic Auth 用户名，留空表示不开启认证 |
-| `PANEL_PASSWORD` | 空 | Basic Auth 密码 |
+| `PANEL_USERNAME` | 空 | 面板登录用户名；与 `PANEL_PASSWORD` 任一设置后启用认证 |
+| `PANEL_PASSWORD` | 空 | 面板登录密码 |
+| `PANEL_SECRET_KEY` | 空 | Flask Session 签名密钥；建议生产环境显式设置，避免重启后登录会话全部失效 |
 | `DEFAULT_UPSTREAM_HOST` | `127.0.0.1` | 统一转发目标主机，默认是本机回环地址 |
 | `DEFAULT_UPSTREAM_PORT` | `443` | 统一转发目标端口 |
 | `SEED_LISTEN_PORT` | `31098` | 首次启动且数据库为空时自动创建的监听端口 |
@@ -277,8 +291,12 @@ AI routing 相关内容主要集中在：
 | `DB_BACKUP_KEEP_DAYS` | `7` | 备份保留天数，超期自动清理 |
 | `DB_BACKUP_PREFIX` | `xray-routing-panel` | 备份文件名前缀，文件名形如 `xray-routing-panel-20260531T030000Z.db` |
 | `DB_BACKUP_CRON_SCHEDULE` | `0 3 * * *` | 备份定时表达式 |
-| `AI_UPSTREAM_HOST` | `nat.qq.pw` | 命中 AI 域名后转发到的专用上游主机 |
-| `AI_UPSTREAM_PORT` | `31098` | 命中 AI 域名后转发到的专用上游端口 |
+| `AI_UPSTREAM_HOST` | `upstream.example.com` | AI 主上游主机；未设置 `AI_UPSTREAMS` 时作为首选项 |
+| `AI_UPSTREAM_PORT` | `27166` | AI 主上游端口；未设置 `AI_UPSTREAMS` 时作为首选项 |
+| `AI_UPSTREAM_FALLBACK_URL` | 空 | 可选；第二上游的完整 `vless://` Reality 链接，适用于备用上游有独立 UUID / `pbk` / `sid` / `sni` |
+| `AI_UPSTREAM_FALLBACKS` | 空 | 可选；在主上游后追加备用上游列表，格式为逗号或换行分隔的 `host[:port]` |
+| `AI_UPSTREAMS` | 空 | 可选；完整覆盖 AI 上游优先级列表，格式为逗号或换行分隔的 `host:port` |
+| `AI_UPSTREAM_PROBE_TIMEOUT_SECONDS` | `3` | AI 上游 TCP 可达性探测超时；首个不可达时自动切换到后续上游 |
 | `AI_DOMAIN_INTERVAL_SECONDS` | `3600` | AI 域名管理器执行周期 |
 | `AI_DOMAIN_LOOKBACK_SECONDS` | `3600` | 每轮分析最近多少秒的访问日志 |
 | `AI_DOMAIN_BATCH_SIZE` | `50` | 单批送给分类器的最大域名数 |
@@ -305,9 +323,11 @@ AI routing 相关内容主要集中在：
 .
 ├── app/
 │   ├── panel.py              # Flask 应用和 Nginx 管理逻辑
-│   ├── templates/index.html  # 面板页面
+│   ├── templates/index.html  # Vue 单页面板模板
 │   ├── templates/probe_dashboard.html
-│   └── static/style.css      # 页面样式
+│   └── static/
+│       ├── panel.js          # Vue 前端状态和 API 调用
+│       └── style.css         # 页面样式
 ├── backups/                  # SQLite 备份输出目录
 ├── data/
 │   └── panel.db              # SQLite 数据库
@@ -386,10 +406,11 @@ python3 ./scripts/backup_db.py --db-path ./data/panel.db --backup-dir ./backups
 - `docker-compose.yml` 使用的是 `network_mode: host`，更适合 Linux 主机。
 - 面板里创建的监听端口会直接在宿主机生效，避免和宿主机已有服务端口冲突。
 - `xray-routing-panel-db-backup` 服务会按定时表达式把 `panel.db` 备份到 `./backups`。
-- 如果设置了 `PANEL_USERNAME` 或 `PANEL_PASSWORD`，面板会启用 Basic Auth。
+- 如果设置了 `PANEL_USERNAME` 或 `PANEL_PASSWORD`，面板会启用登录页和 Session 鉴权；API 仍兼容 `Authorization: Basic ...`。
 - 删除端口时会同时删除该端口对应的累计统计数据。
 - 程序依赖 `nginx-full` 的 `stream` 能力，镜像里已经安装好。
 - 如果你手动修改 `/etc/nginx/streams-enabled/ports.conf`，下次面板操作会被重新生成覆盖。
+- 首页默认从 `https://cdn.jsdelivr.net/npm/vue@3.5.16/dist/vue.global.prod.js` 加载 Vue 运行时；如果你的浏览器环境无法访问 jsDelivr，需要改成自托管静态资源。
 
 ## 常用命令
 
@@ -418,7 +439,7 @@ tail -f ./logs/xray-routing-panel-db-backup.log
 
 ## 后续可扩展方向
 
-- 增加 API 接口而不只依赖表单页面
+- 补充和整理现有 JSON API 文档
 - 为每个端口增加创建人或租户字段
 - 支持导出统计报表
 - 支持 UDP 转发开关

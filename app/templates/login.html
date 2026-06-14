@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>登录 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body class="auth-page">
+    <main class="shell auth-shell">
+      <section class="auth-layout">
+        <div class="auth-copy">
+          <p class="eyebrow">PANEL ACCESS</p>
+          <h1 class="page-title">登录控制台</h1>
+          <p class="page-subtitle">
+            使用已配置的账号密码进入面板。登录后可直接管理端口、订阅输出和探针监控。
+          </p>
+
+          <div class="auth-highlights">
+            <div class="info-tile">
+              <span>认证方式</span>
+              <strong>Session 登录</strong>
+            </div>
+            <div class="info-tile">
+              <span>脚本兼容</span>
+              <strong>保留 Basic Auth</strong>
+            </div>
+          </div>
+        </div>
+
+        <section class="auth-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-eyebrow">LOGIN</p>
+              <h2>进入 xray-routing-panel</h2>
+              <p>凭据由服务端环境变量控制，页面不会显示默认账号密码。</p>
+            </div>
+          </div>
+
+          {% if message %}
+          <section class="banner {{ message_level }}">
+            <div class="banner-row">
+              <span>{{ message }}</span>
+            </div>
+          </section>
+          {% endif %}
+
+          {% if error_message %}
+          <section class="banner error">
+            <div class="banner-row">
+              <span>{{ error_message }}</span>
+            </div>
+          </section>
+          {% endif %}
+
+          <form class="auth-form" method="post" action="{{ url_for('login') }}">
+            <input type="hidden" name="next" value="{{ next_target }}">
+            <label>
+              <span>账号</span>
+              <input
+                type="text"
+                name="username"
+                value="{{ form_username }}"
+                autocomplete="username"
+                autocapitalize="off"
+                spellcheck="false"
+                autofocus
+              >
+            </label>
+            <label>
+              <span>密码</span>
+              <input
+                type="password"
+                name="password"
+                autocomplete="current-password"
+              >
+            </label>
+            <div class="actions">
+              <button class="primary" type="submit">登录</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

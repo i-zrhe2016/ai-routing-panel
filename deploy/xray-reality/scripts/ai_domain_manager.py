@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import sqlite3
 import shutil
 import subprocess
@@ -12,12 +13,14 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote, urlparse
 
 
 TIMESTAMP_RE = re.compile(r"^(?P<date>\d{4}/\d{2}/\d{2}) (?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?) ")
 TARGET_RE = re.compile(r" accepted (?P<proto>[a-z]+):(?P<target>\S+)")
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$")
 PLACEHOLDER_RE = re.compile(r"__([A-Z0-9_]+)__")
+UPSTREAM_LIST_SEPARATOR_RE = re.compile(r"[\n,;]+")
 UNSET_PROXY_PROTOCOL = "replace_me"
 FORCED_AI_ROUTE_DOMAIN_SUFFIXES = (
     "anthropic.com",
@@ -95,6 +98,45 @@ def env_int(name, default):
 def env_bool(name, default):
     raw = str(os.environ.get(name, default)).strip().lower()
     return raw not in {"0", "false", "no", "off", ""}
+
+
+def load_env_file_values(path):
+    if not path or not path.is_file():
+        return {}
+
+    values = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ValueError(f"invalid line in {path}: {raw_line}")
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def read_env_or_file(name, default="", env_file_values=None):
+    raw = os.environ.get(name)
+    if raw is not None and str(raw).strip() != "":
+        return str(raw).strip()
+    if env_file_values and str(env_file_values.get(name, "")).strip() != "":
+        return str(env_file_values[name]).strip()
+    return str(default).strip()
+
+
+def parse_positive_float(raw, field_name):
+    try:
+        value = float(str(raw).strip())
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a positive number") from exc
+    if value <= 0:
+        raise ValueError(f"{field_name} must be a positive number")
+    return value
 
 
 def utc_now():
@@ -781,6 +823,307 @@ def join_host_port(host, port):
     return f"{host_text}:{int(port)}"
 
 
+def build_template_upstream_candidate(host, port):
+    return {
+        "upstream_host": str(host).strip(),
+        "upstream_port": int(port),
+        "candidate_type": "template",
+    }
+
+
+def parse_upstream_endpoint(raw, default_port=None, field_name="AI_UPSTREAMS"):
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError(f"{field_name} contains an empty upstream entry")
+
+    host = ""
+    port_text = None
+    if text.startswith("["):
+        end = text.find("]")
+        if end < 0:
+            raise ValueError(f"{field_name} entry {text!r} has an invalid IPv6 format")
+        host = text[1:end].strip()
+        remainder = text[end + 1:].strip()
+        if remainder:
+            if not remainder.startswith(":"):
+                raise ValueError(f"{field_name} entry {text!r} must use [host]:port for IPv6")
+            port_text = remainder[1:].strip()
+    else:
+        colon_count = text.count(":")
+        if colon_count == 0:
+            host = text
+        elif colon_count == 1:
+            host, port_text = text.rsplit(":", 1)
+        else:
+            host = text
+
+    host = host.strip()
+    if not host:
+        raise ValueError(f"{field_name} entry {text!r} is missing a host")
+
+    if port_text is None or not port_text:
+        if default_port is None:
+            raise ValueError(f"{field_name} entry {text!r} is missing a port")
+        port = int(default_port)
+    else:
+        try:
+            port = int(port_text)
+        except ValueError as exc:
+            raise ValueError(f"{field_name} entry {text!r} has an invalid port") from exc
+
+    if port <= 0 or port > 65535:
+        raise ValueError(f"{field_name} entry {text!r} must use a port in 1..65535")
+
+    return {
+        "upstream_host": host,
+        "upstream_port": port,
+    }
+
+
+def parse_vless_fallback_url(raw, field_name="AI_UPSTREAM_FALLBACK_URL"):
+    text = str(raw or "").strip()
+    if not text:
+        return None
+
+    parsed = urlparse(text)
+    if parsed.scheme.lower() != "vless":
+        raise ValueError(f"{field_name} must use a vless:// URL")
+    if not parsed.username:
+        raise ValueError(f"{field_name} is missing the VLESS UUID")
+    if not parsed.hostname:
+        raise ValueError(f"{field_name} is missing the upstream host")
+    if parsed.port is None:
+        raise ValueError(f"{field_name} is missing the upstream port")
+
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    network = str(params.get("type", "tcp")).strip().lower() or "tcp"
+    if network != "tcp":
+        raise ValueError(f"{field_name} currently supports only type=tcp")
+
+    security = str(params.get("security", "none")).strip().lower() or "none"
+    encryption = str(params.get("encryption", "none")).strip() or "none"
+    user = {
+        "id": unquote(parsed.username),
+        "encryption": encryption,
+    }
+    flow = str(params.get("flow", "")).strip()
+    if flow:
+        user["flow"] = flow
+
+    outbound = {
+        "tag": "ai_proxy",
+        "protocol": "vless",
+        "settings": {
+            "vnext": [
+                {
+                    "address": parsed.hostname,
+                    "port": parsed.port,
+                    "users": [user],
+                }
+            ]
+        },
+        "streamSettings": {
+            "network": network,
+            "security": security,
+        },
+    }
+
+    if security == "reality":
+        sni = str(params.get("sni", "")).strip()
+        fingerprint = str(params.get("fp", "")).strip()
+        public_key = str(params.get("pbk", "")).strip()
+        short_id = str(params.get("sid", "")).strip()
+        if not sni or not fingerprint or not public_key or not short_id:
+            raise ValueError(
+                f"{field_name} must include sni, fp, pbk, and sid when security=reality"
+            )
+
+        reality_settings = {
+            "serverName": sni,
+            "fingerprint": fingerprint,
+            "publicKey": public_key,
+            "shortId": short_id,
+        }
+        pq_verify = str(params.get("pqv", "")).strip()
+        if pq_verify:
+            reality_settings["mldsa65Verify"] = pq_verify
+        spider_x = str(params.get("spx", "")).strip()
+        if spider_x:
+            reality_settings["spiderX"] = spider_x
+        outbound["streamSettings"]["realitySettings"] = reality_settings
+    elif security not in {"none", ""}:
+        raise ValueError(f"{field_name} currently supports only security=reality or security=none")
+
+    return {
+        "upstream_host": parsed.hostname,
+        "upstream_port": int(parsed.port),
+        "candidate_type": "share_url",
+        "candidate_label": unquote(parsed.fragment).strip(),
+        "proxy_payload_override": {"outbounds": [outbound]},
+    }
+
+
+def parse_upstream_list(raw, default_port=None, field_name="AI_UPSTREAMS"):
+    text = str(raw or "").strip()
+    if not text:
+        return []
+
+    candidates = []
+    for token in UPSTREAM_LIST_SEPARATOR_RE.split(text):
+        token = token.strip()
+        if not token:
+            continue
+        candidates.append(parse_upstream_endpoint(token, default_port=default_port, field_name=field_name))
+    return candidates
+
+
+def dedupe_upstream_candidates(candidates):
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        key = (
+            str(candidate["upstream_host"]).strip().lower(),
+            int(candidate["upstream_port"]),
+            str(candidate.get("candidate_type", "template")).strip().lower(),
+            str(candidate.get("candidate_label", "")).strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized = dict(candidate)
+        normalized["upstream_host"] = str(candidate["upstream_host"]).strip()
+        normalized["upstream_port"] = int(candidate["upstream_port"])
+        unique.append(normalized)
+    return unique
+
+
+def build_ai_upstream_candidates(
+    primary_host,
+    primary_port,
+    upstreams_raw="",
+    fallbacks_raw="",
+    fallback_share_url="",
+):
+    if str(upstreams_raw or "").strip():
+        candidates = parse_upstream_list(
+            upstreams_raw,
+            default_port=primary_port,
+            field_name="AI_UPSTREAMS",
+        )
+        candidates = [build_template_upstream_candidate(item["upstream_host"], item["upstream_port"]) for item in candidates]
+    else:
+        candidates = [
+            build_template_upstream_candidate(primary_host, primary_port)
+        ]
+        fallback_candidate = parse_vless_fallback_url(fallback_share_url, field_name="AI_UPSTREAM_FALLBACK_URL")
+        if fallback_candidate:
+            candidates.append(fallback_candidate)
+        candidates.extend(
+            [
+                build_template_upstream_candidate(item["upstream_host"], item["upstream_port"])
+                for item in parse_upstream_list(
+                    fallbacks_raw,
+                    default_port=primary_port,
+                    field_name="AI_UPSTREAM_FALLBACKS",
+                )
+            ]
+        )
+
+    candidates = dedupe_upstream_candidates(candidates)
+    if not candidates:
+        raise ValueError("at least one AI upstream must be configured")
+    return candidates
+
+
+def probe_ai_upstream_candidate(candidate, timeout_seconds):
+    checked_at = format_timestamp(utc_now())
+    reachable = False
+    failure_reason = ""
+    try:
+        with socket.create_connection(
+            (candidate["upstream_host"], int(candidate["upstream_port"])),
+            timeout=timeout_seconds,
+        ):
+            reachable = True
+    except OSError as exc:
+        failure_reason = str(exc)[:200]
+
+    result = dict(candidate)
+    result.update(
+        {
+            "upstream_host": candidate["upstream_host"],
+            "upstream_port": int(candidate["upstream_port"]),
+            "is_reachable": reachable,
+            "failure_reason": failure_reason,
+            "checked_at": checked_at,
+        }
+    )
+    return result
+
+
+def summarize_ai_target_candidate(candidate):
+    summary = {
+        "upstream_host": candidate["upstream_host"],
+        "upstream_port": int(candidate["upstream_port"]),
+        "candidate_type": candidate.get("candidate_type", "template"),
+        "is_reachable": bool(candidate.get("is_reachable")),
+        "failure_reason": str(candidate.get("failure_reason", "")).strip(),
+        "checked_at": str(candidate.get("checked_at", "")).strip(),
+    }
+    label = str(candidate.get("candidate_label", "")).strip()
+    if label:
+        summary["candidate_label"] = label
+    return summary
+
+
+def summarize_ai_target_for_report(ai_target):
+    summary = summarize_ai_target_candidate(ai_target)
+    for key in (
+        "selected_index",
+        "selected_number",
+        "candidate_count",
+        "failover_active",
+        "probe_status",
+        "probe_timeout_seconds",
+    ):
+        if key in ai_target:
+            summary[key] = ai_target[key]
+    failure_reason = str(ai_target.get("failure_reason", "")).strip()
+    if failure_reason:
+        summary["failure_reason"] = failure_reason
+    summary["candidates"] = list(ai_target.get("candidates", []))
+    return summary
+
+
+def select_ai_target(candidates, timeout_seconds):
+    probes = [probe_ai_upstream_candidate(candidate, timeout_seconds) for candidate in candidates]
+    selected_index = 0
+    for index, candidate in enumerate(probes):
+        if candidate["is_reachable"]:
+            selected_index = index
+            break
+    else:
+        selected_index = 0
+
+    selected = probes[selected_index]
+    all_unreachable = not any(item["is_reachable"] for item in probes)
+    selected_target = dict(selected)
+    selected_target.update(
+        {
+            "selected_index": selected_index,
+            "selected_number": selected_index + 1,
+            "candidate_count": len(probes),
+            "failover_active": selected_index > 0,
+            "probe_status": "all_unreachable" if all_unreachable else "reachable",
+            "probe_timeout_seconds": timeout_seconds,
+            "checked_at": selected["checked_at"],
+            "failure_reason": selected["failure_reason"] if all_unreachable else "",
+            "candidates": [summarize_ai_target_candidate(item) for item in probes],
+        }
+    )
+    return selected_target
+
+
 def build_proxy_sockopt_payload():
     sockopt = {}
     if env_bool("XRAY_TCP_FAST_OPEN", True):
@@ -839,6 +1182,14 @@ def build_default_proxy_payload(ai_target):
 
 
 def render_proxy_template(template_path, ai_target, panel_target):
+    override_payload = ai_target.get("proxy_payload_override")
+    if isinstance(override_payload, dict):
+        outbounds = override_payload.get("outbounds", [])
+        if not isinstance(outbounds, list) or not outbounds:
+            return None, "proxy_payload_override_has_no_outbounds"
+        apply_default_proxy_sockopt(outbounds)
+        return {"outbounds": outbounds}, "share_url_override"
+
     if not template_path or not template_path.is_file():
         return build_default_proxy_payload(ai_target), "builtin_freedom_redirect"
     raw = template_path.read_text(encoding="utf-8")
@@ -954,7 +1305,7 @@ def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, 
             {"protocol": protocol, "hits": hits}
             for protocol, hits in sorted(protocols.items())
         ],
-        "ai_target": ai_target,
+        "ai_target": summarize_ai_target_for_report(ai_target) if ai_target else None,
         "panel_target": panel_target,
         "route_status": route_status,
     }
@@ -994,6 +1345,23 @@ def write_domain_report(output_dir, report):
             "ai_target: "
             f"{report['ai_target']['upstream_host']}:{report['ai_target']['upstream_port']}"
         )
+        if report["ai_target"].get("candidate_count", 0) > 1:
+            lines.append(
+                "ai_target_selection: "
+                f"{report['ai_target']['selected_number']}/{report['ai_target']['candidate_count']} "
+                f"({'fallback' if report['ai_target'].get('failover_active') else 'primary'})"
+            )
+        if report["ai_target"].get("probe_status"):
+            lines.append(f"ai_target_probe_status: {report['ai_target']['probe_status']}")
+        candidates = report["ai_target"].get("candidates", [])
+        if candidates:
+            lines.append(
+                "ai_target_candidates: "
+                + ", ".join(
+                    f"{item['upstream_host']}:{item['upstream_port']}({'ok' if item['is_reachable'] else 'down'})"
+                    for item in candidates
+                )
+            )
     if report["panel_target"]:
         lines.append(
             "panel_target: "
@@ -1152,10 +1520,7 @@ def run_once(args):
     decisions = load_decisions(args.classification_state_path)
     observed_domains = {item["domain"] for item in log_state["events"]}
     sync_builtin_domain_decisions(decisions, args.classification_state_path, observed_domains)
-    ai_target = {
-        "upstream_host": args.ai_upstream_host,
-        "upstream_port": args.ai_upstream_port,
-    }
+    ai_target = select_ai_target(args.ai_upstream_candidates, args.ai_upstream_probe_timeout_seconds)
     panel_target = read_panel_target(args.panel_db_path, args.panel_route_listen_port)
     route_status = {"status": "disabled", "reason": ""}
 
@@ -1260,6 +1625,7 @@ def build_args():
     args.proxy_template_path = Path(
         os.environ.get("AI_PROXY_OUTBOUND_TEMPLATE_PATH", str(workspace / "ai-proxy-outbound.json"))
     )
+    env_file_values = load_env_file_values(args.env_file)
     args.restart_container_name = os.environ.get("XRAY_RESTART_CONTAINER", "").strip()
     args.restart_command = os.environ.get("XRAY_RESTART_COMMAND", "").strip()
     args.codex_classifier_enabled = env_bool("CODEX_CLASSIFIER_ENABLED", "1")
@@ -1276,8 +1642,22 @@ def build_args():
     args.openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     args.openai_model = os.environ.get("OPENAI_MODEL", "gpt-5.5").strip() or "gpt-5.5"
     args.openai_base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1/responses").strip()
-    args.ai_upstream_host = os.environ.get("AI_UPSTREAM_HOST", "nat.qq.pw").strip()
-    args.ai_upstream_port = env_int("AI_UPSTREAM_PORT", 31098)
+    args.ai_upstream_host = read_env_or_file("AI_UPSTREAM_HOST", "upstream.example.com", env_file_values)
+    args.ai_upstream_port = int(read_env_or_file("AI_UPSTREAM_PORT", "27166", env_file_values))
+    args.ai_upstreams = read_env_or_file("AI_UPSTREAMS", "", env_file_values)
+    args.ai_upstream_fallbacks = read_env_or_file("AI_UPSTREAM_FALLBACKS", "", env_file_values)
+    args.ai_upstream_fallback_url = read_env_or_file("AI_UPSTREAM_FALLBACK_URL", "", env_file_values)
+    args.ai_upstream_probe_timeout_seconds = parse_positive_float(
+        read_env_or_file("AI_UPSTREAM_PROBE_TIMEOUT_SECONDS", "3", env_file_values),
+        "AI_UPSTREAM_PROBE_TIMEOUT_SECONDS",
+    )
+    args.ai_upstream_candidates = build_ai_upstream_candidates(
+        args.ai_upstream_host,
+        args.ai_upstream_port,
+        upstreams_raw=args.ai_upstreams,
+        fallbacks_raw=args.ai_upstream_fallbacks,
+        fallback_share_url=args.ai_upstream_fallback_url,
+    )
     return args
 
 
@@ -1293,11 +1673,8 @@ def main():
     if args.batch_size <= 0:
         print("AI_DOMAIN_BATCH_SIZE must be > 0", file=sys.stderr)
         return 1
-    if not args.ai_upstream_host:
-        print("AI_UPSTREAM_HOST must not be empty", file=sys.stderr)
-        return 1
-    if args.ai_upstream_port <= 0 or args.ai_upstream_port > 65535:
-        print("AI_UPSTREAM_PORT must be in 1..65535", file=sys.stderr)
+    if not args.ai_upstream_candidates:
+        print("at least one AI upstream must be configured", file=sys.stderr)
         return 1
 
     while True:

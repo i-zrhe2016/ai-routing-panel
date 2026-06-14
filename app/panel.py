@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import atexit
 import base64
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -14,9 +16,9 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 
 
 def parse_optional_env_port(value, field_name):
@@ -63,6 +65,7 @@ PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))
 PANEL_PUBLIC_URL = os.environ.get("PANEL_PUBLIC_URL", "").strip().rstrip("/")
 PANEL_USERNAME = os.environ.get("PANEL_USERNAME", "")
 PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
+PANEL_SECRET_KEY = os.environ.get("PANEL_SECRET_KEY", "").strip()
 
 DEFAULT_UPSTREAM_HOST = os.environ.get("DEFAULT_UPSTREAM_HOST", "127.0.0.1")
 DEFAULT_UPSTREAM_PORT = int(os.environ.get("DEFAULT_UPSTREAM_PORT", "443"))
@@ -91,6 +94,8 @@ PROBE_TEST_LISTEN_PORT = parse_optional_env_port(
     "PROBE_TEST_LISTEN_PORT",
 )
 AUTH_ENABLED = bool(PANEL_USERNAME or PANEL_PASSWORD)
+AUTH_SESSION_KEY = "panel_auth_marker"
+AUTH_SESSION_MARKER = hashlib.sha256(f"{PANEL_USERNAME}\0{PANEL_PASSWORD}".encode("utf-8")).hexdigest()
 PROBE_DASHBOARD_RANGES = {
     "1h": {"hours": 1, "label": "1小时"},
     "24h": {"hours": 24, "label": "24小时"},
@@ -100,6 +105,13 @@ PROBE_DASHBOARD_RANGES = {
 LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config.update(
+    SECRET_KEY=PANEL_SECRET_KEY or secrets.token_hex(32),
+    SESSION_COOKIE_NAME="xray-routing-panel-session",
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=PANEL_PUBLIC_URL.startswith("https://"),
+)
 
 
 class ValidationError(Exception):
@@ -609,11 +621,104 @@ def status_payload(enabled, expires_at, traffic_limit_bytes=None, traffic_usage_
     return {"code": "disabled", "label": "已停用"}
 
 
-def request_auth_failed():
-    return Response(
-        "Authentication required",
-        401,
-        {"WWW-Authenticate": 'Basic realm="xray-routing-panel"'},
+def credentials_match(username, password):
+    return hmac.compare_digest(str(username or ""), PANEL_USERNAME) and hmac.compare_digest(
+        str(password or ""),
+        PANEL_PASSWORD,
+    )
+
+
+def is_session_authenticated():
+    return AUTH_ENABLED and session.get(AUTH_SESSION_KEY) == AUTH_SESSION_MARKER
+
+
+def mark_session_authenticated():
+    session.clear()
+    session[AUTH_SESSION_KEY] = AUTH_SESSION_MARKER
+
+
+def extract_basic_credentials():
+    auth = request.authorization
+    auth_type = str(getattr(auth, "type", "basic") or "basic").lower()
+    if auth and auth_type == "basic":
+        return auth.username or "", auth.password or ""
+
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Basic "):
+        return None
+    try:
+        decoded = base64.b64decode(header[6:]).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except Exception:
+        return None
+    return username, password
+
+
+def current_request_target():
+    if not request.query_string:
+        return request.path
+    query = request.query_string.decode("utf-8", errors="ignore")
+    return f"{request.path}?{query}"
+
+
+def normalize_next_target(value, fallback=None):
+    fallback_target = fallback or url_for("index")
+    candidate = str(value or "").strip()
+    if not candidate:
+        return fallback_target
+
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        if parsed.netloc != request.host:
+            return fallback_target
+
+    path = parsed.path or "/"
+    if not path.startswith("/") or path.startswith("//") or path in {url_for("login"), url_for("logout")}:
+        return fallback_target
+
+    if parsed.query:
+        return f"{path}?{parsed.query}"
+    return path
+
+
+def login_next_target_for_request():
+    fallback_target = url_for("index")
+    if request.path.startswith("/api/"):
+        return normalize_next_target(request.referrer, fallback=fallback_target)
+    return normalize_next_target(current_request_target(), fallback=fallback_target)
+
+
+def login_url_for_request():
+    return url_for("login", next=login_next_target_for_request())
+
+
+def auth_required_response():
+    if request.path.startswith("/api/"):
+        response = jsonify(
+            {
+                "ok": False,
+                "code": "auth_required",
+                "message": "请先登录面板。",
+                "login_url": login_url_for_request(),
+            }
+        )
+        response.status_code = 401
+        response.headers["WWW-Authenticate"] = 'Basic realm="xray-routing-panel"'
+        return response
+    return redirect(login_url_for_request(), code=303)
+
+
+def render_login_page(next_target, form_username="", error_message="", status_code=200):
+    return (
+        render_template(
+            "login.html",
+            next_target=next_target,
+            form_username=form_username,
+            error_message=error_message,
+            message=request.args.get("message", "").strip(),
+            message_level=request.args.get("level", "info").strip() or "info",
+        ),
+        status_code,
     )
 
 
@@ -1634,24 +1739,20 @@ state = PanelState()
 def ensure_basic_auth():
     if request.path == "/healthz":
         return None
-    if request.endpoint in {"subscription_default", "subscription_clash", "subscription_v2ray"}:
-        return None
     if not AUTH_ENABLED:
         return None
-    auth = request.authorization
-    if auth and auth.username == PANEL_USERNAME and auth.password == PANEL_PASSWORD:
+    if request.endpoint in {"login", "logout", "static", "subscription_default", "subscription_clash", "subscription_v2ray"}:
+        return None
+    if session.get(AUTH_SESSION_KEY) and not is_session_authenticated():
+        session.clear()
+    if is_session_authenticated():
         return None
 
-    header = request.headers.get("Authorization", "")
-    if header.startswith("Basic "):
-        try:
-            decoded = base64.b64decode(header[6:]).decode("utf-8")
-            username, password = decoded.split(":", 1)
-            if username == PANEL_USERNAME and password == PANEL_PASSWORD:
-                return None
-        except Exception:
-            pass
-    return request_auth_failed()
+    basic_credentials = extract_basic_credentials()
+    if basic_credentials and credentials_match(*basic_credentials):
+        mark_session_authenticated()
+        return None
+    return auth_required_response()
 
 
 @app.template_filter("human_bytes")
@@ -1659,12 +1760,7 @@ def human_bytes_filter(value):
     return human_bytes(value)
 
 
-@app.route("/", methods=["GET"])
-def index():
-    state.sync_traffic_logs()
-    state.disable_auto_stopped_ports(reload_nginx=True)
-    ports = state.query_ports()
-    summary = state.query_summary(ports)
+def build_subscription_snapshot(ports):
     subscription_profile, subscription_error = parse_xray_client_profile()
     subscription = {
         "available": subscription_profile is not None,
@@ -1672,43 +1768,132 @@ def index():
         "token": "",
         "client_config_path": str(XRAY_CLIENT_CONFIG_PATH),
         "server": subscription_profile["server"] if subscription_profile else "",
+        "path_example": "",
     }
-    if subscription_profile is not None:
-        subscription["token"] = state.get_subscription_token()
-        for port in ports:
-            port["subscription"] = {
-                "clash_url": external_url_for(
-                    "subscription_clash",
-                    token=subscription["token"],
-                    listen_port=port["listen_port"],
-                ),
-                "v2ray_url": external_url_for(
-                    "subscription_v2ray",
-                    token=subscription["token"],
-                    listen_port=port["listen_port"],
-                ),
-                "default_url": external_url_for(
-                    "subscription_default",
-                    token=subscription["token"],
-                    listen_port=port["listen_port"],
-                ),
-                "share_link": build_vless_share_link(subscription_profile, port["listen_port"], port["note"]),
+    if subscription_profile is None:
+        return subscription
+
+    subscription["token"] = state.get_subscription_token()
+    subscription["path_example"] = f"/{subscription['token']}/31098"
+    for port in ports:
+        port["subscription"] = {
+            "clash_url": external_url_for(
+                "subscription_clash",
+                token=subscription["token"],
+                listen_port=port["listen_port"],
+            ),
+            "v2ray_url": external_url_for(
+                "subscription_v2ray",
+                token=subscription["token"],
+                listen_port=port["listen_port"],
+            ),
+            "default_url": external_url_for(
+                "subscription_default",
+                token=subscription["token"],
+                listen_port=port["listen_port"],
+            ),
+            "share_link": build_vless_share_link(subscription_profile, port["listen_port"], port["note"]),
+        }
+    return subscription
+
+
+def collect_dashboard_state(message="", level="info"):
+    ports = state.query_ports()
+    summary = state.query_summary(ports)
+    subscription = build_subscription_snapshot(ports)
+    return {
+        "flash": {
+            "message": message,
+            "level": level,
+        },
+        "meta": {
+            "panel_address": PANEL_PUBLIC_URL or f"{PANEL_HOST}:{PANEL_PORT}",
+            "nginx_running": state.nginx_running(),
+            "timezone_label": datetime.now().astimezone().strftime("%Z"),
+            "probe_enabled": PROBE_ENABLED,
+            "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
+            "default_upstream_host": DEFAULT_UPSTREAM_HOST,
+            "default_upstream_port": DEFAULT_UPSTREAM_PORT,
+        },
+        "summary": summary,
+        "subscription": subscription,
+        "ports": ports,
+    }
+
+
+def build_dashboard_state(message="", level="info"):
+    state.sync_traffic_logs()
+    state.disable_auto_stopped_ports(reload_nginx=True)
+    return collect_dashboard_state(message=message, level=level)
+
+
+def json_success_response(message="", level="success", status_code=200):
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "message": message,
+                "level": level,
+                "dashboard": build_dashboard_state(message=message, level=level),
             }
+        ),
+        status_code,
+    )
+
+
+def json_error_response(message, status_code=400):
+    return jsonify({"ok": False, "message": message}), status_code
+
+
+def request_payload():
+    payload = request.get_json(silent=True)
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not AUTH_ENABLED:
+        return redirect(url_for("index"), code=303)
+
+    next_target = normalize_next_target(request.values.get("next"), fallback=url_for("index"))
+    if is_session_authenticated():
+        return redirect(next_target, code=303)
+
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if credentials_match(username, password):
+            mark_session_authenticated()
+            return redirect(next_target, code=303)
+        return render_login_page(
+            next_target=next_target,
+            form_username=username,
+            error_message="账号或密码错误。",
+            status_code=401,
+        )
+
+    return render_login_page(next_target=next_target)
+
+
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    session.clear()
+    if not AUTH_ENABLED:
+        return redirect(url_for("index"), code=303)
+    return redirect(url_for("login", message="已退出登录。", level="info"), code=303)
+
+
+@app.route("/", methods=["GET"])
+def index():
     return render_template(
         "index.html",
-        ports=ports,
-        summary=summary,
-        default_upstream_host=DEFAULT_UPSTREAM_HOST,
-        default_upstream_port=DEFAULT_UPSTREAM_PORT,
-        timezone_label=datetime.now().astimezone().strftime("%Z"),
-        message=request.args.get("message", "").strip(),
-        level=request.args.get("level", "info").strip(),
-        nginx_running=state.nginx_running(),
-        panel_host=PANEL_HOST,
-        panel_port=PANEL_PORT,
-        panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
-        probe_enabled=PROBE_ENABLED,
-        subscription=subscription,
+        auth_enabled=AUTH_ENABLED,
+        initial_state=build_dashboard_state(
+            message=request.args.get("message", "").strip(),
+            level=request.args.get("level", "info").strip(),
+        ),
     )
 
 
@@ -1726,6 +1911,7 @@ def probe_dashboard():
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
         panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
+        auth_enabled=AUTH_ENABLED,
     )
 
 
@@ -1735,6 +1921,69 @@ def healthz():
     healthy = state.nginx_running()
     status_code = 200 if healthy else 500
     return jsonify({"ok": healthy, "nginx_running": healthy}), status_code
+
+
+@app.route("/api/dashboard", methods=["GET"])
+def api_dashboard():
+    return jsonify({"ok": True, "dashboard": build_dashboard_state()})
+
+
+@app.route("/api/subscriptions/rotate", methods=["POST"])
+def api_rotate_subscription():
+    state.rotate_subscription_token()
+    return json_success_response("订阅链接已重新生成，旧链接已失效。")
+
+
+@app.route("/api/ports", methods=["POST"])
+def api_create_port():
+    try:
+        payload = state.validate_port_payload(request_payload())
+        state.create_port(payload)
+        return json_success_response("端口已创建并写入 nginx。", status_code=201)
+    except sqlite3.IntegrityError:
+        return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
+
+
+@app.route("/api/ports/<int:port_id>", methods=["PUT"])
+def api_update_port(port_id):
+    try:
+        payload = state.validate_port_payload(request_payload())
+        state.update_port(port_id, payload)
+        return json_success_response("端口配置已更新。")
+    except sqlite3.IntegrityError:
+        return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
+
+
+@app.route("/api/ports/<int:port_id>/toggle", methods=["POST"])
+def api_toggle_port(port_id):
+    try:
+        state.toggle_port(port_id)
+        return json_success_response("端口状态已切换。")
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
+
+
+@app.route("/api/ports/<int:port_id>", methods=["DELETE"])
+def api_delete_port(port_id):
+    try:
+        state.delete_port(port_id)
+        return json_success_response("端口已删除。")
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
+
+
+@app.route("/api/ports/<int:port_id>/reset-traffic", methods=["POST"])
+def api_reset_port_traffic(port_id):
+    try:
+        restored = state.reset_port_traffic(port_id)
+        message = "流量已重置，端口已恢复启用。" if restored else "流量已重置。"
+        return json_success_response(message)
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
 
 
 def build_subscription_response(token, listen_port, output_format):
