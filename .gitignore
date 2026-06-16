@@ -7,14 +7,13 @@ logs/
 backups/
 
 dimt_v2/
-deploy/k8s/secret-runtime.yaml
-deploy/xray-reality/.env
-deploy/xray-reality/ai-proxy-outbound.json
-!deploy/xray-reality/logs/
-deploy/xray-reality/logs/**
-!deploy/xray-reality/logs/.gitkeep
-deploy/xray-reality/runtime/**
-!deploy/xray-reality/runtime/.gitkeep
-!deploy/xray-reality/reports/
-deploy/xray-reality/reports/**
-!deploy/xray-reality/reports/.gitkeep
+app/xray/.env
+app/xray/ai-proxy-outbound.json
+!app/xray/logs/
+app/xray/logs/**
+!app/xray/logs/.gitkeep
+app/xray/runtime/**
+!app/xray/runtime/.gitkeep
+!app/xray/reports/
+app/xray/reports/**
+!app/xray/reports/.gitkeep

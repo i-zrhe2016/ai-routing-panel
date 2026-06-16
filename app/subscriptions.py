@@ -352,9 +352,10 @@ def build_clash_subscription_content(profile, listen_port, note):
 
 
 def build_port_access_payload(port, subscription_profile):
+    tenant_panel_path = f"/tenant/{port['tenant_token']}"
     payload = {
         "tenant_panel_url": external_url_for("tenant_panel", tenant_token=port["tenant_token"]),
-        "tenant_login_url": external_url_for("tenant_login", tenant_token=port["tenant_token"]),
+        "tenant_login_url": external_url_for("login", next=tenant_panel_path),
         "tenant_username": str(port.get("tenant_username") or ""),
         "tenant_password": str(port.get("tenant_password") or ""),
         "tenant_subscription_default_url": "",

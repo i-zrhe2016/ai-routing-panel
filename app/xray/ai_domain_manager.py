@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -14,6 +15,10 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote, urlparse
+
+from app.xray.config import BASE_DIR, DEFAULT_RENDER_MODULE
+from app.xray.envfile import load_env_file as shared_load_env_file
+from app.xray.envfile import read_env_or_file as shared_read_env_or_file
 
 
 TIMESTAMP_RE = re.compile(r"^(?P<date>\d{4}/\d{2}/\d{2}) (?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?) ")
@@ -103,30 +108,11 @@ def env_bool(name, default):
 def load_env_file_values(path):
     if not path or not path.is_file():
         return {}
-
-    values = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            raise ValueError(f"invalid line in {path}: {raw_line}")
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if value and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        values[key] = value
-    return values
+    return shared_load_env_file(path)
 
 
 def read_env_or_file(name, default="", env_file_values=None):
-    raw = os.environ.get(name)
-    if raw is not None and str(raw).strip() != "":
-        return str(raw).strip()
-    if env_file_values and str(env_file_values.get(name, "")).strip() != "":
-        return str(env_file_values[name]).strip()
-    return str(default).strip()
+    return shared_read_env_or_file(name, default=default, env_file_values=env_file_values)
 
 
 def parse_positive_float(raw, field_name):
@@ -351,6 +337,134 @@ def extract_output_text(payload):
     return "\n".join(texts).strip()
 
 
+def normalize_openai_base_url(base_url):
+    raw = str(base_url or "").strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    return raw.rstrip("/")
+
+
+def is_local_openai_base_url(base_url):
+    parsed = urlparse(normalize_openai_base_url(base_url))
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return False
+    if host in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "0.0.0.0",
+        "host.docker.internal",
+    } or host.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
+def infer_openai_api_style(base_url, allow_no_key=False):
+    parsed = urlparse(normalize_openai_base_url(base_url))
+    path = parsed.path.rstrip("/").lower()
+    if path.endswith("/chat/completions"):
+        return "chat_completions"
+    if path.endswith("/responses"):
+        return "responses"
+    if allow_no_key or is_local_openai_base_url(base_url):
+        return "chat_completions"
+    return "responses"
+
+
+def resolve_openai_endpoint(base_url, allow_no_key=False):
+    normalized = normalize_openai_base_url(base_url)
+    parsed = urlparse(normalized)
+    style = infer_openai_api_style(normalized, allow_no_key=allow_no_key)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/chat/completions") or path.endswith("/responses"):
+        return normalized, style
+    suffix = "/chat/completions" if style == "chat_completions" else "/responses"
+    resolved_path = f"{path}{suffix}" if path else f"/v1{suffix}"
+    resolved = parsed._replace(path=resolved_path, params="", query="", fragment="")
+    return resolved.geturl(), style
+
+
+def build_openai_classification_payload(domains, model, api_style):
+    system_prompt = (
+        "You classify internet domains. Return JSON only. "
+        "For each input domain, decide whether the website is primarily an AI product, AI model provider, "
+        "AI coding tool, AI chat product, AI inference platform, or an AI-focused developer platform. "
+        "Use classification 'ai' only when the domain is clearly AI-related. Use 'not_ai' otherwise."
+    )
+    user_prompt = json.dumps(
+        {
+            "task": "classify_domains",
+            "domains": domains,
+            "return_format": [
+                {
+                    "domain": "example.com",
+                    "classification": "ai|not_ai",
+                    "reason": "short reason",
+                }
+            ],
+        },
+        ensure_ascii=True,
+    )
+    if api_style == "chat_completions":
+        return {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0,
+        }
+    return {
+        "model": model,
+        "input": [
+            {
+                "role": "system",
+                "content": [{"type": "input_text", "text": system_prompt}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": user_prompt}],
+            },
+        ],
+        "store": False,
+    }
+
+
+def extract_chat_completions_text(payload):
+    texts = []
+    for choice in payload.get("choices", []):
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            texts.append(content.strip())
+        elif isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") in {"text", "output_text"} and item.get("text"):
+                    texts.append(str(item["text"]).strip())
+        if texts:
+            break
+    if texts:
+        return "\n".join(texts).strip()
+    return extract_output_text(payload)
+
+
+def extract_openai_response_text(payload, api_style):
+    if api_style == "chat_completions":
+        return extract_chat_completions_text(payload)
+    return extract_output_text(payload)
+
+
 def validate_classification_results(domains, parsed):
     if not isinstance(parsed, list):
         raise RuntimeError("classifier output must be a JSON list")
@@ -511,51 +625,20 @@ def classify_domains_via_codex(domains, args):
     return validate_classification_results(domains, parsed)
 
 
-def classify_domains_via_openai(domains, api_key, model, base_url, timeout_seconds):
-    system_prompt = (
-        "You classify internet domains. Return JSON only. "
-        "For each input domain, decide whether the website is primarily an AI product, AI model provider, "
-        "AI coding tool, AI chat product, AI inference platform, or an AI-focused developer platform. "
-        "Use classification 'ai' only when the domain is clearly AI-related. Use 'not_ai' otherwise."
-    )
-    user_prompt = json.dumps(
-        {
-            "task": "classify_domains",
-            "domains": domains,
-            "return_format": [
-                {
-                    "domain": "example.com",
-                    "classification": "ai|not_ai",
-                    "reason": "short reason",
-                }
-            ],
-        },
-        ensure_ascii=True,
-    )
-    payload = {
-        "model": model,
-        "input": [
-            {
-                "role": "system",
-                "content": [{"type": "input_text", "text": system_prompt}],
-            },
-            {
-                "role": "user",
-                "content": [{"type": "input_text", "text": user_prompt}],
-            },
-        ],
-        "store": False,
-    }
-
+def classify_domains_via_openai(domains, api_key, model, base_url, timeout_seconds, allow_no_key=False):
+    endpoint, api_style = resolve_openai_endpoint(base_url, allow_no_key=allow_no_key)
+    payload = build_openai_classification_payload(domains, model, api_style)
     body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(
-        base_url,
+        endpoint,
         data=body,
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
@@ -567,13 +650,13 @@ def classify_domains_via_openai(domains, api_key, model, base_url, timeout_secon
         raise RuntimeError(f"openai request failed: {exc}") from exc
 
     payload = json.loads(raw)
-    text = extract_output_text(payload)
+    text = extract_openai_response_text(payload, api_style)
     if not text:
-        raise RuntimeError("openai response did not contain output text")
+        raise RuntimeError(f"openai-compatible {api_style} response did not contain output text")
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"openai output was not valid JSON: {text}") from exc
+        raise RuntimeError(f"openai-compatible output was not valid JSON: {text}") from exc
     return validate_classification_results(domains, parsed)
 
 
@@ -1384,20 +1467,26 @@ def write_domain_report(output_dir, report):
 
 
 def rerender_config(render_script, env_file, config_out, client_out, share_out, dynamic_routing_file):
-    command = [
-        sys.executable,
-        str(render_script),
-        "--env-file",
-        str(env_file),
-        "--config-out",
-        str(config_out),
-        "--client-out",
-        str(client_out),
-        "--share-out",
-        str(share_out),
-        "--dynamic-routing-file",
-        str(dynamic_routing_file),
-    ]
+    render_entry = str(render_script).strip() or DEFAULT_RENDER_MODULE
+    command = [sys.executable]
+    if render_entry.endswith(".py") or "/" in render_entry or "\\" in render_entry:
+        command.append(render_entry)
+    else:
+        command.extend(["-m", render_entry])
+    command.extend(
+        [
+            "--env-file",
+            str(env_file),
+            "--config-out",
+            str(config_out),
+            "--client-out",
+            str(client_out),
+            "--share-out",
+            str(share_out),
+            "--dynamic-routing-file",
+            str(dynamic_routing_file),
+        ]
+    )
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip() or "render_config failed"
@@ -1485,7 +1574,7 @@ def classify_pending_domains(decisions, decisions_path, observed_domains, args):
             return []
         remaining = unresolved
 
-    if not remaining or not args.openai_api_key:
+    if not remaining or not args.openai_classifier_enabled:
         return remaining
 
     for start in range(0, len(remaining), args.batch_size):
@@ -1496,6 +1585,7 @@ def classify_pending_domains(decisions, decisions_path, observed_domains, args):
             args.openai_model,
             args.openai_base_url,
             args.openai_timeout_seconds,
+            allow_no_key=args.openai_allow_no_key,
         )
         classified_at = format_timestamp(utc_now())
         for domain in batch:
@@ -1595,7 +1685,7 @@ def seconds_until_next_boundary(interval_seconds):
 
 def build_args():
     parser = argparse.ArgumentParser(description="Classify Xray destination domains and maintain dynamic AI routing.")
-    parser.add_argument("--workspace-dir", default=os.environ.get("XRAY_WORKSPACE_DIR", "/workspace"))
+    parser.add_argument("--workspace-dir", default=os.environ.get("XRAY_WORKSPACE_DIR", str(BASE_DIR)))
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval-seconds", type=int, default=env_int("AI_DOMAIN_INTERVAL_SECONDS", 3600))
     parser.add_argument("--lookback-seconds", type=int, default=env_int("AI_DOMAIN_LOOKBACK_SECONDS", 3600))
@@ -1617,7 +1707,11 @@ def build_args():
         os.environ.get("AI_DOMAIN_DYNAMIC_ROUTING_PATH", str(workspace / "runtime" / "dynamic-routing.json"))
     )
     args.env_file = Path(os.environ.get("XRAY_ENV_FILE", str(workspace / ".env")))
-    args.render_script = Path(os.environ.get("XRAY_RENDER_SCRIPT", str(workspace / "scripts" / "render_config.py")))
+    args.render_script = (
+        os.environ.get("XRAY_RENDER_MODULE", "").strip()
+        or os.environ.get("XRAY_RENDER_SCRIPT", "").strip()
+        or DEFAULT_RENDER_MODULE
+    )
     args.config_out = Path(os.environ.get("XRAY_CONFIG_OUT", str(workspace / "runtime" / "config.json")))
     args.client_out = Path(os.environ.get("XRAY_CLIENT_OUT", str(workspace / "runtime" / "client-test.json")))
     args.share_out = Path(os.environ.get("XRAY_SHARE_OUT", str(workspace / "runtime" / "client-share.txt")))
@@ -1641,7 +1735,14 @@ def build_args():
     args.codex_model = os.environ.get("CODEX_MODEL", "").strip()
     args.openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     args.openai_model = os.environ.get("OPENAI_MODEL", "gpt-5.5").strip() or "gpt-5.5"
-    args.openai_base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1/responses").strip()
+    args.openai_base_url = normalize_openai_base_url(
+        os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1/responses")
+    )
+    args.openai_allow_no_key = env_bool(
+        "OPENAI_ALLOW_NO_KEY",
+        "1" if is_local_openai_base_url(args.openai_base_url) else "0",
+    )
+    args.openai_classifier_enabled = bool(args.openai_api_key) or args.openai_allow_no_key
     args.ai_upstream_host = read_env_or_file("AI_UPSTREAM_HOST", "upstream.example.com", env_file_values)
     args.ai_upstream_port = int(read_env_or_file("AI_UPSTREAM_PORT", "27166", env_file_values))
     args.ai_upstreams = read_env_or_file("AI_UPSTREAMS", "", env_file_values)

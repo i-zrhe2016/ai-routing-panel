@@ -2,9 +2,12 @@
 
 `xray-routing-panel` 当前更适合被理解成一套“AI routing 控制面 + Xray REALITY 数据面”的组合部署，而不只是一个 TCP 端口面板。
 
+> 当前版本已移除 Nginx。面板会直接生成 Xray 多端口 `inbound`，并通过 Xray API + `access.log` 维护流量统计和健康状态。
+> 如果下文仍出现旧的 `nginx` / `stream` 描述，请以 `docker-compose.yml`、`Dockerfile` 和当前代码实现为准。
+
 这套仓库里的核心链路是：
 
-- `xray-routing-panel` 用 Nginx `stream` 管理入口端口，把公网 TCP 入口稳定转发到本机 Xray
+- `xray-routing-panel` 维护端口数据库，并把有效端口直接渲染成 Xray REALITY `inbounds`
 - `xray-reality` 负责实际代理连接和路由命中
 - `xray-ai-domain-manager` 按小时分析 Xray 访问日志，识别 AI 域名并生成动态路由片段
 - 命中的 AI 域名自动改走已探测可达的 AI 上游，默认首选 `upstream.example.com:27166`
@@ -33,9 +36,9 @@
 
 - AI routing 只有在 `docker compose --profile xray ...` 启动后才会生效
 - 当前只处理 TCP 链路，不做 HTTP 反代，不做 UDP 分流
-- 面板本身仍是“单一固定上游”的 `stream` 管理器；AI 分流发生在后面的 Xray 路由层
+- 面板现在直接管理 Xray `inbounds`；AI 分流仍发生在后面的 Xray 路由层
 - 域名分类是按窗口批处理，默认每 `3600` 秒统计最近 `3600` 秒访问，不是逐请求实时判定
-- 没有本机 `codex` 且没有 `OPENAI_API_KEY` 时，只有内建已知 AI 域名会被自动识别，其他未知域名不会自动标成 AI
+- 没有本机 `codex`，且也没有可用的 OpenAI 兼容分类接口时，只有内建已知 AI 域名会被自动识别，其他未知域名不会自动标成 AI
 
 ## AI Routing 工作原理
 
@@ -43,7 +46,7 @@
 
 ```text
 client
-  -> nginx stream listen port
+  -> xray reality inbound
   -> local xray-reality
   -> access.log
   -> xray-ai-domain-manager
@@ -55,14 +58,14 @@ client
 
 运行时主要步骤如下：
 
-1. 面板根据 `ports` 表生成 Nginx `stream` 配置，把入口端口转到统一上游，默认是本机 `127.0.0.1:443`
-2. `xray-reality` 处理真实代理流量，并把目标域名写入 `deploy/xray-reality/logs/access.log`
+1. 面板根据 `ports` 表生成 Xray 多端口 `inbound`，每个启用端口直接由 Xray 监听
+2. `xray-reality` 处理真实代理流量，并把目标域名写入 `app/xray/logs/access.log`
 3. `xray-ai-domain-manager` 读取最近一小时日志，先走内建强制 AI 路由名单和已知 AI 域名名单
-4. 对剩余未知域名，优先调用本机 `codex`；如果不可用且设置了 `OPENAI_API_KEY`，再回退到 OpenAI Responses API
+4. 对剩余未知域名，优先调用本机 `codex`；如果不可用，再回退到配置好的 OpenAI 兼容分类接口
 5. AI 域名结果写入：
-   - `deploy/xray-reality/runtime/ai-domain-decisions.json`
-   - `deploy/xray-reality/runtime/dynamic-routing.json`
-   - `deploy/xray-reality/reports/hourly-domains/latest.{txt,json}`
+   - `app/xray/runtime/ai-domain-decisions.json`
+   - `app/xray/runtime/dynamic-routing.json`
+   - `app/xray/reports/hourly-domains/latest.{txt,json}`
    - `data/panel.db` 中的 `ai_domains`、`ai_domain_observations`
 6. 动态路由片段变化后，管理器会重新渲染 Xray 配置，并在需要时重启 `xray-reality`
 
@@ -80,13 +83,13 @@ client
   - `31098`，仓库当前默认入口端口和探针观察端口
 - 如果你想让未知域名自动分类，至少满足下面一项：
   - 宿主机已安装 `codex` CLI，且 `codex login status` 可用
-  - 设置可用的 `OPENAI_API_KEY`
+  - 配置可用的 OpenAI 兼容接口
 
 ### 2. 准备 Xray REALITY 参数
 
 ```bash
-./deploy/xray-reality/scripts/generate-secrets.sh
-cp deploy/xray-reality/.env.example deploy/xray-reality/.env
+./app/xray/generate-secrets.sh
+cp app/xray/.env.example app/xray/.env
 ```
 
 至少需要修改：
@@ -99,15 +102,15 @@ cp deploy/xray-reality/.env.example deploy/xray-reality/.env
 - `XRAY_SERVER_NAME`
 - `XRAY_DEST`
 
-如果你希望通过面板暴露的入口端口接入，例如公网访问 `31098` 再转到本机 Xray `443`：
+如果你希望使用面板管理的入口端口接入，例如公网访问 `31098`：
 
-- 保持 `XRAY_LISTEN_PORT=443`
-- 额外设置 `XRAY_PUBLIC_PORT=31098`
+- 保持 `SEED_LISTEN_PORT=31098`，或在面板里新增需要的监听端口
+- `XRAY_LISTEN_PORT` 只作为“未启用面板端口文件时”的单端口回退值
 
 ### 3. 渲染配置并启动完整栈
 
 ```bash
-python3 deploy/xray-reality/scripts/render_config.py
+python -m app.xray.render_config
 docker compose --profile xray up -d --build
 ```
 
@@ -123,11 +126,11 @@ docker compose --profile xray up -d --build
 - 面板地址：`http://服务器IP:18080`
 - 探针监控页：`http://服务器IP:18080/probe-dashboard`
 - 健康检查：`http://服务器IP:18080/healthz`
-- Xray 监听：`0.0.0.0:443`
-- 面板默认把入口端口转发到 `127.0.0.1:443`
+- Xray 默认回退监听：`0.0.0.0:443`
+- 面板会把已启用端口直接写入 Xray，例如默认初始化端口 `31098`
 - 数据库持久化到 `./data`
 - 面板日志持久化到 `./logs`
-- Xray 日志持久化到 `./deploy/xray-reality/logs`
+- Xray 日志持久化到 `./app/xray/logs`
 
 如果你要固定页面展示地址或启用登录认证，先复制根目录模板：
 
@@ -140,25 +143,25 @@ cp .env.example .env
 补充说明：
 
 - 根目录 `.env` 只用于覆盖面板和 `docker compose` 的运行参数，不负责 REALITY 密钥和 Xray 路由参数
-- `deploy/xray-reality/.env` 才是 `xray-reality` 和 `xray-ai-domain-manager` 的主要配置来源
+- `app/xray/.env` 才是 `xray-reality` 和 `xray-ai-domain-manager` 的主要配置来源
 - 首次启动时如果 `data/panel.db` 不存在，程序会自动建表
 - 如果数据库里还没有任何端口记录，会按 `SEED_LISTEN_PORT` 自动创建一条初始监听端口，默认是 `31098`
-- 只有在 `deploy/xray-reality/runtime/client-test.json` 已生成并成功挂载后，页面里的 `Clash / V2Ray / VLESS` 订阅与分享链接才会可用
+- 只有在 `app/xray/runtime/client-test.json` 已生成并成功挂载后，页面里的 `Clash / V2Ray / VLESS` 订阅与分享链接才会可用
 
 ### 4. 验证 AI routing 是否已经生效
 
 默认按一小时窗口执行。想立刻跑一轮分类，可以手动执行：
 
 ```bash
-docker compose --profile xray run --rm xray-ai-domain-manager python /workspace/scripts/ai_domain_manager.py --once
+docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
 ```
 
 常用检查方式：
 
 ```bash
 docker compose --profile xray logs -f xray-ai-domain-manager
-cat deploy/xray-reality/reports/hourly-domains/latest.txt
-sed -n '1,220p' deploy/xray-reality/reports/hourly-domains/latest.json
+cat app/xray/reports/hourly-domains/latest.txt
+sed -n '1,220p' app/xray/reports/hourly-domains/latest.json
 ```
 
 检查共享数据库中的 AI 聚合结果：
@@ -201,19 +204,19 @@ AI routing 相关的 `xray-reality` 和 `xray-ai-domain-manager` 不会启动。
 
 AI routing 相关内容主要集中在：
 
-- `deploy/xray-reality/.env`：REALITY 参数和 AI 管理器运行参数
-- `deploy/xray-reality/runtime/config.json`：渲染后的 Xray 服务端配置
-- `deploy/xray-reality/runtime/client-share.txt`：客户端导入链接
-- `deploy/xray-reality/runtime/client-test.json`：本地验证用客户端配置
-- `deploy/xray-reality/runtime/ai-domain-decisions.json`：域名分类缓存
-- `deploy/xray-reality/runtime/dynamic-routing.json`：动态路由片段
-- `deploy/xray-reality/reports/hourly-domains/`：最近一小时和历史归档报告
-- `deploy/xray-reality/logs/access.log`：AI 管理器的主要输入日志
+- `app/xray/.env`：REALITY 参数和 AI 管理器运行参数
+- `app/xray/runtime/config.json`：渲染后的 Xray 服务端配置
+- `app/xray/runtime/client-share.txt`：客户端导入链接
+- `app/xray/runtime/client-test.json`：本地验证用客户端配置
+- `app/xray/runtime/ai-domain-decisions.json`：域名分类缓存
+- `app/xray/runtime/dynamic-routing.json`：动态路由片段
+- `app/xray/reports/hourly-domains/`：最近一小时和历史归档报告
+- `app/xray/logs/access.log`：AI 管理器的主要输入日志
 - `data/panel.db`：共享数据库，保存端口规则、流量和 AI 域名聚合数据
 
 更完整的 REALITY 和 AI 域名管理说明见：
 
-- [deploy/xray-reality/README.md](deploy/xray-reality/README.md)
+- [app/xray/README.md](app/xray/README.md)
 
 ## 页面使用
 
@@ -391,12 +394,13 @@ curl -u admin:secret \
 | `AI_DOMAIN_BATCH_SIZE` | `50` | 单批送给分类器的最大域名数 |
 | `CODEX_CLASSIFIER_ENABLED` | `1` | 是否优先启用本机 `codex` 做未知域名分类 |
 | `CODEX_TIMEOUT_SECONDS` | `180` | 调用本机 `codex` 的超时时间 |
-| `OPENAI_API_KEY` | 空 | 本机 `codex` 不可用时的 OpenAI 回退凭据 |
-| `OPENAI_MODEL` | `gpt-5.5` | OpenAI 回退分类时使用的模型 |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1/responses` | OpenAI Responses API 地址 |
+| `OPENAI_API_KEY` | 空 | 本机 `codex` 不可用时的 OpenAI 兼容接口凭据；本地模型通常可留空 |
+| `OPENAI_MODEL` | `gpt-5.5` | 回退分类时使用的模型名，也可填写本地兼容服务暴露的模型 |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1/responses` | OpenAI 兼容接口地址；官方默认走 Responses API，本地接口可填 `http://host.docker.internal:11434/v1` 这类根地址 |
+| `OPENAI_ALLOW_NO_KEY` | `0`，本地地址默认推断为 `1` | 是否允许在未设置 `OPENAI_API_KEY` 时调用兼容接口；本地 Ollama / LM Studio / vLLM 常用 |
 | `PANEL_ROUTE_LISTEN_PORT` | `0` | 可选；指定某个面板监听端口作为模板里 `__PANEL_*__` 占位符的优先来源 |
 | `SUBSCRIPTION_NAME_PREFIX` | `reality` | 生成订阅名称和分享备注时使用的默认前缀 |
-| `XRAY_CLIENT_CONFIG_PATH` | `/xray-runtime/client-test.json` | 订阅内容和 `vless://` 分享链接所依赖的客户端配置路径 |
+| `XRAY_CLIENT_CONFIG_PATH` | `/app/xray/runtime/client-test.json` | 订阅内容和 `vless://` 分享链接所依赖的客户端配置路径 |
 
 代码里还有一些偏内部用途的路径变量，例如：
 
@@ -408,6 +412,20 @@ curl -u admin:secret \
 
 一般不需要改。
 
+本地大模型分类示例：
+
+```env
+OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+OPENAI_MODEL=qwen2.5:14b
+OPENAI_ALLOW_NO_KEY=1
+```
+
+说明：
+
+- `xray-ai-domain-manager` 运行在容器里，访问宿主机本地模型时应使用 `host.docker.internal`
+- 如果你的本地服务直接兼容 `POST /v1/chat/completions`，只填到 `/v1` 即可，管理器会自动补全接口路径
+- 官方 OpenAI 默认仍走 `https://api.openai.com/v1/responses`
+
 ## 目录结构
 
 ```text
@@ -415,6 +433,17 @@ curl -u admin:secret \
 ├── .env.example              # docker compose 覆盖示例
 ├── app/
 │   ├── panel.py              # Flask 应用和 Nginx 管理逻辑
+│   ├── xray/
+│   │   ├── .env.example      # REALITY 参数和 AI 管理器配置模板
+│   │   ├── README.md         # Xray REALITY 和 AI 域名管理详细说明
+│   │   ├── ai_domain_manager.py
+│   │   ├── render_config.py
+│   │   ├── generate-secrets.sh
+│   │   ├── assets/
+│   │   │   └── ai-proxy-outbound.example.json
+│   │   ├── logs/             # Xray 访问日志，AI 管理器从这里读入域名
+│   │   ├── reports/          # 按小时输出 AI 域名报告
+│   │   └── runtime/          # 渲染配置、分类缓存、动态路由片段
 │   ├── templates/index.html  # Vue 单页面板模板
 │   ├── templates/login.html
 │   ├── templates/probe_dashboard.html
@@ -425,15 +454,6 @@ curl -u admin:secret \
 ├── backups/                  # SQLite 备份输出目录
 ├── data/
 │   └── panel.db              # SQLite 数据库
-├── deploy/
-│   └── xray-reality/
-│       ├── README.md         # Xray REALITY 和 AI 域名管理详细说明
-│       ├── .env.example      # REALITY 参数和 AI 管理器配置模板
-│       ├── ai-proxy-outbound.example.json
-│       ├── logs/             # Xray 访问日志，AI 管理器从这里读入域名
-│       ├── reports/          # 按小时输出 AI 域名报告
-│       ├── runtime/          # 渲染配置、分类缓存、动态路由片段
-│       └── scripts/          # REALITY 渲染和 AI 域名管理脚本
 ├── logs/
 │   ├── error.log             # Nginx 错误日志
 │   └── stream-access.log     # Nginx stream 访问日志
@@ -513,9 +533,9 @@ python3 ./scripts/backup_db.py --db-path ./data/panel.db --backup-dir ./backups
 - `GET /healthz` 返回 `500`：
   先执行 `docker compose logs -f xray-routing-panel`，再进入容器运行 `nginx -t`，最后检查 `/etc/nginx/streams-enabled/ports.conf` 是否生成了非法端口配置。
 - 页面里订阅链接显示不可用：
-  先确认你已经执行过 `python3 deploy/xray-reality/scripts/render_config.py`，并且 `deploy/xray-reality/runtime/client-test.json` 在容器里可见。
+  先确认你已经执行过 `python -m app.xray.render_config`，并且 `app/xray/runtime/client-test.json` 在容器里可见。
 - AI 域名始终没有新增分类结果：
-  先看 `docker compose --profile xray logs -f xray-ai-domain-manager`，再手动执行一次 `--once`；同时确认 `deploy/xray-reality/logs/access.log` 有新日志，以及宿主机 `codex login status` 或 `OPENAI_API_KEY` 可用。
+  先看 `docker compose --profile xray logs -f xray-ai-domain-manager`，再手动执行一次 `--once`；同时确认 `app/xray/logs/access.log` 有新日志，以及宿主机 `codex login status` 或 `OPENAI_API_KEY` 可用。
 - 面板重启后登录状态全部失效：
   根目录 `.env` 里显式设置 `PANEL_SECRET_KEY`，不要依赖进程启动时随机生成的值。
 - 第一次启动后没有出现默认端口：

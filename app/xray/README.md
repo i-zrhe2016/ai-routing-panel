@@ -1,13 +1,14 @@
 # Xray VLESS + XTLS + REALITY
 
-这个目录提供一套独立的本机部署样板，不会修改当前 `xray-routing-panel` 的服务逻辑。
+这个目录是直接纳入 `app/` 的 Xray REALITY 子系统，和当前 `xray-routing-panel` 共享仓库与 compose，但保持独立运行边界。
 
 说明：
 
 - 服务定义已经合并进仓库根目录 `docker-compose.yml` 的 `xray` profile
-- 当前目录主要保存 `.env`、模板、脚本、`runtime/` 和 `logs/`
+- 当前目录是 `app.xray` 子系统，包含模块入口、默认资源和运行目录
+- 正式入口统一使用 `python -m app.xray.render_config` 和 `python -m app.xray.ai_domain_manager`
 - 推荐在仓库根目录执行 `docker compose --profile xray ...`
-- `deploy/xray-reality/.env` 主要用于渲染 Reality 配置和给 AI 管理器提供运行参数；`xray-reality` 服务镜像版本当前直接写在根目录 `docker-compose.yml`
+- `app/xray/.env` 主要用于渲染 Reality 配置和给 AI 管理器提供运行参数；`xray-reality` 服务镜像版本当前直接写在根目录 `docker-compose.yml`
 
 它默认使用：
 
@@ -43,13 +44,13 @@ cd /path/to/xray-routing-panel
 2. 生成一组新的 UUID、REALITY 密钥和 short id：
 
 ```bash
-./deploy/xray-reality/scripts/generate-secrets.sh
+./app/xray/generate-secrets.sh
 ```
 
 3. 复制环境变量模板并填入参数：
 
 ```bash
-cp deploy/xray-reality/.env.example deploy/xray-reality/.env
+cp app/xray/.env.example app/xray/.env
 ```
 
 至少需要修改这些值：
@@ -70,7 +71,7 @@ cp deploy/xray-reality/.env.example deploy/xray-reality/.env
 4. 渲染服务端配置和客户端连接信息：
 
 ```bash
-python3 deploy/xray-reality/scripts/render_config.py
+python -m app.xray.render_config
 ```
 
 5. 启动服务：
@@ -130,7 +131,7 @@ docker compose --profile xray up -d --build xray-reality xray-ai-domain-manager
 如果你想从通用样板重新开始，仓库还提供了：
 
 ```bash
-cp ai-proxy-outbound.example.json ai-proxy-outbound.json
+cp app/xray/assets/ai-proxy-outbound.example.json app/xray/ai-proxy-outbound.json
 ```
 
 管理器会自动把：
@@ -206,7 +207,7 @@ docker compose --profile xray ps xray-reality xray-ai-domain-manager
 ```bash
 docker compose --profile xray logs -f xray-reality
 docker compose --profile xray logs -f xray-ai-domain-manager
-tail -f deploy/xray-reality/logs/access.log deploy/xray-reality/logs/error.log
+tail -f app/xray/logs/access.log app/xray/logs/error.log
 ```
 
 校验配置：
@@ -218,8 +219,8 @@ docker compose --profile xray run --rm xray-reality run -test -config /etc/xray/
 查看最近一小时域名报告：
 
 ```bash
-cat deploy/xray-reality/reports/hourly-domains/latest.txt
-sed -n '1,220p' deploy/xray-reality/reports/hourly-domains/latest.json
+cat app/xray/reports/hourly-domains/latest.txt
+sed -n '1,220p' app/xray/reports/hourly-domains/latest.json
 ```
 
 检查 AI 域名是否已经写入共享数据库：
@@ -236,14 +237,14 @@ PY
 手动跑一轮 AI 域名分析：
 
 ```bash
-docker compose --profile xray run --rm xray-ai-domain-manager python /workspace/scripts/ai_domain_manager.py --once
+docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
 ```
 
 手动验证 `chatgpt.com` 是否命中 `ai_proxy`：
 
 ```bash
 docker run --rm --network host \
-  -v "$(pwd)/deploy/xray-reality/runtime/client-test.json:/etc/xray/config.json:ro" \
+  -v "$(pwd)/app/xray/runtime/client-test.json:/etc/xray/config.json:ro" \
   ghcr.io/xtls/xray-core:26.5.3 run -c /etc/xray/config.json
 ```
 
@@ -251,7 +252,7 @@ docker run --rm --network host \
 
 ```bash
 curl --socks5-hostname 127.0.0.1:10808 -I https://chatgpt.com
-tail -n 20 deploy/xray-reality/logs/access.log
+tail -n 20 app/xray/logs/access.log
 ```
 
 命中时，`logs/access.log` 里应看到类似：
@@ -289,6 +290,14 @@ accepted tcp:chatgpt.com:443 [ai_proxy]
 | `AI_PROXY_OUTBOUND_TEMPLATE_PATH` | AI 专用出站模板路径，默认 `/workspace/ai-proxy-outbound.json` |
 | `AI_DOMAIN_INTERVAL_SECONDS` | AI 域名分析执行周期，默认 `3600` 秒 |
 | `AI_DOMAIN_LOOKBACK_SECONDS` | 每轮统计窗口长度，默认 `3600` 秒 |
+| `AI_DOMAIN_BATCH_SIZE` | 单批送给分类器的最大域名数，默认 `50` |
+| `CODEX_CLASSIFIER_ENABLED` | 是否优先启用本机 `codex` 做未知域名分类，默认 `1` |
+| `CODEX_TIMEOUT_SECONDS` | 调用本机 `codex` 的超时时间，默认 `180` 秒 |
+| `CODEX_MODEL` | 可选；指定 `codex exec --model` |
+| `OPENAI_API_KEY` | 可选；OpenAI 兼容接口凭据，本地模型通常可留空 |
+| `OPENAI_MODEL` | 回退分类时使用的模型名，默认 `gpt-5.5` |
+| `OPENAI_BASE_URL` | OpenAI 兼容接口地址；默认 `https://api.openai.com/v1/responses` |
+| `OPENAI_ALLOW_NO_KEY` | 是否允许未设置 Key 时仍调用兼容接口；本地接口常设为 `1` |
 | `PANEL_ROUTE_LISTEN_PORT` | 可选；指定面板监听端口时，模板里的 `__PANEL_*__` 占位符优先使用该端口对应的上游 |
 
 AI 域名管理服务默认使用：
@@ -302,7 +311,7 @@ AI 域名管理服务默认使用：
 - 每 `3600` 秒刷新一次
 - 每次统计最近 `3600` 秒窗口
 - 优先走本机 `codex exec`
-- `OPENAI_MODEL` 默认是 `gpt-5.5`，也可以改成你自己的 Codex/推理模型
+- `OPENAI_MODEL` 默认是 `gpt-5.5`，也可以改成你自己的本地推理模型
 
 共享数据库会新增两张表：
 
@@ -322,9 +331,23 @@ AI 域名管理服务默认使用：
 如果本机 `codex` 不可用：
 
 - 管理器会继续输出域名报告
-- 并自动回退到 `OPENAI_API_KEY` 对应的 Responses API
+- 并自动回退到配置好的 OpenAI 兼容接口
 
-如果既没有可用的本机 `codex`，也没有 `OPENAI_API_KEY`：
+本地大模型示例：
+
+```env
+OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+OPENAI_MODEL=qwen2.5:14b
+OPENAI_ALLOW_NO_KEY=1
+```
+
+说明：
+
+- 容器访问宿主机本地模型应使用 `host.docker.internal`
+- 对 `Ollama`、`LM Studio`、`vLLM` 这类兼容 `chat/completions` 的服务，只填 `/v1` 根地址即可
+- 如果 `OPENAI_BASE_URL` 明确写成 `/v1/responses`，管理器会继续按 OpenAI Responses API 调用
+
+如果既没有可用的本机 `codex`，也没有可用的 OpenAI 兼容接口：
 
 - 管理器仍会生成域名报告
 - 内建已知 AI 域名列表仍会自动命中，例如 `openai.com`、`chatgpt.com`、`anthropic.com`、`claude.ai`
@@ -349,9 +372,9 @@ AI 域名管理服务默认使用：
 
 如果需要更换 UUID 或 REALITY 密钥：
 
-1. 重新执行 `./deploy/xray-reality/scripts/generate-secrets.sh`
-2. 更新 `deploy/xray-reality/.env`
-3. 重新执行 `python3 deploy/xray-reality/scripts/render_config.py`
+1. 重新执行 `./app/xray/generate-secrets.sh`
+2. 更新 `app/xray/.env`
+3. 重新执行 `python -m app.xray.render_config`
 4. 执行 `docker compose --profile xray up -d xray-reality xray-ai-domain-manager`
 
 客户端也需要同步更新新的参数。

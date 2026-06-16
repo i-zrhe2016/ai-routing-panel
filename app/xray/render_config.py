@@ -6,43 +6,12 @@ import sys
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
-
-REQUIRED_KEYS = [
-    "XRAY_LISTEN_HOST",
-    "XRAY_LISTEN_PORT",
-    "XRAY_PUBLIC_HOST",
-    "XRAY_CLIENT_UUID",
-    "XRAY_FLOW",
-    "XRAY_REALITY_PRIVATE_KEY",
-    "XRAY_REALITY_PUBLIC_KEY",
-    "XRAY_REALITY_SHORT_ID",
-    "XRAY_SERVER_NAME",
-    "XRAY_DEST",
-    "XRAY_FINGERPRINT",
-    "XRAY_LOGLEVEL",
-    "XRAY_NODE_TAG",
-]
-
-
-def load_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            raise ValueError(f"invalid line in {path}: {raw_line}")
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if value and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        values[key] = value
-    return values
+from app.xray.config import BASE_DIR, REQUIRED_ENV_KEYS, RUNTIME_DIR
+from app.xray.envfile import load_env_file
 
 
 def validate_env(values: dict[str, str]) -> None:
-    missing = [key for key in REQUIRED_KEYS if not values.get(key)]
+    missing = [key for key in REQUIRED_ENV_KEYS if not values.get(key)]
     if missing:
         raise ValueError(f"missing required values: {', '.join(missing)}")
 
@@ -114,6 +83,31 @@ def load_optional_json(path: Path | None) -> dict | None:
     return payload
 
 
+def load_panel_ports(path: Path | None) -> list[int]:
+    payload = load_optional_json(path)
+    if not payload:
+        return []
+
+    ports = payload.get("ports", [])
+    if not isinstance(ports, list):
+        raise ValueError("panel ports file must use a JSON list in `ports`")
+
+    normalized: list[int] = []
+    seen: set[int] = set()
+    for item in ports:
+        try:
+            listen_port = int(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid panel listen port: {item!r}") from exc
+        if listen_port < 1 or listen_port > 65535:
+            raise ValueError(f"invalid panel listen port: {listen_port}")
+        if listen_port in seen:
+            continue
+        normalized.append(listen_port)
+        seen.add(listen_port)
+    return normalized
+
+
 def merge_dynamic_routing(config: dict, dynamic_payload: dict | None) -> dict:
     if not dynamic_payload:
         return config
@@ -141,48 +135,73 @@ def merge_dynamic_routing(config: dict, dynamic_payload: dict | None) -> dict:
     return config
 
 
-def build_server_config(values: dict[str, str], dynamic_payload: dict | None = None) -> dict:
+def build_reality_inbound(values: dict[str, str], listen_port: int) -> dict:
     stream_sockopt = build_stream_sockopt(values)
+    return {
+        "tag": f"panel-{listen_port}",
+        "listen": values["XRAY_LISTEN_HOST"],
+        "port": int(listen_port),
+        "protocol": "vless",
+        "settings": {
+            "clients": [
+                {
+                    "id": values["XRAY_CLIENT_UUID"],
+                    "flow": values["XRAY_FLOW"],
+                }
+            ],
+            "decryption": "none",
+        },
+        "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "sockopt": stream_sockopt,
+            "realitySettings": {
+                "show": False,
+                "dest": values["XRAY_DEST"],
+                "xver": 0,
+                "serverNames": [values["XRAY_SERVER_NAME"]],
+                "privateKey": values["XRAY_REALITY_PRIVATE_KEY"],
+                "shortIds": [values["XRAY_REALITY_SHORT_ID"]],
+            },
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls", "quic"],
+            "routeOnly": True,
+        },
+    }
+
+
+def build_server_config(
+    values: dict[str, str],
+    dynamic_payload: dict | None = None,
+    panel_ports: list[int] | None = None,
+) -> dict:
+    panel_ports = list(panel_ports or [])
+    if panel_ports:
+        inbounds = [build_reality_inbound(values, listen_port) for listen_port in panel_ports]
+    else:
+        inbounds = [build_reality_inbound(values, int(values["XRAY_LISTEN_PORT"]))]
+
     config = {
         "log": {
             "loglevel": values["XRAY_LOGLEVEL"],
             "access": "/var/log/xray/access.log",
             "error": "/var/log/xray/error.log",
         },
-        "inbounds": [
-            {
-                "listen": values["XRAY_LISTEN_HOST"],
-                "port": int(values["XRAY_LISTEN_PORT"]),
-                "protocol": "vless",
-                "settings": {
-                    "clients": [
-                        {
-                            "id": values["XRAY_CLIENT_UUID"],
-                            "flow": values["XRAY_FLOW"],
-                        }
-                    ],
-                    "decryption": "none",
-                },
-                "streamSettings": {
-                    "network": "tcp",
-                    "security": "reality",
-                    "sockopt": stream_sockopt,
-                    "realitySettings": {
-                        "show": False,
-                        "dest": values["XRAY_DEST"],
-                        "xver": 0,
-                        "serverNames": [values["XRAY_SERVER_NAME"]],
-                        "privateKey": values["XRAY_REALITY_PRIVATE_KEY"],
-                        "shortIds": [values["XRAY_REALITY_SHORT_ID"]],
-                    },
-                },
-                "sniffing": {
-                    "enabled": True,
-                    "destOverride": ["http", "tls", "quic"],
-                    "routeOnly": True,
-                },
+        "api": {
+            "tag": "api",
+            "listen": values.get("XRAY_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085",
+            "services": ["StatsService", "HandlerService"],
+        },
+        "stats": {},
+        "policy": {
+            "system": {
+                "statsInboundUplink": True,
+                "statsInboundDownlink": True,
             }
-        ],
+        },
+        "inbounds": inbounds,
         "outbounds": [{"protocol": "freedom", "tag": "direct"}],
     }
     return merge_dynamic_routing(config, dynamic_payload)
@@ -270,13 +289,13 @@ def write_json(path: Path, payload: dict) -> None:
 
 
 def main() -> int:
-    base_dir = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description="Render Xray REALITY config from .env")
-    parser.add_argument("--env-file", default=str(base_dir / ".env"))
-    parser.add_argument("--config-out", default=str(base_dir / "runtime" / "config.json"))
-    parser.add_argument("--client-out", default=str(base_dir / "runtime" / "client-test.json"))
-    parser.add_argument("--share-out", default=str(base_dir / "runtime" / "client-share.txt"))
-    parser.add_argument("--dynamic-routing-file", default=str(base_dir / "runtime" / "dynamic-routing.json"))
+    parser.add_argument("--env-file", default=str(BASE_DIR / ".env"))
+    parser.add_argument("--config-out", default=str(RUNTIME_DIR / "config.json"))
+    parser.add_argument("--client-out", default=str(RUNTIME_DIR / "client-test.json"))
+    parser.add_argument("--share-out", default=str(RUNTIME_DIR / "client-share.txt"))
+    parser.add_argument("--dynamic-routing-file", default=str(RUNTIME_DIR / "dynamic-routing.json"))
+    parser.add_argument("--panel-ports-file", default=str(RUNTIME_DIR / "panel-ports.json"))
     args = parser.parse_args()
 
     env_path = Path(args.env_file)
@@ -288,11 +307,12 @@ def main() -> int:
         values = load_env_file(env_path)
         validate_env(values)
         dynamic_payload = load_optional_json(Path(args.dynamic_routing_file))
+        panel_ports = load_panel_ports(Path(args.panel_ports_file))
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    write_json(Path(args.config_out), build_server_config(values, dynamic_payload))
+    write_json(Path(args.config_out), build_server_config(values, dynamic_payload, panel_ports))
     write_json(Path(args.client_out), build_client_config(values))
 
     share_path = Path(args.share_out)

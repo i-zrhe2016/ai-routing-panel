@@ -12,12 +12,12 @@
         <div class="header-copy">
           <div class="header-kicker-row">
             <p class="eyebrow">PROBE DASHBOARD</p>
-            <span class="status-pill {{ 'good' if nginx_running else 'bad' }}">
+            <span class="status-pill {{ 'good' if xray_running else 'bad' }}">
               <span class="status-pill-dot"></span>
-              {{ 'Nginx 运行中' if nginx_running else 'Nginx 未运行' }}
+              {{ 'Xray 运行中' if xray_running else 'Xray 未运行' }}
             </span>
           </div>
-          <h1 class="page-title">后端连通性监控</h1>
+          <h1 class="page-title">端口连通性监控</h1>
           <p class="page-subtitle">
             这里专门观察内部测试链路的可达性。成功率、时间线和最近错误会帮助你快速判断当前上游是否稳定。
           </p>

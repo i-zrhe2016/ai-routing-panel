@@ -5,15 +5,17 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 
-def load_panel_module(temp_root):
+def load_panel_module(temp_root, panel_username="", panel_password=""):
     data_dir = temp_root / "data"
-    logs_dir = temp_root / "logs"
-    streams_dir = temp_root / "streams"
+    xray_dir = temp_root / "xray"
+    runtime_dir = xray_dir / "runtime"
+    logs_dir = xray_dir / "logs"
     data_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
-    streams_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
 
     client_config_path = temp_root / "client-test.json"
     client_config_path.write_text(
@@ -50,27 +52,51 @@ def load_panel_module(temp_root):
         encoding="utf-8",
     )
 
+    env_file_path = xray_dir / ".env"
+    env_file_path.write_text(
+        "\n".join(
+            [
+                "XRAY_LISTEN_HOST=0.0.0.0",
+                "XRAY_LISTEN_PORT=443",
+                "XRAY_PUBLIC_HOST=panel.example.com",
+                "XRAY_CLIENT_UUID=11111111-1111-1111-1111-111111111111",
+                "XRAY_FLOW=xtls-rprx-vision",
+                "XRAY_REALITY_PRIVATE_KEY=private-key-example",
+                "XRAY_REALITY_PUBLIC_KEY=public-key-example",
+                "XRAY_REALITY_SHORT_ID=0123456789abcdef",
+                "XRAY_SERVER_NAME=www.example.com",
+                "XRAY_DEST=www.example.com:443",
+                "XRAY_FINGERPRINT=chrome",
+                "XRAY_LOGLEVEL=warning",
+                "XRAY_NODE_TAG=test-node",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     os.environ["DATA_DIR"] = str(data_dir)
     os.environ["DB_PATH"] = str(data_dir / "panel.db")
-    os.environ["STREAMS_DIR"] = str(streams_dir)
-    os.environ["STREAM_ACCESS_LOG"] = str(logs_dir / "stream-access.log")
-    os.environ["NGINX_CONFIG_PATH"] = str(temp_root / "nginx.conf")
-    os.environ["NGINX_PID_PATH"] = str(temp_root / "nginx.pid")
+    os.environ["XRAY_ENV_FILE_PATH"] = str(env_file_path)
+    os.environ["XRAY_CONFIG_PATH"] = str(runtime_dir / "config.json")
+    os.environ["XRAY_PANEL_PORTS_PATH"] = str(runtime_dir / "panel-ports.json")
+    os.environ["XRAY_ACCESS_LOG_PATH"] = str(logs_dir / "access.log")
+    os.environ["XRAY_CONTAINER_NAME"] = "test-xray-container"
     os.environ["XRAY_CLIENT_CONFIG_PATH"] = str(client_config_path)
     os.environ["PANEL_PUBLIC_URL"] = "http://panel.example.com"
     os.environ["SEED_LISTEN_PORT"] = ""
-    os.environ["PANEL_USERNAME"] = ""
-    os.environ["PANEL_PASSWORD"] = ""
+    os.environ["PANEL_USERNAME"] = panel_username
+    os.environ["PANEL_PASSWORD"] = panel_password
     os.environ["PANEL_SECRET_KEY"] = "test-secret-key"
 
     sys.modules.pop("app.panel", None)
     module = importlib.import_module("app.panel")
     module = importlib.reload(module)
-    module.state.nginx_config_test = lambda: None
-    module.state.nginx_running = lambda: False
-    module.state.start_nginx = lambda: None
-    module.state.nginx_reload = lambda: None
-    module.state.nginx_stop = lambda: None
+    module.state.render_xray_config = lambda: None
+    module.state.xray_config_test = lambda: None
+    module.state.xray_restart = lambda: None
+    module.state.xray_container_exists = lambda: False
+    module.state.xray_running = lambda: False
     module.state.init_db()
     return module
 
@@ -99,10 +125,16 @@ class TenantPanelTest(unittest.TestCase):
                 return port
         self.fail(f"port {listen_port} was not created")
 
+    def assert_login_redirect_target(self, response, expected_next):
+        location = response.headers["Location"]
+        parsed = urlparse(location)
+        self.assertEqual(parsed.path, "/login")
+        self.assertEqual(parse_qs(parsed.query).get("next"), [expected_next])
+
     def tenant_login(self, tenant_token, username, password, follow_redirects=False):
         return self.client.post(
-            f"/tenant/{tenant_token}/login",
-            data={"username": username, "password": password},
+            "/login",
+            data={"username": username, "password": password, "next": f"/tenant/{tenant_token}"},
             follow_redirects=follow_redirects,
         )
 
@@ -120,11 +152,15 @@ class TenantPanelTest(unittest.TestCase):
 
         response = self.client.get(f"/tenant/{port_a['tenant_token']}")
         self.assertEqual(response.status_code, 303)
-        self.assertIn(f"/tenant/{port_a['tenant_token']}/login", response.headers["Location"])
+        self.assert_login_redirect_target(response, f"/tenant/{port_a['tenant_token']}")
 
-        login_page = self.client.get(f"/tenant/{port_a['tenant_token']}/login")
+        legacy_login = self.client.get(f"/tenant/{port_a['tenant_token']}/login")
+        self.assertEqual(legacy_login.status_code, 303)
+        self.assert_login_redirect_target(legacy_login, f"/tenant/{port_a['tenant_token']}")
+
+        login_page = self.client.get("/login")
         self.assertEqual(login_page.status_code, 200)
-        self.assertIn("登录租户面板", login_page.get_data(as_text=True))
+        self.assertIn("统一登录入口", login_page.get_data(as_text=True))
 
         wrong_login = self.tenant_login(port_a["tenant_token"], port_a["tenant_username"], "wrong-password")
         self.assertEqual(wrong_login.status_code, 401)
@@ -144,7 +180,7 @@ class TenantPanelTest(unittest.TestCase):
 
         other_tenant = self.client.get(f"/tenant/{port_b['tenant_token']}")
         self.assertEqual(other_tenant.status_code, 303)
-        self.assertIn(f"/tenant/{port_b['tenant_token']}/login", other_tenant.headers["Location"])
+        self.assert_login_redirect_target(other_tenant, f"/tenant/{port_b['tenant_token']}")
 
         missing = self.client.get("/tenant/not-a-real-token")
         self.assertEqual(missing.status_code, 404)
@@ -199,7 +235,7 @@ class TenantPanelTest(unittest.TestCase):
             )
             conn.commit()
 
-        changed = self.panel.state.disable_auto_stopped_ports(reload_nginx=False)
+        changed = self.panel.state.disable_auto_stopped_ports(reload_xray=False)
         self.assertGreaterEqual(changed, 1)
 
         remaining_ports = self.panel.state.query_ports()
@@ -211,6 +247,43 @@ class TenantPanelTest(unittest.TestCase):
                 (port["listen_port"],),
             ).fetchone()
         self.assertIsNone(row)
+
+
+class UnifiedAdminLoginTest(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.panel = load_panel_module(self.root, panel_username="admin-user", panel_password="admin-pass-123")
+        self.client = self.panel.app.test_client()
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def test_admin_login_uses_unified_login_page(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 303)
+        location = response.headers["Location"]
+        parsed = urlparse(location)
+        self.assertEqual(parsed.path, "/login")
+        self.assertEqual(parse_qs(parsed.query).get("next"), ["/"])
+
+        login_page = self.client.get("/login?next=/")
+        self.assertEqual(login_page.status_code, 200)
+        self.assertIn("统一登录入口", login_page.get_data(as_text=True))
+
+        failed = self.client.post(
+            "/login",
+            data={"username": "admin-user", "password": "wrong-password", "next": "/"},
+        )
+        self.assertEqual(failed.status_code, 401)
+
+        logged_in = self.client.post(
+            "/login",
+            data={"username": "admin-user", "password": "admin-pass-123", "next": "/"},
+            follow_redirects=True,
+        )
+        self.assertEqual(logged_in.status_code, 200)
+        self.assertIn("xray-routing-panel", logged_in.get_data(as_text=True))
 
 
 if __name__ == "__main__":

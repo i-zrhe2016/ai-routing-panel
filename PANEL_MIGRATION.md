@@ -2,6 +2,9 @@
 
 本文档用于把当前这套 `xray-routing-panel` 从旧机器迁移到新机器。
 
+> 当前版本已去除 Nginx，入口端口由 Xray 直接监听。
+> 如果本文后续仍出现旧的 `nginx` / `stream-access.log` 说法，请优先参考当前 `docker-compose.yml`、`Dockerfile` 和 `app/state.py` 的实现。
+
 ## 迁移目标
 
 - 保留现有端口规则

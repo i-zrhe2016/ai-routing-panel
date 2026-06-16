@@ -34,6 +34,10 @@ def is_session_authenticated():
     return AUTH_ENABLED and session.get(AUTH_SESSION_KEY) == AUTH_SESSION_MARKER
 
 
+def clear_admin_session():
+    session.pop(AUTH_SESSION_KEY, None)
+
+
 def clear_tenant_session():
     session.pop(TENANT_SESSION_TOKEN_KEY, None)
     session.pop(TENANT_SESSION_MARKER_KEY, None)
@@ -59,6 +63,7 @@ def is_tenant_session_authenticated(port):
 
 
 def mark_tenant_session_authenticated(port):
+    clear_admin_session()
     clear_tenant_session()
     session[TENANT_SESSION_TOKEN_KEY] = str(port.get("tenant_token") or "")
     session[TENANT_SESSION_MARKER_KEY] = tenant_session_marker(port)

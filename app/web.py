@@ -104,15 +104,21 @@ def ensure_tenant_panel_auth():
 
     if session.get(TENANT_SESSION_TOKEN_KEY) and not is_tenant_session_authenticated(port):
         clear_tenant_session()
+    if AUTH_ENABLED and is_session_authenticated():
+        return None
     if is_tenant_session_authenticated(port):
         return None
 
     basic_credentials = extract_basic_credentials()
-    if basic_credentials and tenant_credentials_match(port, *basic_credentials):
-        mark_tenant_session_authenticated(port)
-        return None
+    if basic_credentials:
+        if AUTH_ENABLED and credentials_match(*basic_credentials):
+            mark_session_authenticated()
+            return None
+        if tenant_credentials_match(port, *basic_credentials):
+            mark_tenant_session_authenticated(port)
+            return None
 
-    return redirect(url_for("tenant_login", tenant_token=tenant_token), code=303)
+    return redirect(tenant_login_target(tenant_token), code=303)
 
 
 @app.template_filter("human_bytes")
@@ -129,7 +135,7 @@ def build_subscription_snapshot(ports):
         "server": subscription_profile["server"] if subscription_profile else "",
         "mode": "per-port",
         "tenant_count": len(ports),
-        "tenant_panel_path_example": "/tenant/<tenant_token>/login",
+        "tenant_panel_path_example": "/login?next=/tenant/<tenant_token>",
         "tenant_subscription_path_example": "/tenant-subscriptions/<subscription_token>/clash",
     }
     for port in ports:
@@ -148,7 +154,7 @@ def collect_dashboard_state(message="", level="info"):
         },
         "meta": {
             "panel_address": PANEL_PUBLIC_URL or f"{PANEL_HOST}:{PANEL_PORT}",
-            "nginx_running": state.nginx_running(),
+            "xray_running": state.xray_running(),
             "timezone_label": datetime.now().astimezone().strftime("%Z"),
             "probe_enabled": PROBE_ENABLED,
             "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
@@ -179,7 +185,7 @@ def build_tenant_dashboard_state(tenant_token, message="", level="info"):
             "timezone_label": datetime.now().astimezone().strftime("%Z"),
             "probe_enabled": PROBE_ENABLED,
             "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
-            "tenant_login_url": url_for("tenant_login", tenant_token=tenant_token),
+            "tenant_login_url": tenant_login_target(tenant_token),
             "tenant_logout_url": url_for("tenant_logout", tenant_token=tenant_token),
             "subscription_available": subscription_profile is not None,
             "subscription_error": subscription_error,
@@ -191,8 +197,8 @@ def build_tenant_dashboard_state(tenant_token, message="", level="info"):
 
 
 def build_dashboard_state(message="", level="info"):
-    state.sync_traffic_logs()
-    state.disable_auto_stopped_ports(reload_nginx=True)
+    state.sync_traffic_state()
+    state.disable_auto_stopped_ports(reload_xray=True)
     return collect_dashboard_state(message=message, level=level)
 
 
@@ -221,21 +227,49 @@ def request_payload():
     return {}
 
 
+def tenant_panel_target(tenant_token):
+    return url_for("tenant_panel", tenant_token=tenant_token)
+
+
+def tenant_login_target(tenant_token, **values):
+    query = {"next": tenant_panel_target(tenant_token)}
+    query.update(values)
+    return url_for("login", **query)
+
+
+def get_authenticated_tenant():
+    tenant_token = str(session.get(TENANT_SESSION_TOKEN_KEY) or "").strip()
+    if not tenant_token:
+        return None
+
+    port = state.get_port_by_tenant_token(tenant_token)
+    if port is None or not is_tenant_session_authenticated(port):
+        clear_tenant_session()
+        return None
+    return port
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if not AUTH_ENABLED:
-        return redirect(url_for("index"), code=303)
-
     next_target = normalize_next_target(request.values.get("next"), fallback=url_for("index"))
+    authenticated_tenant = get_authenticated_tenant()
+    if authenticated_tenant is not None:
+        return redirect(tenant_panel_target(authenticated_tenant["tenant_token"]), code=303)
     if is_session_authenticated():
         return redirect(next_target, code=303)
 
     if request.method == "POST":
+        state.sync_traffic_state()
+        state.disable_auto_stopped_ports(reload_xray=True)
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if credentials_match(username, password):
+        if AUTH_ENABLED and credentials_match(username, password):
             mark_session_authenticated()
             return redirect(next_target, code=303)
+        port = state.get_port_by_tenant_username(username)
+        if port is not None and tenant_credentials_match(port, username, password):
+            mark_tenant_session_authenticated(port)
+            return redirect(tenant_panel_target(port["tenant_token"]), code=303)
         return render_login_page(
             next_target=next_target,
             form_username=username,
@@ -249,8 +283,6 @@ def login():
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
-    if not AUTH_ENABLED:
-        return redirect(url_for("index"), code=303)
     return redirect(url_for("login", message="已退出登录。", level="info"), code=303)
 
 
@@ -270,13 +302,13 @@ def index():
 def probe_dashboard():
     if not PROBE_ENABLED:
         return redirect(url_for("index", message="探针检测已停用。", level="info"), code=303)
-    state.sync_traffic_logs()
+    state.sync_traffic_state()
     dashboard = state.get_probe_dashboard(request.args.get("range", "24h").strip())
     return render_template(
         "probe_dashboard.html",
         dashboard=dashboard,
         timezone_label=datetime.now().astimezone().strftime("%Z"),
-        nginx_running=state.nginx_running(),
+        xray_running=state.xray_running(),
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
         panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
@@ -286,41 +318,43 @@ def probe_dashboard():
 
 @app.route("/tenant/<tenant_token>/login", methods=["GET", "POST"])
 def tenant_login(tenant_token):
-    state.sync_traffic_logs()
-    state.disable_auto_stopped_ports(reload_nginx=True)
+    state.sync_traffic_state()
+    state.disable_auto_stopped_ports(reload_xray=True)
     port = state.get_port_by_tenant_token(tenant_token)
     if port is None:
         abort(404)
 
+    if request.method == "GET":
+        return redirect(tenant_login_target(tenant_token), code=303)
+
+    if is_session_authenticated():
+        return redirect(tenant_panel_target(tenant_token), code=303)
     if is_tenant_session_authenticated(port):
-        return redirect(url_for("tenant_panel", tenant_token=tenant_token), code=303)
+        return redirect(tenant_panel_target(tenant_token), code=303)
 
-    if request.method == "POST":
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
-        if tenant_credentials_match(port, username, password):
-            mark_tenant_session_authenticated(port)
-            return redirect(url_for("tenant_panel", tenant_token=tenant_token), code=303)
-        return render_tenant_login_page(
-            port,
-            form_username=username,
-            error_message="用户名或密码错误。",
-            status_code=401,
-        )
-
-    return render_tenant_login_page(port)
+    username = request.form.get("username", "")
+    password = request.form.get("password", "")
+    if tenant_credentials_match(port, username, password):
+        mark_tenant_session_authenticated(port)
+        return redirect(tenant_panel_target(tenant_token), code=303)
+    return render_tenant_login_page(
+        port,
+        form_username=username,
+        error_message="用户名或密码错误。",
+        status_code=401,
+    )
 
 
 @app.route("/tenant/<tenant_token>/logout", methods=["GET", "POST"])
 def tenant_logout(tenant_token):
     clear_tenant_session()
-    return redirect(url_for("tenant_login", tenant_token=tenant_token, message="已退出登录。", level="info"), code=303)
+    return redirect(tenant_login_target(tenant_token, message="已退出登录。", level="info"), code=303)
 
 
 @app.route("/tenant/<tenant_token>", methods=["GET"])
 def tenant_panel(tenant_token):
-    state.sync_traffic_logs()
-    state.disable_auto_stopped_ports(reload_nginx=True)
+    state.sync_traffic_state()
+    state.disable_auto_stopped_ports(reload_xray=True)
     dashboard = build_tenant_dashboard_state(
         tenant_token,
         message=request.args.get("message", "").strip(),
@@ -333,10 +367,10 @@ def tenant_panel(tenant_token):
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    state.sync_traffic_logs()
-    healthy = state.nginx_running()
+    state.sync_traffic_state()
+    healthy = state.xray_running()
     status_code = 200 if healthy else 500
-    return jsonify({"ok": healthy, "nginx_running": healthy}), status_code
+    return jsonify({"ok": healthy, "xray_running": healthy}), status_code
 
 
 @app.route("/api/dashboard", methods=["GET"])
@@ -355,7 +389,7 @@ def api_create_port():
     try:
         payload = state.validate_port_payload(request_payload())
         state.create_port(payload)
-        return json_success_response("端口已创建并写入 nginx。", status_code=201)
+        return json_success_response("端口已创建并写入 Xray。", status_code=201)
     except sqlite3.IntegrityError:
         return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
     except (ValidationError, RuntimeError) as exc:
@@ -512,7 +546,7 @@ def create_port():
     try:
         payload = state.validate_port_payload(request.form)
         state.create_port(payload)
-        return message_redirect("端口已创建并写入 nginx。", "success")
+        return message_redirect("端口已创建并写入 Xray。", "success")
     except sqlite3.IntegrityError:
         return message_redirect("监听端口已存在，请更换其他端口。", "error")
     except (ValidationError, RuntimeError) as exc:

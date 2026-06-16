@@ -35,12 +35,23 @@ def parse_bool_env(value, default=False):
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = Path(os.environ.get("DB_PATH", DATA_DIR / "panel.db"))
-NGINX_CONFIG_PATH = Path(os.environ.get("NGINX_CONFIG_PATH", "/etc/nginx/nginx.conf"))
-STREAMS_DIR = Path(os.environ.get("STREAMS_DIR", "/etc/nginx/streams-enabled"))
-GENERATED_STREAM_CONFIG = STREAMS_DIR / "ports.conf"
-STREAM_ACCESS_LOG = Path(os.environ.get("STREAM_ACCESS_LOG", "/var/log/nginx/stream-access.log"))
-NGINX_PID_PATH = Path(os.environ.get("NGINX_PID_PATH", "/var/run/nginx.pid"))
-XRAY_CLIENT_CONFIG_PATH = Path(os.environ.get("XRAY_CLIENT_CONFIG_PATH", "/xray-runtime/client-test.json"))
+XRAY_ENV_FILE_PATH = Path(os.environ.get("XRAY_ENV_FILE_PATH", BASE_DIR / "xray" / ".env"))
+XRAY_CONFIG_PATH = Path(os.environ.get("XRAY_CONFIG_PATH", BASE_DIR / "xray" / "runtime" / "config.json"))
+XRAY_PANEL_PORTS_PATH = Path(
+    os.environ.get("XRAY_PANEL_PORTS_PATH", BASE_DIR / "xray" / "runtime" / "panel-ports.json")
+)
+XRAY_ACCESS_LOG_PATH = Path(os.environ.get("XRAY_ACCESS_LOG_PATH", BASE_DIR / "xray" / "logs" / "access.log"))
+XRAY_API_SERVER = os.environ.get("XRAY_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
+XRAY_CONTAINER_NAME = os.environ.get("XRAY_CONTAINER_NAME", "xray-reality-local").strip()
+XRAY_DOCKER_BIN = os.environ.get("XRAY_DOCKER_BIN", "docker").strip() or "docker"
+XRAY_STATS_QUERY_TIMEOUT = parse_nonnegative_env_int(
+    os.environ.get("XRAY_STATS_QUERY_TIMEOUT", "5"),
+    "XRAY_STATS_QUERY_TIMEOUT",
+)
+XRAY_PROBE_HOST = os.environ.get("XRAY_PROBE_HOST", "127.0.0.1").strip() or "127.0.0.1"
+XRAY_CLIENT_CONFIG_PATH = Path(
+    os.environ.get("XRAY_CLIENT_CONFIG_PATH", BASE_DIR / "xray" / "runtime" / "client-test.json")
+)
 SUBSCRIPTION_NAME_PREFIX = os.environ.get("SUBSCRIPTION_NAME_PREFIX", "reality").strip() or "reality"
 
 PANEL_HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
@@ -53,21 +64,6 @@ PANEL_SECRET_KEY = os.environ.get("PANEL_SECRET_KEY", "").strip()
 DEFAULT_UPSTREAM_HOST = os.environ.get("DEFAULT_UPSTREAM_HOST", "127.0.0.1")
 DEFAULT_UPSTREAM_PORT = int(os.environ.get("DEFAULT_UPSTREAM_PORT", "443"))
 SEED_LISTEN_PORT = os.environ.get("SEED_LISTEN_PORT", "31098").strip()
-PROXY_CONNECT_TIMEOUT = os.environ.get("PROXY_CONNECT_TIMEOUT", "5s")
-PROXY_TIMEOUT = os.environ.get("PROXY_TIMEOUT", "600s")
-STREAM_LISTEN_BACKLOG = parse_nonnegative_env_int(
-    os.environ.get("STREAM_LISTEN_BACKLOG", "4096"),
-    "STREAM_LISTEN_BACKLOG",
-)
-STREAM_LISTEN_FASTOPEN = parse_nonnegative_env_int(
-    os.environ.get("STREAM_LISTEN_FASTOPEN", "256"),
-    "STREAM_LISTEN_FASTOPEN",
-)
-STREAM_LISTEN_SO_KEEPALIVE = os.environ.get("STREAM_LISTEN_SO_KEEPALIVE", "on").strip() or "on"
-STREAM_PROXY_SOCKET_KEEPALIVE = parse_bool_env(
-    os.environ.get("STREAM_PROXY_SOCKET_KEEPALIVE", "1"),
-    default=True,
-)
 MAINTENANCE_INTERVAL = int(os.environ.get("MAINTENANCE_INTERVAL", "10"))
 PROBE_ENABLED = os.environ.get("PROBE_ENABLED", "0").strip().lower() not in {"0", "false", "no", "off"}
 PROBE_INTERVAL = int(os.environ.get("PROBE_INTERVAL", "60"))
@@ -88,4 +84,3 @@ PROBE_DASHBOARD_RANGES = {
 }
 
 LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
-

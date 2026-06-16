@@ -1,7 +1,10 @@
+import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -11,25 +14,24 @@ from .config import (
     DB_PATH,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
-    GENERATED_STREAM_CONFIG,
     LOCAL_TZ,
     MAINTENANCE_INTERVAL,
-    NGINX_CONFIG_PATH,
-    NGINX_PID_PATH,
     PROBE_DASHBOARD_RANGES,
     PROBE_ENABLED,
     PROBE_INTERVAL,
     PROBE_TEST_LISTEN_PORT,
     PROBE_TIMEOUT,
-    PROXY_CONNECT_TIMEOUT,
-    PROXY_TIMEOUT,
     SEED_LISTEN_PORT,
-    STREAM_ACCESS_LOG,
-    STREAM_LISTEN_BACKLOG,
-    STREAM_LISTEN_FASTOPEN,
-    STREAM_LISTEN_SO_KEEPALIVE,
-    STREAM_PROXY_SOCKET_KEEPALIVE,
-    STREAMS_DIR,
+    XRAY_ACCESS_LOG_PATH,
+    XRAY_API_SERVER,
+    XRAY_CLIENT_CONFIG_PATH,
+    XRAY_CONFIG_PATH,
+    XRAY_CONTAINER_NAME,
+    XRAY_DOCKER_BIN,
+    XRAY_ENV_FILE_PATH,
+    XRAY_PANEL_PORTS_PATH,
+    XRAY_PROBE_HOST,
+    XRAY_STATS_QUERY_TIMEOUT,
 )
 from .errors import ValidationError
 from .helpers import (
@@ -50,14 +52,18 @@ from .helpers import (
     utc_now,
 )
 
+XRAY_ACCESS_LOG_LINE_RE = re.compile(
+    r"^(?P<seen_at>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?) .* \[(?P<tag>[^\]]+) >> [^\]]+\]$"
+)
+
 
 class PanelState:
     def __init__(self):
         self.write_lock = threading.Lock()
         self.stop_event = threading.Event()
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        STREAMS_DIR.mkdir(parents=True, exist_ok=True)
-        STREAM_ACCESS_LOG.parent.mkdir(parents=True, exist_ok=True)
+        XRAY_PANEL_PORTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        XRAY_ACCESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     def connect(self):
         conn = sqlite3.connect(DB_PATH)
@@ -330,10 +336,9 @@ class PanelState:
             self.ensure_port_tokens_in_tx(conn)
             self.ensure_port_credentials_in_tx(conn)
             conn.commit()
-        self.sync_traffic_logs()
-        self.disable_auto_stopped_ports(reload_nginx=False)
+        self.sync_traffic_state()
+        self.disable_auto_stopped_ports(reload_xray=False)
         self.write_current_config()
-        self.start_nginx()
 
     def get_state(self, conn, key, default=None):
         row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
@@ -351,106 +356,164 @@ class PanelState:
             (key, str(value)),
         )
 
-    def sync_traffic_logs(self):
-        if not STREAM_ACCESS_LOG.exists():
+    def sync_traffic_state(self):
+        with self.write_lock:
+            return self.sync_traffic_state_locked()
+
+    def sync_traffic_state_locked(self):
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            log_updates = self.sync_xray_access_log_in_tx(conn)
+            byte_updates = self.sync_xray_traffic_stats_in_tx(conn)
+            conn.commit()
+            return {
+                "connection_updates": log_updates,
+                "byte_updates": byte_updates,
+            }
+
+    def sync_xray_access_log_in_tx(self, conn):
+        if not XRAY_ACCESS_LOG_PATH.exists():
             return 0
 
-        with self.write_lock:
-            with self.connect() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                stat = STREAM_ACCESS_LOG.stat()
-                current_inode = str(stat.st_ino)
-                current_offset = int(self.get_state(conn, "stream_log_offset", "0"))
-                recorded_inode = self.get_state(conn, "stream_log_inode", "")
+        stat = XRAY_ACCESS_LOG_PATH.stat()
+        current_inode = str(stat.st_ino)
+        current_offset = int(self.get_state(conn, "xray_access_log_offset", "0"))
+        recorded_inode = self.get_state(conn, "xray_access_log_inode", "")
 
-                if recorded_inode != current_inode or stat.st_size < current_offset:
-                    current_offset = 0
+        if recorded_inode != current_inode or stat.st_size < current_offset:
+            current_offset = 0
 
-                aggregates = {}
-                with STREAM_ACCESS_LOG.open("r", encoding="utf-8", errors="ignore") as handle:
-                    handle.seek(current_offset)
-                    for line in handle:
-                        parsed = self.parse_stream_log_line(line)
-                        if parsed is None:
-                            continue
-                        listen_port, bytes_sent, bytes_received, stat_date, seen_at = parsed
-                        item = aggregates.setdefault(
-                            (listen_port, stat_date),
-                            {
-                                "connections": 0,
-                                "bytes_sent": 0,
-                                "bytes_received": 0,
-                                "last_seen": seen_at,
-                            },
-                        )
-                        item["connections"] += 1
-                        item["bytes_sent"] += bytes_sent
-                        item["bytes_received"] += bytes_received
-                        if seen_at > item["last_seen"]:
-                            item["last_seen"] = seen_at
-                    new_offset = handle.tell()
+        aggregates = {}
+        with XRAY_ACCESS_LOG_PATH.open("r", encoding="utf-8", errors="ignore") as handle:
+            handle.seek(current_offset)
+            for line in handle:
+                parsed = self.parse_xray_access_log_line(line)
+                if parsed is None:
+                    continue
+                listen_port, stat_date, seen_at = parsed
+                item = aggregates.setdefault(
+                    (listen_port, stat_date),
+                    {
+                        "connections": 0,
+                        "last_seen": seen_at,
+                    },
+                )
+                item["connections"] += 1
+                if seen_at > item["last_seen"]:
+                    item["last_seen"] = seen_at
+            new_offset = handle.tell()
 
-                for (listen_port, stat_date), item in aggregates.items():
-                    conn.execute(
-                        """
-                        INSERT INTO traffic_totals (
-                            listen_port, total_connections, total_bytes_sent, total_bytes_received, last_seen
-                        ) VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT(listen_port) DO UPDATE SET
-                            total_connections = total_connections + excluded.total_connections,
-                            total_bytes_sent = total_bytes_sent + excluded.total_bytes_sent,
-                            total_bytes_received = total_bytes_received + excluded.total_bytes_received,
-                            last_seen = CASE
-                                WHEN traffic_totals.last_seen IS NULL OR traffic_totals.last_seen < excluded.last_seen
-                                THEN excluded.last_seen
-                                ELSE traffic_totals.last_seen
-                            END
-                        """,
-                        (
-                            listen_port,
-                            item["connections"],
-                            item["bytes_sent"],
-                            item["bytes_received"],
-                            item["last_seen"],
-                        ),
-                    )
-                    conn.execute(
-                        """
-                        INSERT INTO traffic_daily (
-                            listen_port, stat_date, total_connections, total_bytes_sent, total_bytes_received
-                        ) VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT(listen_port, stat_date) DO UPDATE SET
-                            total_connections = total_connections + excluded.total_connections,
-                            total_bytes_sent = total_bytes_sent + excluded.total_bytes_sent,
-                            total_bytes_received = total_bytes_received + excluded.total_bytes_received
-                        """,
-                        (
-                            listen_port,
-                            stat_date,
-                            item["connections"],
-                            item["bytes_sent"],
-                            item["bytes_received"],
-                        ),
-                    )
+        for (listen_port, stat_date), item in aggregates.items():
+            conn.execute(
+                """
+                INSERT INTO traffic_totals (
+                    listen_port, total_connections, total_bytes_sent, total_bytes_received, last_seen
+                ) VALUES (?, ?, 0, 0, ?)
+                ON CONFLICT(listen_port) DO UPDATE SET
+                    total_connections = total_connections + excluded.total_connections,
+                    last_seen = CASE
+                        WHEN traffic_totals.last_seen IS NULL OR traffic_totals.last_seen < excluded.last_seen
+                        THEN excluded.last_seen
+                        ELSE traffic_totals.last_seen
+                    END
+                """,
+                (
+                    listen_port,
+                    item["connections"],
+                    item["last_seen"],
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO traffic_daily (
+                    listen_port, stat_date, total_connections, total_bytes_sent, total_bytes_received
+                ) VALUES (?, ?, ?, 0, 0)
+                ON CONFLICT(listen_port, stat_date) DO UPDATE SET
+                    total_connections = total_connections + excluded.total_connections
+                """,
+                (
+                    listen_port,
+                    stat_date,
+                    item["connections"],
+                ),
+            )
 
-                self.set_state(conn, "stream_log_inode", current_inode)
-                self.set_state(conn, "stream_log_offset", str(new_offset))
-                conn.commit()
-                return len(aggregates)
+        self.set_state(conn, "xray_access_log_inode", current_inode)
+        self.set_state(conn, "xray_access_log_offset", str(new_offset))
+        return len(aggregates)
 
-    def parse_stream_log_line(self, line):
-        parts = line.strip().split("\t")
-        if len(parts) < 4:
+    def parse_xray_access_log_line(self, line):
+        match = XRAY_ACCESS_LOG_LINE_RE.match(line.strip())
+        if match is None:
             return None
+
+        tag = str(match.group("tag") or "").strip()
+        if not tag.startswith("panel-"):
+            return None
+
         try:
-            seen_at = datetime.fromisoformat(parts[0]).astimezone(timezone.utc).isoformat(timespec="seconds")
-            listen_port = int(parts[1])
-            bytes_sent = int(parts[2])
-            bytes_received = int(parts[3])
-        except (ValueError, IndexError):
+            listen_port = int(tag.removeprefix("panel-"))
+        except ValueError:
             return None
+
+        timestamp_text = match.group("seen_at")
+        timestamp_format = "%Y/%m/%d %H:%M:%S.%f" if "." in timestamp_text else "%Y/%m/%d %H:%M:%S"
+        try:
+            seen_local = datetime.strptime(timestamp_text, timestamp_format).replace(tzinfo=LOCAL_TZ)
+        except ValueError:
+            return None
+        seen_at = seen_local.astimezone(timezone.utc).isoformat(timespec="seconds")
         stat_date = seen_at[:10]
-        return listen_port, bytes_sent, bytes_received, stat_date, seen_at
+        return listen_port, stat_date, seen_at
+
+    def sync_xray_traffic_stats_in_tx(self, conn):
+        stats = self.read_xray_traffic_stats()
+        if not stats:
+            return 0
+
+        now_text = utc_iso_now()
+        stat_date = now_text[:10]
+        for listen_port, item in stats.items():
+            last_seen = now_text if item["bytes_sent"] or item["bytes_received"] else None
+            conn.execute(
+                """
+                INSERT INTO traffic_totals (
+                    listen_port, total_connections, total_bytes_sent, total_bytes_received, last_seen
+                ) VALUES (?, 0, ?, ?, ?)
+                ON CONFLICT(listen_port) DO UPDATE SET
+                    total_bytes_sent = total_bytes_sent + excluded.total_bytes_sent,
+                    total_bytes_received = total_bytes_received + excluded.total_bytes_received,
+                    last_seen = CASE
+                        WHEN excluded.last_seen IS NULL THEN traffic_totals.last_seen
+                        WHEN traffic_totals.last_seen IS NULL OR traffic_totals.last_seen < excluded.last_seen
+                        THEN excluded.last_seen
+                        ELSE traffic_totals.last_seen
+                    END
+                """,
+                (
+                    listen_port,
+                    item["bytes_sent"],
+                    item["bytes_received"],
+                    last_seen,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO traffic_daily (
+                    listen_port, stat_date, total_connections, total_bytes_sent, total_bytes_received
+                ) VALUES (?, ?, 0, ?, ?)
+                ON CONFLICT(listen_port, stat_date) DO UPDATE SET
+                    total_bytes_sent = total_bytes_sent + excluded.total_bytes_sent,
+                    total_bytes_received = total_bytes_received + excluded.total_bytes_received
+                """,
+                (
+                    listen_port,
+                    stat_date,
+                    item["bytes_sent"],
+                    item["bytes_received"],
+                ),
+            )
+        return len(stats)
 
     def query_ports(self):
         today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
@@ -494,10 +557,10 @@ class PanelState:
         if item["probe_is_reachable"] is not None:
             if int(item["probe_is_reachable"]):
                 item["probe_status"] = "healthy"
-                item["probe_status_label"] = "后端可达"
+                item["probe_status_label"] = "端口可达"
             else:
                 item["probe_status"] = "unhealthy"
-                item["probe_status_label"] = "后端不可达"
+                item["probe_status_label"] = "端口不可达"
         item["traffic_usage_bytes"] = int(item["total_bytes_sent"]) + int(item["total_bytes_received"])
         item["traffic_limit_display"] = (
             human_bytes(item["traffic_limit_bytes"]) if item["traffic_limit_bytes"] is not None else "无限制"
@@ -698,8 +761,8 @@ class PanelState:
 
         self.apply_mutation(operation)
 
-    def disable_expired_ports(self, reload_nginx=True):
-        return self.disable_auto_stopped_ports(reload_nginx=reload_nginx)
+    def disable_expired_ports(self, reload_xray=True):
+        return self.disable_auto_stopped_ports(reload_xray=reload_xray)
 
     def run_upstream_probes(self):
         if not PROBE_ENABLED:
@@ -708,7 +771,7 @@ class PanelState:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT listen_port, upstream_host, upstream_port
+                SELECT listen_port
                 FROM ports
                 ORDER BY listen_port ASC
                 """
@@ -721,7 +784,7 @@ class PanelState:
             failure_reason = ""
             try:
                 with socket.create_connection(
-                    (row["upstream_host"], int(row["upstream_port"])),
+                    (XRAY_PROBE_HOST, int(row["listen_port"])),
                     timeout=PROBE_TIMEOUT,
                 ):
                     reachable = 1
@@ -861,7 +924,7 @@ class PanelState:
         current_status_label = "未检测"
         if filtered_rows:
             current_status = "healthy" if filtered_rows[0]["is_reachable"] else "unhealthy"
-            current_status_label = "后端可达" if filtered_rows[0]["is_reachable"] else "后端不可达"
+            current_status_label = "端口可达" if filtered_rows[0]["is_reachable"] else "端口不可达"
 
         return {
             "test_port": {
@@ -897,25 +960,26 @@ class PanelState:
             for key, config in PROBE_DASHBOARD_RANGES.items()
         ]
 
-    def disable_auto_stopped_ports(self, reload_nginx=True):
+    def disable_auto_stopped_ports(self, reload_xray=True):
         with self.write_lock:
             with self.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 changed = self.disable_auto_stopped_ports_in_tx(conn)
                 if changed:
-                    self.persist_and_reload(conn, reload_nginx=reload_nginx)
+                    self.persist_and_reload(conn, reload_xray=reload_xray)
                 else:
                     conn.commit()
                 return changed
 
     def apply_mutation(self, operation):
         with self.write_lock:
+            self.sync_traffic_state_locked()
             with self.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     result = operation(conn)
                     self.disable_auto_stopped_ports_in_tx(conn)
-                    self.persist_and_reload(conn, reload_nginx=True)
+                    self.persist_and_reload(conn, reload_xray=True)
                     return result
                 except Exception:
                     conn.rollback()
@@ -1041,6 +1105,37 @@ class PanelState:
             return None
         return self.serialize_port_row(row)
 
+    def get_port_by_tenant_username(self, tenant_username):
+        today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    p.*,
+                    COALESCE(t.total_connections, 0) AS total_connections,
+                    COALESCE(t.total_bytes_sent, 0) AS total_bytes_sent,
+                    COALESCE(t.total_bytes_received, 0) AS total_bytes_received,
+                    t.last_seen AS last_seen,
+                    pr.is_reachable AS probe_is_reachable,
+                    pr.checked_at AS probe_checked_at,
+                    pr.failure_reason AS probe_failure_reason,
+                    COALESCE(d.total_connections, 0) AS today_connections,
+                    COALESCE(d.total_bytes_sent, 0) AS today_bytes_sent,
+                    COALESCE(d.total_bytes_received, 0) AS today_bytes_received
+                FROM ports p
+                LEFT JOIN traffic_totals t ON t.listen_port = p.listen_port
+                LEFT JOIN upstream_probes pr ON pr.listen_port = p.listen_port
+                LEFT JOIN traffic_daily d ON d.listen_port = p.listen_port AND d.stat_date = ?
+                WHERE p.tenant_username = ?
+                LIMIT 1
+                """,
+                (today, str(tenant_username or "").strip()),
+            ).fetchone()
+
+        if row is None:
+            return None
+        return self.serialize_port_row(row)
+
     def get_port_subscription_record_by_token(self, subscription_token):
         with self.connect() as conn:
             row = conn.execute(
@@ -1077,13 +1172,6 @@ class PanelState:
         item["status_label"] = status["label"]
         return item
 
-    def mark_stream_log_consumed(self, conn):
-        if not STREAM_ACCESS_LOG.exists():
-            return
-        stat = STREAM_ACCESS_LOG.stat()
-        self.set_state(conn, "stream_log_inode", str(stat.st_ino))
-        self.set_state(conn, "stream_log_offset", str(stat.st_size))
-
     def reset_port_traffic(self, port_id):
         def operation(conn):
             row = conn.execute(
@@ -1105,7 +1193,6 @@ class PanelState:
             if row is None:
                 raise ValidationError("端口记录不存在。")
 
-            self.mark_stream_log_consumed(conn)
             conn.execute(
                 """
                 UPDATE traffic_totals
@@ -1174,29 +1261,33 @@ class PanelState:
                 changed += 1
         return changed + cleaned
 
-    def persist_and_reload(self, conn, reload_nginx):
-        previous_config = GENERATED_STREAM_CONFIG.read_text(encoding="utf-8") if GENERATED_STREAM_CONFIG.exists() else None
-        config_text = self.render_stream_config(conn)
-        GENERATED_STREAM_CONFIG.write_text(config_text, encoding="utf-8")
+    def persist_and_reload(self, conn, reload_xray):
+        previous_panel_ports = XRAY_PANEL_PORTS_PATH.read_text(encoding="utf-8") if XRAY_PANEL_PORTS_PATH.exists() else None
+        previous_config = XRAY_CONFIG_PATH.read_text(encoding="utf-8") if XRAY_CONFIG_PATH.exists() else None
+        panel_ports_payload = self.render_panel_ports_payload(conn)
+        self.write_json_file(XRAY_PANEL_PORTS_PATH, panel_ports_payload)
         try:
-            self.nginx_config_test()
-            if reload_nginx and self.nginx_running():
-                self.nginx_reload()
+            self.render_xray_config()
+            self.xray_config_test()
+            if reload_xray:
+                self.xray_restart()
         except Exception:
-            if previous_config is None:
-                GENERATED_STREAM_CONFIG.unlink(missing_ok=True)
+            if previous_panel_ports is None:
+                XRAY_PANEL_PORTS_PATH.unlink(missing_ok=True)
             else:
-                GENERATED_STREAM_CONFIG.write_text(previous_config, encoding="utf-8")
+                XRAY_PANEL_PORTS_PATH.write_text(previous_panel_ports, encoding="utf-8")
+            if previous_config is None:
+                XRAY_CONFIG_PATH.unlink(missing_ok=True)
+            else:
+                XRAY_CONFIG_PATH.write_text(previous_config, encoding="utf-8")
             raise
         conn.commit()
 
-    def render_stream_config(self, conn):
+    def render_panel_ports_payload(self, conn):
         rows = conn.execute(
             """
             SELECT
-                p.listen_port,
-                p.upstream_host,
-                p.upstream_port
+                p.listen_port
             FROM ports
             AS p
             LEFT JOIN traffic_totals t ON t.listen_port = p.listen_port
@@ -1210,70 +1301,142 @@ class PanelState:
             """,
             (utc_iso_now(),),
         ).fetchall()
-        blocks = [
-            "# Generated by xray-routing-panel.",
-            "# Do not edit this file manually.",
-            "",
-        ]
-        for row in rows:
-            listen_options = [str(row["listen_port"]), "reuseport"]
-            if STREAM_LISTEN_BACKLOG > 0:
-                listen_options.append(f"backlog={STREAM_LISTEN_BACKLOG}")
-            if STREAM_LISTEN_FASTOPEN > 0:
-                listen_options.append(f"fastopen={STREAM_LISTEN_FASTOPEN}")
-            if STREAM_LISTEN_SO_KEEPALIVE:
-                listen_options.append(f"so_keepalive={STREAM_LISTEN_SO_KEEPALIVE}")
-            blocks.extend(
-                [
-                    "server {",
-                    f"    listen {' '.join(listen_options)};",
-                    f"    proxy_connect_timeout {PROXY_CONNECT_TIMEOUT};",
-                    f"    proxy_timeout {PROXY_TIMEOUT};",
-                    "    proxy_socket_keepalive on;" if STREAM_PROXY_SOCKET_KEEPALIVE else "",
-                    f"    proxy_pass {row['upstream_host']}:{row['upstream_port']};",
-                    "}",
-                    "",
-                ]
-            )
-        return "\n".join(line for line in blocks if line).strip() + "\n"
+        return {
+            "ports": [int(row["listen_port"]) for row in rows],
+        }
 
     def write_current_config(self):
         with self.connect() as conn:
-            GENERATED_STREAM_CONFIG.write_text(self.render_stream_config(conn), encoding="utf-8")
-        self.nginx_config_test()
+            self.write_json_file(XRAY_PANEL_PORTS_PATH, self.render_panel_ports_payload(conn))
+        self.render_xray_config()
+        self.xray_config_test()
 
-    def nginx_config_test(self):
-        self.run_command(["nginx", "-c", str(NGINX_CONFIG_PATH), "-t"], "nginx 配置校验失败")
+    def write_json_file(self, path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
-    def start_nginx(self):
-        self.run_command(["nginx", "-c", str(NGINX_CONFIG_PATH)], "nginx 启动失败")
+    def render_xray_config(self):
+        share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
+        self.run_command(
+            [
+                sys.executable,
+                "-m",
+                "app.xray.render_config",
+                "--env-file",
+                str(XRAY_ENV_FILE_PATH),
+                "--config-out",
+                str(XRAY_CONFIG_PATH),
+                "--client-out",
+                str(XRAY_CLIENT_CONFIG_PATH),
+                "--share-out",
+                str(share_path),
+                "--panel-ports-file",
+                str(XRAY_PANEL_PORTS_PATH),
+            ],
+            "Xray 配置渲染失败",
+        )
 
-    def nginx_reload(self):
-        self.run_command(["nginx", "-c", str(NGINX_CONFIG_PATH), "-s", "reload"], "nginx 重载失败")
-
-    def nginx_stop(self):
-        if not self.nginx_running():
+    def xray_config_test(self):
+        if not self.xray_container_exists() or not self.xray_running():
             return
+        self.run_command(
+            [
+                XRAY_DOCKER_BIN,
+                "exec",
+                XRAY_CONTAINER_NAME,
+                "/usr/local/bin/xray",
+                "run",
+                "-test",
+                "-config",
+                "/etc/xray/config.json",
+            ],
+            "Xray 配置校验失败",
+        )
+
+    def xray_restart(self):
+        if not self.xray_container_exists():
+            return
+        command = [XRAY_DOCKER_BIN, "start" if not self.xray_running() else "restart", XRAY_CONTAINER_NAME]
+        self.run_command(command, "Xray 重启失败")
+
+    def xray_container_exists(self):
+        if not XRAY_CONTAINER_NAME:
+            return False
+        completed = subprocess.run(
+            [XRAY_DOCKER_BIN, "container", "inspect", XRAY_CONTAINER_NAME],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return completed.returncode == 0
+
+    def xray_running(self):
+        if not self.xray_container_exists():
+            return False
+        completed = subprocess.run(
+            [XRAY_DOCKER_BIN, "inspect", "--format", "{{.State.Running}}", XRAY_CONTAINER_NAME],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return completed.returncode == 0 and completed.stdout.strip().lower() == "true"
+
+    def read_xray_traffic_stats(self):
+        if not self.xray_running():
+            return {}
         try:
-            self.run_command(["nginx", "-c", str(NGINX_CONFIG_PATH), "-s", "quit"], "nginx 停止失败")
-        except RuntimeError:
-            pass
+            completed = self.run_command(
+                [
+                    XRAY_DOCKER_BIN,
+                    "exec",
+                    XRAY_CONTAINER_NAME,
+                    "/usr/local/bin/xray",
+                    "api",
+                    "statsquery",
+                    f"--server={XRAY_API_SERVER}",
+                    "-timeout",
+                    str(XRAY_STATS_QUERY_TIMEOUT),
+                    "-pattern",
+                    "inbound>>>panel-",
+                    "-reset",
+                ],
+                "Xray 流量查询失败",
+            )
+            payload = json.loads(completed.stdout or "{}")
+        except (RuntimeError, json.JSONDecodeError):
+            return {}
 
-    def nginx_pid(self):
-        if not NGINX_PID_PATH.exists():
-            return None
-        try:
-            pid = int(NGINX_PID_PATH.read_text(encoding="utf-8").strip())
-            os.kill(pid, 0)
-            return pid
-        except (OSError, ValueError):
-            return None
+        counters = {}
+        for item in payload.get("stat", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            parts = name.split(">>>")
+            if len(parts) != 4 or parts[0] != "inbound" or parts[2] != "traffic":
+                continue
+            tag = parts[1]
+            if not tag.startswith("panel-"):
+                continue
+            try:
+                listen_port = int(tag.removeprefix("panel-"))
+                value = int(item.get("value", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            counter = counters.setdefault(
+                listen_port,
+                {
+                    "bytes_sent": 0,
+                    "bytes_received": 0,
+                },
+            )
+            if parts[3] == "uplink":
+                counter["bytes_received"] += value
+            elif parts[3] == "downlink":
+                counter["bytes_sent"] += value
+        return counters
 
-    def nginx_running(self):
-        return self.nginx_pid() is not None
-
-    def run_command(self, command, error_prefix):
-        completed = subprocess.run(command, capture_output=True, text=True)
+    def run_command(self, command, error_prefix, timeout=None):
+        completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)
         if completed.returncode == 0:
             return completed
         detail = completed.stderr.strip() or completed.stdout.strip() or "未知错误"
@@ -1283,8 +1446,8 @@ class PanelState:
         last_probe_at = 0.0
         while not self.stop_event.wait(MAINTENANCE_INTERVAL):
             try:
-                self.sync_traffic_logs()
-                self.disable_auto_stopped_ports(reload_nginx=True)
+                self.sync_traffic_state()
+                self.disable_auto_stopped_ports(reload_xray=True)
                 now_monotonic = time.monotonic()
                 if PROBE_ENABLED and now_monotonic - last_probe_at >= PROBE_INTERVAL:
                     self.run_upstream_probes()
@@ -1296,5 +1459,4 @@ class PanelState:
         if self.stop_event.is_set():
             return
         self.stop_event.set()
-        self.sync_traffic_logs()
-        self.nginx_stop()
+        self.sync_traffic_state()

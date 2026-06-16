@@ -17,9 +17,9 @@
         <div class="header-copy">
           <div class="header-kicker-row">
             <p class="eyebrow">ROUTING CONTROL</p>
-            <span class="status-pill" :class="meta.nginx_running ? 'good' : 'bad'">
+            <span class="status-pill" :class="meta.xray_running ? 'good' : 'bad'">
               <span class="status-pill-dot"></span>
-              <span v-text="meta.nginx_running ? 'Nginx 运行中' : 'Nginx 未运行'"></span>
+              <span v-text="meta.xray_running ? 'Xray 运行中' : 'Xray 未运行'"></span>
             </span>
           </div>
           <h1 class="page-title">xray-routing-panel</h1>
@@ -39,8 +39,8 @@
               <strong v-text="meta.timezone_label"></strong>
             </div>
             <div class="info-tile">
-              <span>默认后端</span>
-              <strong v-text="meta.default_upstream_host + ':' + meta.default_upstream_port"></strong>
+              <span>接入方式</span>
+              <strong>Xray Direct</strong>
             </div>
             <div class="info-tile">
               <span>总端口数</span>
@@ -72,9 +72,9 @@
 
       <section class="stats-grid">
         <article class="stat-card stat-card-emphasis">
-          <span>Nginx 状态</span>
-          <strong :class="meta.nginx_running ? 'ok' : 'bad'" v-text="meta.nginx_running ? '运行中' : '未运行'"></strong>
-          <small>当前入口转发服务健康状态</small>
+          <span>Xray 状态</span>
+          <strong :class="meta.xray_running ? 'ok' : 'bad'" v-text="meta.xray_running ? '运行中' : '未运行'"></strong>
+          <small>当前 Reality 入站服务健康状态</small>
         </article>
         <article class="stat-card">
           <span>运行中端口</span>
@@ -99,12 +99,12 @@
         <article class="stat-card">
           <span>累计入站流量</span>
           <strong v-text="humanBytes(summary.total_bytes_received)"></strong>
-          <small>客户端 -> 面板</small>
+          <small>客户端 -> Xray</small>
         </article>
         <article class="stat-card">
           <span>累计出站流量</span>
           <strong v-text="humanBytes(summary.total_bytes_sent)"></strong>
-          <small>面板 -> 后端</small>
+          <small>Xray -> 客户端</small>
         </article>
       </section>
 
@@ -114,7 +114,7 @@
             <div>
               <p class="section-eyebrow">CREATE</p>
               <h2>新增端口</h2>
-              <p>快速生成新的监听入口，默认直接转发到当前固定后端。</p>
+              <p>快速生成新的 Xray Reality 监听入口，共享当前节点参数。</p>
             </div>
           </div>
 
@@ -124,8 +124,8 @@
               <input v-model="createForm.listen_port" type="number" min="1" max="65535" required>
             </label>
             <div class="fixed-target">
-              <span>固定后端</span>
-              <strong v-text="meta.default_upstream_host + ':' + meta.default_upstream_port"></strong>
+              <span>接入方式</span>
+              <strong>Xray Direct</strong>
             </div>
             <label>
               <span>到期时间（<span v-text="meta.timezone_label"></span>）</span>
@@ -220,7 +220,7 @@
                 <tr>
                   <th>端口 / 备注</th>
                   <th>状态</th>
-                  <th>固定后端</th>
+                  <th>接入方式</th>
                   <th>累计流量</th>
                   <th>今日流量</th>
                   <th>连接数</th>
@@ -245,7 +245,7 @@
                   <td>
                     <span class="badge" :class="port.status" v-text="port.status_label"></span>
                   </td>
-                  <td class="table-muted" v-text="port.upstream_host + ':' + port.upstream_port"></td>
+                  <td class="table-muted">Xray 直连</td>
                   <td v-text="port.traffic_used_display"></td>
                   <td v-text="humanBytes(trafficToday(port))"></td>
                   <td v-text="port.total_connections"></td>
@@ -277,7 +277,7 @@
                 <template v-if="selectedPort.note">
                   <span v-text="selectedPort.note + ' · '"></span>
                 </template>
-                <span v-text="'租户固定转发到 ' + selectedPort.upstream_host + ':' + selectedPort.upstream_port"></span>
+                <span>租户直接接入当前 Xray Reality 入站</span>
               </p>
             </div>
 
@@ -329,7 +329,7 @@
                   <strong v-text="selectedPort.probe_checked_at_display"></strong>
                 </div>
                 <div v-if="meta.probe_enabled">
-                  <span>后端状态</span>
+                  <span>端口状态</span>
                   <strong :class="'probe-text ' + selectedPort.probe_status" v-text="selectedPort.probe_status_label"></strong>
                 </div>
               </div>
@@ -346,8 +346,8 @@
                   <input v-model="selectedPort.form.listen_port" type="number" min="1" max="65535" required>
                 </label>
                 <div class="fixed-target">
-                  <span>固定后端</span>
-                  <strong v-text="meta.default_upstream_host + ':' + meta.default_upstream_port"></strong>
+                  <span>接入方式</span>
+                  <strong>Xray Direct</strong>
                 </div>
                 <label>
                   <span>到期时间（<span v-text="meta.timezone_label"></span>）</span>

@@ -27,8 +27,8 @@
               <strong>{{ dashboard.port.listen_port }}</strong>
             </div>
             <div class="info-tile">
-              <span>固定后端</span>
-              <strong>{{ dashboard.port.upstream_host }}:{{ dashboard.port.upstream_port }}</strong>
+              <span>接入方式</span>
+              <strong>Xray Direct</strong>
             </div>
             <div class="info-tile">
               <span>到期时间</span>
@@ -115,7 +115,7 @@
               <strong>{{ dashboard.port.probe_checked_at_display }}</strong>
             </div>
             <div>
-              <span>后端状态</span>
+              <span>端口状态</span>
               <strong class="probe-text {{ dashboard.port.probe_status }}">{{ dashboard.port.probe_status_label }}</strong>
             </div>
             {% endif %}
