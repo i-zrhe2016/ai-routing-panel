@@ -240,6 +240,31 @@ PY
 docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
 ```
 
+如果你想把“未分类域名”先做 Google 搜索，再交给 OpenRouter 的 `openai/gpt-5-nano` 按搜索结果判断，可以单独启动仓库自带的 MCP server：
+
+```bash
+python -m app.xray.google_search_mcp
+```
+
+它默认读取：
+
+- `reports/hourly-domains/latest.json`
+- `runtime/ai-domain-decisions.json`
+- 启动时还会自动读取仓库根目录 `.env` 和当前目录 `.env`
+
+并提供：
+
+- `collect_uncategorized_domains`
+- `search_domains_with_google`
+- `classify_domains_with_google`
+
+Google 搜索层直接抓取 Google 搜索结果页，不需要 Google Search API key；只需要配置 OpenRouter：
+
+```bash
+export OPENROUTER_API_KEY=...
+export OPENROUTER_MODEL=openai/gpt-5-nano
+```
+
 手动验证 `chatgpt.com` 是否命中 `ai_proxy`：
 
 ```bash

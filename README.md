@@ -25,6 +25,65 @@
 - 输出按小时归档的文本和 JSON 报告，便于审计最近一小时命中了哪些 AI 域名
 - 仍然保留面板原有的端口管理、订阅链接、流量统计、到期停用和备份能力
 
+## Google Search + OpenRouter MCP
+
+仓库现在额外带了一套 MCP server，用于把“尚未分类的域名”先做 Google 搜索，再把每个域名的搜索结果发给 OpenRouter 的 `openai/gpt-5-nano` 做 `ai` / `not_ai` / `unknown` 判断。
+
+这个 MCP 当前不使用 Google Search API。
+
+- 搜索来源：直接请求 Google 搜索结果页并解析标题、链接、摘要
+- 分类来源：OpenRouter `openai/gpt-5-nano`
+- 必需凭据：只需要 `OPENROUTER_API_KEY`
+
+入口：
+
+```bash
+python -m app.xray.google_search_mcp
+```
+
+或：
+
+```bash
+python scripts/google_search_mcp.py
+```
+
+MCP 暴露 3 个 tools：
+
+- `collect_uncategorized_domains`
+- `search_domains_with_google`
+- `classify_domains_with_google`
+
+默认会从这些文件取数据：
+
+- 报告：`app/xray/reports/hourly-domains/latest.json`
+- 分类状态：`app/xray/runtime/ai-domain-decisions.json`
+- 环境变量：启动时会自动读取根目录 `.env` 和 `app/xray/.env`
+
+运行前至少需要：
+
+- `OPENROUTER_API_KEY`
+
+可选但推荐：
+
+- `GOOGLE_SEARCH_USER_AGENT`
+- `GOOGLE_SEARCH_NUM_RESULTS=5`
+- `GOOGLE_SEARCH_QUERY_TEMPLATE='"{domain}"'`
+
+常用环境变量：
+
+```bash
+export GOOGLE_SEARCH_USER_AGENT='Mozilla/5.0 ...'
+export GOOGLE_SEARCH_NUM_RESULTS=5
+export GOOGLE_SEARCH_QUERY_TEMPLATE='"{domain}"'
+export OPENROUTER_API_KEY=...
+export OPENROUTER_MODEL=openai/gpt-5-nano
+```
+
+注意：
+
+- 启动时会自动读取根目录 `.env` 和 `app/xray/.env`
+- 因为搜索层直接抓 Google HTML，偶发可能遇到限流、验证码页或页面结构变化
+
 ## 适合场景
 
 - 你有一个固定入口端口，希望把 AI 相关目标站点自动切到专用上游
