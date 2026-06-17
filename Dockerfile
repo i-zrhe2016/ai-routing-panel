@@ -1,3 +1,5 @@
+FROM ghcr.io/xtls/xray-core:26.5.3 AS xray-core
+
 FROM debian:bookworm-slim
 
 RUN apt-get update \
@@ -12,6 +14,7 @@ RUN apt-get update \
 
 COPY app /app
 COPY scripts /app/scripts
+COPY --from=xray-core /usr/local/bin/xray /usr/local/bin/xray
 
 ENV DATA_DIR=/data \
     DB_PATH=/data/panel.db \

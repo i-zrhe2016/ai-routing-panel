@@ -1,39 +1,311 @@
 # xray-routing-panel
 
-`xray-routing-panel` 当前更适合被理解成一套“AI routing 控制面 + Xray REALITY 数据面”的组合部署，而不只是一个 TCP 端口面板。
+`xray-routing-panel` 是一套以 `Xray REALITY` 为数据面的控制面板，当前实现重点是：
 
-> 当前版本已移除 Nginx。面板会直接生成 Xray 多端口 `inbound`，并通过 Xray API + `access.log` 维护流量统计和健康状态。
-> 如果下文仍出现旧的 `nginx` / `stream` 描述，请以 `docker-compose.yml`、`Dockerfile` 和当前代码实现为准。
+- 用 Web 面板维护入口端口、到期时间、流量上限、租户凭据和订阅链接
+- 直接生成 Xray 多端口 `inbounds`，不再依赖 `nginx`
+- 通过 Xray API 和 `access.log` 维护连接数、流量统计与健康状态
+- 按小时分析访问域名，自动生成 AI 分流规则
 
-这套仓库里的核心链路是：
+> 当前版本已经移除 `nginx`。如果你在仓库里还看到旧的 `stream-access.log`、历史备份文件名或旧文档残留，那些都属于历史遗留，不是当前运行链路的一部分。
 
-- `xray-routing-panel` 维护端口数据库，并把有效端口直接渲染成 Xray REALITY `inbounds`
-- `xray-reality` 负责实际代理连接和路由命中
-- `xray-ai-domain-manager` 按小时分析 Xray 访问日志，识别 AI 域名并生成动态路由片段
-- 命中的 AI 域名自动改走已探测可达的 AI 上游，默认首选 `upstream.example.com:27166`
-- 面板数据库 `data/panel.db` 同时保存端口规则、流量统计和 AI 域名聚合结果
+## 当前架构
 
-如果不启用 `xray` profile，它仍然可以单独作为轻量 TCP 转发面板使用；但仓库当前最有价值的部分，是这条基于真实访问日志做动态 AI 分流的链路。
+- `xray-routing-panel`
+  - Flask 面板和 JSON API
+  - 管理 `data/panel.db`
+  - 根据数据库中的有效端口生成 `app/xray/runtime/panel-ports.json`
+  - 调用 `python -m app.xray.render_config` 渲染 `app/xray/runtime/config.json`
+  - 在容器模式下校验并重启 `xray-reality`
+- `xray-reality`
+  - 实际承载 `VLESS + REALITY` 入口流量
+  - 默认监听 `0.0.0.0:443`
+  - 暴露 Xray API，默认 `127.0.0.1:10085`
+- `xray-ai-domain-manager`
+  - 定时分析 `app/xray/logs/access.log`
+  - 识别 AI 域名并生成 `dynamic-routing.json`
+  - 规则变化时重新渲染配置并重启 `xray-reality`
+- `xray-routing-panel-db-backup`
+  - 定时备份 `panel.db`
 
-## AI Routing 能做什么
+## 适合场景
 
-- 按真实访问域名把 AI 流量和普通流量分开处理
-- 优先使用本机 `codex` 分类未知域名，必要时回退到 OpenAI Responses API
-- 把 AI 域名分类结果缓存到 `runtime/ai-domain-decisions.json`
-- 把可直接注入 Xray 的动态规则写到 `runtime/dynamic-routing.json`
-- 在共享 `panel.db` 中维护 `ai_domains`、`ai_domain_observations`，方便面板和脚本复用
-- 输出按小时归档的文本和 JSON 报告，便于审计最近一小时命中了哪些 AI 域名
-- 仍然保留面板原有的端口管理、订阅链接、流量统计、到期停用和备份能力
+- 你需要一个可视化面板来管理 Xray 入口端口和租户订阅
+- 你希望基于真实访问日志持续收敛 AI 域名，而不是手工维护静态规则
+- 你希望 AI 相关流量自动改走专用上游，其余流量保持默认路由
+- 你需要按端口设置到期时间、流量上限和独立租户凭据
+
+## 运行模式
+
+### 1. 推荐：完整栈
+
+```bash
+python -m app.xray.render_config
+docker compose --profile xray up -d --build
+```
+
+会启动：
+
+- `xray-routing-panel`
+- `xray-routing-panel-db-backup`
+- `xray-reality`
+- `xray-ai-domain-manager`
+
+这是仓库当前的主路径，也是文档默认假设的部署方式。
+
+### 2. 只启动面板
+
+```bash
+docker compose up -d --build
+```
+
+只会启动：
+
+- `xray-routing-panel`
+- `xray-routing-panel-db-backup`
+
+这种模式下：
+
+- 面板、数据库、租户凭据、订阅地址和备份仍然可用
+- 面板仍会渲染 Xray 配置文件
+- 但如果没有额外运行中的 Xray 数据面，新增的端口不会实际承载代理流量
+- 默认 `GET /healthz` 仍要求 Xray 可用；如果你只想把它当管理 UI，可设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
+
+### 3. 外部 / 本地 Xray 模式
+
+如果你不想使用 `docker-compose.yml` 里的 `xray-reality` 容器，也可以让面板对接宿主机自己的 Xray：
+
+- 设置 `XRAY_LOCAL_BIN=/path/to/xray`
+- 设置 `XRAY_API_SERVER=127.0.0.1:10085`
+- 让你的本地 Xray 进程自行加载 `app/xray/runtime/config.json`
+
+注意：
+
+- 这种模式下，面板会渲染配置并校验 `xray run -test`
+- 但**不会自动重启**你自己的本地 Xray 进程
+- Xray 进程的启动、重载和守护需要你自己负责
+
+## 快速开始
+
+### 1. 前置条件
+
+- Linux 宿主机
+- 已安装 Docker 和 Docker Compose
+- 以下端口未被占用：
+  - `18080`，面板端口
+  - `443`，Xray 默认监听端口
+  - `31098`，默认初始化端口和探针观察端口
+- 如果你想启用自动域名分类，满足下面至少一项：
+  - 宿主机安装了 `codex` CLI，且 `codex login status` 可用
+  - 在 `app/xray/.env` 中配置可用的 OpenAI 兼容接口
+
+### 2. 生成并填写 Xray REALITY 参数
+
+```bash
+./app/xray/generate-secrets.sh
+cp app/xray/.env.example app/xray/.env
+```
+
+至少需要修改这些值：
+
+- `XRAY_PUBLIC_HOST`
+- `XRAY_CLIENT_UUID`
+- `XRAY_REALITY_PRIVATE_KEY`
+- `XRAY_REALITY_PUBLIC_KEY`
+- `XRAY_REALITY_SHORT_ID`
+- `XRAY_SERVER_NAME`
+- `XRAY_DEST`
+
+如果你希望客户端连接的是面板管理的入口端口，例如 `31098`：
+
+- 保持 `XRAY_LISTEN_PORT=443`
+- 设置 `XRAY_PUBLIC_PORT=31098`
+- 保持 `SEED_LISTEN_PORT=31098`，或者在面板中创建自己的入口端口
+
+### 3. 可选：设置面板公开地址和管理员认证
+
+```bash
+cp .env.example .env
+```
+
+根目录 `.env` 默认只提供最常用的覆盖项：
+
+- `PANEL_PUBLIC_URL`
+- `PANEL_USERNAME`
+- `PANEL_PASSWORD`
+- `PANEL_SECRET_KEY`
+
+### 4. 渲染配置并启动
+
+```bash
+python -m app.xray.render_config
+docker compose --profile xray up -d --build
+```
+
+默认访问地址：
+
+- 面板首页：`http://服务器IP:18080`
+- 探针监控页：`http://服务器IP:18080/probe-dashboard`
+- 健康检查：`http://服务器IP:18080/healthz`
+
+### 5. 验证是否正常
+
+```bash
+docker compose ps
+curl http://127.0.0.1:18080/healthz
+docker compose --profile xray logs -f xray-reality
+docker compose --profile xray logs -f xray-ai-domain-manager
+```
+
+如果你要立即执行一次 AI 域名分析：
+
+```bash
+docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
+```
+
+常用检查文件：
+
+- `app/xray/runtime/config.json`
+- `app/xray/runtime/client-test.json`
+- `app/xray/runtime/panel-ports.json`
+- `app/xray/runtime/dynamic-routing.json`
+- `app/xray/reports/hourly-domains/latest.txt`
+- `app/xray/reports/hourly-domains/latest.json`
+
+## 面板能管理什么
+
+当前首页支持这些核心操作：
+
+- 新建监听端口
+- 编辑备注、到期时间、流量上限
+- 启用 / 停用 / 删除端口
+- 为每个端口自动生成：
+  - `tenant_token`
+  - `subscription_token`
+  - `tenant_username`
+  - `tenant_password`
+- 生成每个端口独立的：
+  - `Clash` 订阅
+  - `V2Ray` 订阅
+  - `vless://` 直连分享链接
+- 重置租户面板地址、租户账号密码和订阅地址
+- 查看总流量、今日流量、连接数和最近探针结果
+
+补充说明：
+
+- 当前所有端口记录在启动时会被标准化为 `DEFAULT_UPSTREAM_HOST:DEFAULT_UPSTREAM_PORT`
+- 当前 UI / API 不提供“每个端口配置不同上游”的入口
+- 面板当前更像“Xray 入口端口控制面”，而不是通用反代编排器
+
+## 认证、租户和订阅路径
+
+管理员认证规则：
+
+- 未设置 `PANEL_USERNAME` / `PANEL_PASSWORD` 时，首页和 `/api/*` 默认无需登录
+- 只要两者任意一个被设置，首页、探针页和 `/api/*` 就需要管理员认证
+- Web 页面支持表单登录
+- API 同时支持 `Authorization: Basic ...`
+- `GET /healthz` 永远不要求登录
+
+租户相关路径：
+
+- 管理员登录页：`/login`
+- 租户登录页：`/tenant/<tenant_token>/login`
+- 租户面板：`/tenant/<tenant_token>`
+- 租户订阅：
+  - `/tenant-subscriptions/<subscription_token>`
+  - `/tenant-subscriptions/<subscription_token>/clash`
+  - `/tenant-subscriptions/<subscription_token>/v2ray`
+- 历史兼容全局订阅：
+  - `/<token>/<listen_port>`
+  - `/<token>/<listen_port>/clash`
+  - `/<token>/<listen_port>/v2ray`
+
+注意：
+
+- 每个端口都有独立租户用户名和密码
+- 管理员登录后可直接访问租户面板
+- 订阅内容依赖 `app/xray/runtime/client-test.json`
+- 如果还没执行 `python -m app.xray.render_config`，订阅和分享链接会显示不可用
+
+## 流量统计、配额和健康检查
+
+当前统计链路分成两部分：
+
+- 连接数来自 `app/xray/logs/access.log`
+  - 只统计带 `panel-<listen_port>` inbound tag 的访问日志
+- 字节流量来自 Xray API `statsquery`
+  - 查询模式是 `inbound>>>panel-`
+  - 每次读取后会执行 `-reset`
+
+因此：
+
+- `total_connections` 依赖访问日志增量同步
+- `total_bytes_sent` / `total_bytes_received` 依赖 Xray API 周期拉取
+- 流量上限判断使用：
+
+```text
+累计下行 + 累计上行
+```
+
+端口自动维护规则：
+
+- 到期端口会在维护循环中自动删除
+- 达到流量上限的端口会自动停用
+- “重置流量并启用”会清零累计流量与当日流量；连接数不会被清零
+
+健康检查：
+
+- 接口：`GET /healthz`
+- 返回体：`{"ok": <bool>, "xray_running": <bool>}`
+- 默认要求 Xray 正在运行；如需只检查面板进程本身，可设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
+
+## 探针监控
+
+当 `PROBE_ENABLED=1` 时，服务会周期性对 `XRAY_PROBE_HOST:<listen_port>` 做 TCP 连通性探测，并提供独立监控页：
+
+- 页面：`/probe-dashboard`
+- 时间范围：`1h`、`24h`、`7d`
+- 默认显示：
+  - 如果设置了 `PROBE_TEST_LISTEN_PORT`，固定显示该端口
+  - 否则自动选第一条已启用端口
+
+这个监控页只反映入口 TCP 可达性，不替代业务级探活。
+
+## AI Routing
+
+完整实现细节见 [app/xray/README.md](app/xray/README.md)。根目录 README 只保留当前主链路：
+
+1. `xray-reality` 把访问域名写入 `app/xray/logs/access.log`
+2. `xray-ai-domain-manager` 读取最近一小时日志
+3. 先应用内建 AI 域名规则
+4. 对未知域名优先调用本机 `codex`
+5. 如本机 `codex` 不可用，再回退到 OpenAI 兼容接口
+6. 生成并写回：
+   - `app/xray/runtime/ai-domain-decisions.json`
+   - `app/xray/runtime/dynamic-routing.json`
+   - `app/xray/reports/hourly-domains/latest.{txt,json}`
+   - `data/panel.db` 中的 `ai_domains`、`ai_domain_observations`
+7. 路由变化时重新渲染配置并重启 `xray-reality`
+
+常用命令：
+
+```bash
+docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
+docker compose --profile xray logs -f xray-ai-domain-manager
+cat app/xray/reports/hourly-domains/latest.txt
+```
+
+默认 compose 还依赖宿主机这些路径来运行 `codex` 分类：
+
+- `/root/.codex`
+- `/root/.nvm/versions/node`
+
+如果你的环境不是这两个路径，需要改 `docker-compose.yml` 里的挂载。
 
 ## Google Search + OpenRouter MCP
 
-仓库现在额外带了一套 MCP server，用于把“尚未分类的域名”先做 Google 搜索，再把每个域名的搜索结果发给 OpenRouter 的 `openai/gpt-5-nano` 做 `ai` / `not_ai` / `unknown` 判断。
-
-这个 MCP 当前不使用 Google Search API。
-
-- 搜索来源：直接请求 Google 搜索结果页并解析标题、链接、摘要
-- 分类来源：OpenRouter `openai/gpt-5-nano`
-- 必需凭据：只需要 `OPENROUTER_API_KEY`
+仓库附带了一个可选 MCP server，用于辅助“未分类域名”的人工 / 半自动归类。
 
 入口：
 
@@ -47,334 +319,41 @@ python -m app.xray.google_search_mcp
 python scripts/google_search_mcp.py
 ```
 
-MCP 暴露 3 个 tools：
+它当前是**独立工具**，不是主链路里的自动步骤。默认提供 3 个 tools：
 
 - `collect_uncategorized_domains`
 - `search_domains_with_google`
 - `classify_domains_with_google`
 
-默认会从这些文件取数据：
+特点：
 
-- 报告：`app/xray/reports/hourly-domains/latest.json`
-- 分类状态：`app/xray/runtime/ai-domain-decisions.json`
-- 环境变量：启动时会自动读取根目录 `.env` 和 `app/xray/.env`
+- Google 搜索结果直接抓取 HTML 页面，不依赖 Google Search API
+- 分类使用 OpenRouter 上的 `openai/gpt-5-nano`
+- 最低要求：`OPENROUTER_API_KEY`
 
-运行前至少需要：
-
-- `OPENROUTER_API_KEY`
-
-可选但推荐：
-
-- `GOOGLE_SEARCH_USER_AGENT`
-- `GOOGLE_SEARCH_NUM_RESULTS=5`
-- `GOOGLE_SEARCH_QUERY_TEMPLATE='"{domain}"'`
-
-常用环境变量：
-
-```bash
-export GOOGLE_SEARCH_USER_AGENT='Mozilla/5.0 ...'
-export GOOGLE_SEARCH_NUM_RESULTS=5
-export GOOGLE_SEARCH_QUERY_TEMPLATE='"{domain}"'
-export OPENROUTER_API_KEY=...
-export OPENROUTER_MODEL=openai/gpt-5-nano
-```
-
-注意：
-
-- 启动时会自动读取根目录 `.env` 和 `app/xray/.env`
-- 因为搜索层直接抓 Google HTML，偶发可能遇到限流、验证码页或页面结构变化
-
-## 适合场景
-
-- 你有一个固定入口端口，希望把 AI 相关目标站点自动切到专用上游
-- 你想根据真实访问日志持续收敛 AI 域名名单，而不是手工维护一长串规则
-- 你想优先依赖本机 Codex 做分类，只在需要时才使用 OpenAI API
-- 你仍然需要一个简单的 Web 面板来管理入口端口、订阅链接和流量上限
-
-## 适用边界
-
-- AI routing 只有在 `docker compose --profile xray ...` 启动后才会生效
-- 当前只处理 TCP 链路，不做 HTTP 反代，不做 UDP 分流
-- 面板现在直接管理 Xray `inbounds`；AI 分流仍发生在后面的 Xray 路由层
-- 域名分类是按窗口批处理，默认每 `3600` 秒统计最近 `3600` 秒访问，不是逐请求实时判定
-- 没有本机 `codex`，且也没有可用的 OpenAI 兼容分类接口时，只有内建已知 AI 域名会被自动识别，其他未知域名不会自动标成 AI
-
-## AI Routing 工作原理
-
-默认链路可以概括成：
-
-```text
-client
-  -> xray reality inbound
-  -> local xray-reality
-  -> access.log
-  -> xray-ai-domain-manager
-  -> codex / openai classify
-  -> dynamic-routing.json
-  -> AI domains => ai_proxy
-  -> other domains => default route
-```
-
-运行时主要步骤如下：
-
-1. 面板根据 `ports` 表生成 Xray 多端口 `inbound`，每个启用端口直接由 Xray 监听
-2. `xray-reality` 处理真实代理流量，并把目标域名写入 `app/xray/logs/access.log`
-3. `xray-ai-domain-manager` 读取最近一小时日志，先走内建强制 AI 路由名单和已知 AI 域名名单
-4. 对剩余未知域名，优先调用本机 `codex`；如果不可用，再回退到配置好的 OpenAI 兼容分类接口
-5. AI 域名结果写入：
-   - `app/xray/runtime/ai-domain-decisions.json`
-   - `app/xray/runtime/dynamic-routing.json`
-   - `app/xray/reports/hourly-domains/latest.{txt,json}`
-   - `data/panel.db` 中的 `ai_domains`、`ai_domain_observations`
-6. 动态路由片段变化后，管理器会重新渲染 Xray 配置，并在需要时重启 `xray-reality`
-
-## 快速开始
-
-推荐直接使用仓库根目录的 `docker-compose.yml` 启动完整 AI routing 栈。
-
-### 1. 启动前准备
-
-- Linux 宿主机
-- 已安装 Docker 和 Docker Compose
-- 宿主机上确认这些端口没有冲突：
-  - `443`，Xray 默认监听端口
-  - `18080`，面板端口
-  - `31098`，仓库当前默认入口端口和探针观察端口
-- 如果你想让未知域名自动分类，至少满足下面一项：
-  - 宿主机已安装 `codex` CLI，且 `codex login status` 可用
-  - 配置可用的 OpenAI 兼容接口
-
-### 2. 准备 Xray REALITY 参数
-
-```bash
-./app/xray/generate-secrets.sh
-cp app/xray/.env.example app/xray/.env
-```
-
-至少需要修改：
-
-- `XRAY_PUBLIC_HOST`
-- `XRAY_CLIENT_UUID`
-- `XRAY_REALITY_PRIVATE_KEY`
-- `XRAY_REALITY_PUBLIC_KEY`
-- `XRAY_REALITY_SHORT_ID`
-- `XRAY_SERVER_NAME`
-- `XRAY_DEST`
-
-如果你希望使用面板管理的入口端口接入，例如公网访问 `31098`：
-
-- 保持 `SEED_LISTEN_PORT=31098`，或在面板里新增需要的监听端口
-- `XRAY_LISTEN_PORT` 只作为“未启用面板端口文件时”的单端口回退值
-
-### 3. 渲染配置并启动完整栈
-
-```bash
-python -m app.xray.render_config
-docker compose --profile xray up -d --build
-```
-
-这条命令会启动：
-
-- `xray-routing-panel`
-- `xray-routing-panel-db-backup`
-- `xray-reality`
-- `xray-ai-domain-manager`
-
-默认配置下：
-
-- 面板地址：`http://服务器IP:18080`
-- 探针监控页：`http://服务器IP:18080/probe-dashboard`
-- 健康检查：`http://服务器IP:18080/healthz`
-- Xray 默认回退监听：`0.0.0.0:443`
-- 面板会把已启用端口直接写入 Xray，例如默认初始化端口 `31098`
-- 数据库持久化到 `./data`
-- 面板日志持久化到 `./logs`
-- Xray 日志持久化到 `./app/xray/logs`
-
-如果你要固定页面展示地址或启用登录认证，先复制根目录模板：
-
-```bash
-cp .env.example .env
-```
-
-然后按需填写 `PANEL_PUBLIC_URL`、`PANEL_USERNAME`、`PANEL_PASSWORD`、`PANEL_SECRET_KEY`。
-
-补充说明：
-
-- 根目录 `.env` 只用于覆盖面板和 `docker compose` 的运行参数，不负责 REALITY 密钥和 Xray 路由参数
-- `app/xray/.env` 才是 `xray-reality` 和 `xray-ai-domain-manager` 的主要配置来源
-- 首次启动时如果 `data/panel.db` 不存在，程序会自动建表
-- 如果数据库里还没有任何端口记录，会按 `SEED_LISTEN_PORT` 自动创建一条初始监听端口，默认是 `31098`
-- 只有在 `app/xray/runtime/client-test.json` 已生成并成功挂载后，页面里的 `Clash / V2Ray / VLESS` 订阅与分享链接才会可用
-
-### 4. 验证 AI routing 是否已经生效
-
-默认按一小时窗口执行。想立刻跑一轮分类，可以手动执行：
-
-```bash
-docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
-```
-
-常用检查方式：
-
-```bash
-docker compose --profile xray logs -f xray-ai-domain-manager
-cat app/xray/reports/hourly-domains/latest.txt
-sed -n '1,220p' app/xray/reports/hourly-domains/latest.json
-```
-
-检查共享数据库中的 AI 聚合结果：
-
-```bash
-python3 - <<'PY'
-import sqlite3
-conn = sqlite3.connect('./data/panel.db')
-for row in conn.execute('select domain, classification, total_hits from ai_domains order by domain'):
-    print(row)
-PY
-```
-
-如果 `latest.txt` 里出现类似下面的内容，说明动态规则已经生成：
-
-```text
-route_status: applied
-```
-
-### 5. 停止
-
-```bash
-docker compose --profile xray down
-```
-
-### 6. 如果只想使用面板
-
-```bash
-docker compose up -d --build
-```
-
-这种模式下只会启动：
-
-- `xray-routing-panel`
-- `xray-routing-panel-db-backup`
-
-AI routing 相关的 `xray-reality` 和 `xray-ai-domain-manager` 不会启动。
-
-## AI Routing 组件与产物
-
-AI routing 相关内容主要集中在：
-
-- `app/xray/.env`：REALITY 参数和 AI 管理器运行参数
-- `app/xray/runtime/config.json`：渲染后的 Xray 服务端配置
-- `app/xray/runtime/client-share.txt`：客户端导入链接
-- `app/xray/runtime/client-test.json`：本地验证用客户端配置
-- `app/xray/runtime/ai-domain-decisions.json`：域名分类缓存
-- `app/xray/runtime/dynamic-routing.json`：动态路由片段
-- `app/xray/reports/hourly-domains/`：最近一小时和历史归档报告
-- `app/xray/logs/access.log`：AI 管理器的主要输入日志
-- `data/panel.db`：共享数据库，保存端口规则、流量和 AI 域名聚合数据
-
-更完整的 REALITY 和 AI 域名管理说明见：
-
-- [app/xray/README.md](app/xray/README.md)
-
-## 页面使用
-
-面板首页可以直接完成这些操作：
-
-- Vue 3 单页方式加载初始状态，不再依赖整页刷新
-- 本地搜索端口、备注、上游地址和状态
-- 在同一页内展开或收起端口详情
-- 新增监听端口；每个有效端口会自动生成一个独立租户登录地址、一组随机用户名密码和独立订阅地址
-- 默认固定转发到 `127.0.0.1:443`
-- 查看每个端口专属的租户登录地址、随机用户名密码、`V2Ray / Clash` 订阅链接和 `VLESS` 直连分享
-- 一键复制 `Clash / V2Ray / VLESS` 订阅与分享链接
-- 租户登录路径是 `/tenant/<tenant_token>/login`；登录成功后进入 `/tenant/<tenant_token>`
-- 租户专属订阅路径是 `/tenant-subscriptions/<subscription_token>`，显式格式还有 `/tenant-subscriptions/<subscription_token>/clash` 和 `/tenant-subscriptions/<subscription_token>/v2ray`
-- 管理员仍可继续使用旧的全局订阅路径 `/<token>/<listen_port>*` 兼容历史客户端
-- 设置到期时间
-- 设置流量上限，例如 `10G`、`500MB`、`1048576`
-- 编辑备注
-- 手动启用或停用端口
-- 删除端口
-- 按端口重置租户面板地址、租户账号密码或租户订阅地址，使旧凭据立即失效
-- 在启用探针时跳转到独立监控页查看后端连通性
-
-当前首页前端实现说明：
-
-- 页面模板在 `app/templates/index.html`
-- 租户登录页模板在 `app/templates/tenant_login.html`
-- 租户只读页面模板在 `app/templates/tenant_panel.html`
-- 交互状态和 API 调用逻辑在 `app/static/panel.js`
-- 浏览器端通过 Vue 3 挂载，直接调用 `/api/dashboard`、`/api/ports*`
-- 后端仍然保留原来的表单路由，便于兼容旧调用或手工请求
-
-状态说明：
-
-- `运行中`：端口启用，且未过期、未达到流量上限
-- `已停用`：手动停用
-- `已过期`：当前版本不会长期保留；端口一旦过期会在维护流程中自动清理删除
-- `已达流量上限`：累计收发流量超过上限后自动停用
-
-流量重置说明：
-
-- 对 `已达流量上限` 的端口，页面会显示“重置流量并启用”
-- 该操作会清零该端口的累计流量和按天流量统计
-- 累计连接次数不会被重置
-
-租户登录说明：
-
-- 每个有效端口都会随机生成一组 `tenant_username` / `tenant_password`
-- 租户访问流程是“登录地址 + 用户名 + 密码”，不是只靠 URL 直接进入
-- 管理员可以随时重置租户面板地址，也可以单独重置租户账号密码
-- 端口过期后会自动删除，同时清理该端口的流量统计和探针记录
-
-## 探针监控
-
-当 `PROBE_ENABLED=1` 时，服务会在后台定时对后端目标做 TCP 连通性探测，并提供独立监控页：
-
-- 页面地址：`/probe-dashboard`
-- 可选时间窗口：`1h`、`24h`、`7d`
-- 默认行为：如果设置了 `PROBE_TEST_LISTEN_PORT`，监控页固定展示该监听端口；否则自动选第一条已启用端口
-- 记录内容：最近状态、成功率、最近 12 次检测结果、最近 7 天内的历史时间线
-
-这个页面只用来观察“固定上游是否可达”，不替代业务级可用性监控。
-
-## 认证与 API
-
-认证规则如下：
-
-- 未设置 `PANEL_USERNAME` 和 `PANEL_PASSWORD` 时，首页和 `/api/*` 默认无需登录
-- 只要两者任意一个被设置，首页、探针页和 `/api/*` 就会启用登录校验
-- Web 页面支持表单登录；API 同时支持 `Authorization: Basic ...`
-- `GET /healthz` 永远不要求登录
-- `/tenant/<tenant_token>/login`、`/tenant/<tenant_token>`、`/tenant-subscriptions/<subscription_token>*`、`/<token>/<listen_port>*` 这些租户或订阅链接默认不走全局管理员登录
-- 其中租户面板本身还需要租户自己的随机用户名和密码；订阅链接仍然依赖各自 token 控制访问
-
-如果你把租户登录地址或订阅链接发给别人，这些链接本身就属于访问入口。需要失效旧链接时，可以在页面里执行“重置租户面板地址”；需要失效旧账号时，可以执行“重置账号密码”；需要失效旧订阅链接时，可以执行“重置租户订阅地址”。
-
-常用 JSON API：
+## 常用 API
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/dashboard` | 获取首页完整状态，包括汇总、端口列表、订阅可用性和探针信息 |
+| `GET` | `/api/dashboard` | 获取首页完整状态 |
 | `POST` | `/api/ports` | 新建监听端口 |
-| `PUT` | `/api/ports/<port_id>` | 更新端口的监听端口、备注、到期时间、流量上限 |
+| `PUT` | `/api/ports/<port_id>` | 更新端口配置 |
 | `POST` | `/api/ports/<port_id>/toggle` | 启用或停用端口 |
-| `DELETE` | `/api/ports/<port_id>` | 删除端口及对应累计统计 |
-| `POST` | `/api/ports/<port_id>/reset-traffic` | 清零该端口流量；若此前因超额被停用，会自动恢复启用 |
-| `POST` | `/api/ports/<port_id>/rotate-tenant-token` | 重置租户面板 token |
-| `POST` | `/api/ports/<port_id>/rotate-tenant-credentials` | 重置租户登录用户名和密码 |
-| `POST` | `/api/ports/<port_id>/rotate-subscription-token` | 重置租户订阅 token |
-| `POST` | `/api/subscriptions/rotate` | 重置旧的全局订阅 token；仅兼容历史 `/<token>/<listen_port>*` 链接 |
+| `DELETE` | `/api/ports/<port_id>` | 删除端口 |
+| `POST` | `/api/ports/<port_id>/reset-traffic` | 重置该端口流量 |
+| `POST` | `/api/ports/<port_id>/rotate-tenant-token` | 重置租户面板地址 |
+| `POST` | `/api/ports/<port_id>/rotate-tenant-credentials` | 重置租户用户名和密码 |
+| `POST` | `/api/ports/<port_id>/rotate-subscription-token` | 重置租户订阅地址 |
+| `POST` | `/api/subscriptions/rotate` | 重置历史兼容的全局订阅 token |
 
-创建和更新端口时，请求体字段与页面表单一致：
+创建 / 更新端口的请求字段：
 
 - `listen_port`：必填，`1-65535`
-- `expires_at`：可选，支持 `2026-06-30T20:00` 这种格式；如果不带时区，按服务所在机器本地时区解释
-- `traffic_limit`：可选，支持 `10G`、`500MB`、`1048576`
-- `note`：可选，最大 `200` 个字符
+- `expires_at`：可选，例如 `2026-06-30T20:00`
+- `traffic_limit`：可选，例如 `10G`、`500MB`、`1048576`
+- `note`：可选，最多 `200` 字符
 
-最小示例：
+示例：
 
 ```bash
 curl -u admin:secret http://127.0.0.1:18080/api/dashboard
@@ -396,239 +375,206 @@ curl -u admin:secret \
 {
   "ok": true,
   "message": "...",
+  "level": "success",
   "dashboard": {
     "...": "最新首页状态"
   }
 }
 ```
 
-如果启用了登录校验但没有带认证信息，`/api/*` 会返回 `401`，并带上 `login_url` 字段，前端据此跳转登录页。
-
 ## 环境变量
 
-下表是程序默认值。使用仓库自带的 `docker-compose.yml` 时，部分值会被覆盖，最常见的是：
+### 面板 / 运行时变量
 
-- `PROBE_ENABLED=1`
-- `PROBE_INTERVAL=180`
-- `PROBE_TEST_LISTEN_PORT=31098`
-
-常用环境变量如下。
+下表列的是根服务最常用的变量；容器内路径类覆盖仍以 [docker-compose.yml](docker-compose.yml) 为准。
 
 | 变量名 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PANEL_HOST` | `0.0.0.0` | Flask 面板监听地址 |
 | `PANEL_PORT` | `18080` | Flask 面板监听端口 |
-| `PANEL_PUBLIC_URL` | 空 | 面板对外展示地址；设置后页面中的“面板地址”和生成的订阅链接会固定使用这个公开 URL |
-| `PANEL_USERNAME` | 空 | 面板登录用户名；与 `PANEL_PASSWORD` 任一设置后启用认证 |
-| `PANEL_PASSWORD` | 空 | 面板登录密码 |
-| `PANEL_SECRET_KEY` | 空 | Flask Session 签名密钥；建议生产环境显式设置，避免重启后登录会话全部失效 |
-| `DEFAULT_UPSTREAM_HOST` | `127.0.0.1` | 统一转发目标主机，默认是本机回环地址 |
-| `DEFAULT_UPSTREAM_PORT` | `443` | 统一转发目标端口 |
-| `SEED_LISTEN_PORT` | `31098` | 首次启动且数据库为空时自动创建的监听端口 |
-| `PROXY_CONNECT_TIMEOUT` | `5s` | Nginx `proxy_connect_timeout` |
-| `PROXY_TIMEOUT` | `600s` | Nginx `proxy_timeout` |
-| `STREAM_LISTEN_BACKLOG` | `4096` | Nginx `listen backlog` 参数，影响排队连接上限 |
-| `STREAM_LISTEN_FASTOPEN` | `256` | Nginx `listen fastopen` 参数；设为 `0` 可关闭 |
-| `STREAM_LISTEN_SO_KEEPALIVE` | `on` | Nginx `listen so_keepalive` 参数 |
-| `STREAM_PROXY_SOCKET_KEEPALIVE` | `1` | 是否为到上游的代理连接启用 `proxy_socket_keepalive` |
-| `MAINTENANCE_INTERVAL` | `10` | 后台维护线程扫描日志和自动停用的间隔，单位秒 |
-| `PROBE_ENABLED` | `0` | 是否启用后端连通性探针，默认关闭，设为 `1` 可恢复 |
-| `PROBE_INTERVAL` | `60` | 探针执行间隔，单位秒 |
-| `PROBE_TIMEOUT` | `3` | 单次 TCP 探针超时，单位秒 |
-| `PROBE_TEST_LISTEN_PORT` | 空 | 探针监控页固定使用的测试端口；在当前 `docker-compose.yml` 中示例固定为 `31098`，留空时自动选第一条已启用端口 |
-| `DATA_DIR` | `/data` | 数据目录 |
-| `DB_PATH` | `/data/panel.db` | SQLite 数据库路径 |
-| `DB_BACKUP_DIR` | `/backups` | SQLite 备份输出目录 |
-| `DB_BACKUP_KEEP_DAYS` | `7` | 备份保留天数，超期自动清理 |
-| `DB_BACKUP_PREFIX` | `xray-routing-panel` | 备份文件名前缀，文件名形如 `xray-routing-panel-20260531T030000Z.db` |
-| `DB_BACKUP_CRON_SCHEDULE` | `0 3 * * *` | 备份定时表达式 |
-| `AI_UPSTREAM_HOST` | `upstream.example.com` | AI 主上游主机；未设置 `AI_UPSTREAMS` 时作为首选项 |
-| `AI_UPSTREAM_PORT` | `27166` | AI 主上游端口；未设置 `AI_UPSTREAMS` 时作为首选项 |
-| `AI_UPSTREAM_FALLBACK_URL` | 空 | 可选；第二上游的完整 `vless://` Reality 链接，适用于备用上游有独立 UUID / `pbk` / `sid` / `sni` |
-| `AI_UPSTREAM_FALLBACKS` | 空 | 可选；在主上游后追加备用上游列表，格式为逗号或换行分隔的 `host[:port]` |
-| `AI_UPSTREAMS` | 空 | 可选；完整覆盖 AI 上游优先级列表，格式为逗号或换行分隔的 `host:port` |
-| `AI_UPSTREAM_PROBE_TIMEOUT_SECONDS` | `3` | AI 上游 TCP 可达性探测超时；首个不可达时自动切换到后续上游 |
-| `AI_DOMAIN_INTERVAL_SECONDS` | `3600` | AI 域名管理器执行周期 |
-| `AI_DOMAIN_LOOKBACK_SECONDS` | `3600` | 每轮分析最近多少秒的访问日志 |
-| `AI_DOMAIN_BATCH_SIZE` | `50` | 单批送给分类器的最大域名数 |
-| `CODEX_CLASSIFIER_ENABLED` | `1` | 是否优先启用本机 `codex` 做未知域名分类 |
-| `CODEX_TIMEOUT_SECONDS` | `180` | 调用本机 `codex` 的超时时间 |
-| `OPENAI_API_KEY` | 空 | 本机 `codex` 不可用时的 OpenAI 兼容接口凭据；本地模型通常可留空 |
-| `OPENAI_MODEL` | `gpt-5.5` | 回退分类时使用的模型名，也可填写本地兼容服务暴露的模型 |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1/responses` | OpenAI 兼容接口地址；官方默认走 Responses API，本地接口可填 `http://host.docker.internal:11434/v1` 这类根地址 |
-| `OPENAI_ALLOW_NO_KEY` | `0`，本地地址默认推断为 `1` | 是否允许在未设置 `OPENAI_API_KEY` 时调用兼容接口；本地 Ollama / LM Studio / vLLM 常用 |
-| `PANEL_ROUTE_LISTEN_PORT` | `0` | 可选；指定某个面板监听端口作为模板里 `__PANEL_*__` 占位符的优先来源 |
-| `SUBSCRIPTION_NAME_PREFIX` | `reality` | 生成订阅名称和分享备注时使用的默认前缀 |
-| `XRAY_CLIENT_CONFIG_PATH` | `/app/xray/runtime/client-test.json` | 订阅内容和 `vless://` 分享链接所依赖的客户端配置路径 |
+| `PANEL_PUBLIC_URL` | 空 | 面板对外展示地址；也影响生成的订阅链接和安全 Cookie |
+| `PANEL_USERNAME` | 空 | 管理员用户名 |
+| `PANEL_PASSWORD` | 空 | 管理员密码 |
+| `PANEL_SECRET_KEY` | 空 | Session 签名密钥；未设置时每次启动随机生成 |
+| `PANEL_HEALTH_REQUIRES_XRAY` | `1` | 是否要求 `/healthz` 同时验证 Xray 可用 |
+| `DEFAULT_UPSTREAM_HOST` | `127.0.0.1` | 默认上游主机；启动时会规范化写回所有端口记录 |
+| `DEFAULT_UPSTREAM_PORT` | `443` | 默认上游端口 |
+| `SEED_LISTEN_PORT` | `31098` | 数据库为空时自动创建的初始端口 |
+| `MAINTENANCE_INTERVAL` | `10` | 后台维护循环间隔，单位秒 |
+| `PROBE_ENABLED` | `0` | 是否启用 TCP 探针 |
+| `PROBE_INTERVAL` | `60` | 探针间隔，单位秒 |
+| `PROBE_TIMEOUT` | `3` | 单次探针超时，单位秒 |
+| `PROBE_TEST_LISTEN_PORT` | 空 | 监控页固定展示的测试端口 |
+| `XRAY_API_SERVER` | `127.0.0.1:10085` | Xray API 地址 |
+| `XRAY_LOCAL_BIN` | 空 | 设置后进入“本地 Xray 模式” |
+| `XRAY_CONTAINER_NAME` | `xray-reality-local` | 面板管理的 Xray 容器名 |
+| `XRAY_DOCKER_BIN` | `docker` | Docker 可执行文件名 |
+| `XRAY_STATS_QUERY_TIMEOUT` | `5` | Xray `statsquery` 超时，单位秒 |
+| `XRAY_PROBE_HOST` | `127.0.0.1` | 探针连接使用的目标主机 |
+| `SUBSCRIPTION_NAME_PREFIX` | `reality` | 生成订阅名称和分享备注时使用的前缀 |
 
-代码里还有一些偏内部用途的路径变量，例如：
+内部路径和备份相关变量：
 
-- `NGINX_CONFIG_PATH`
-- `STREAMS_DIR`
-- `STREAM_ACCESS_LOG`
-- `NGINX_PID_PATH`
+- `DATA_DIR`
+- `DB_PATH`
+- `DB_BACKUP_DIR`
+- `DB_BACKUP_KEEP_DAYS`
+- `DB_BACKUP_PREFIX`
+- `DB_BACKUP_CRON_SCHEDULE`
+- `XRAY_ENV_FILE_PATH`
+- `XRAY_CONFIG_PATH`
+- `XRAY_PANEL_PORTS_PATH`
+- `XRAY_ACCESS_LOG_PATH`
 - `XRAY_CLIENT_CONFIG_PATH`
 
-一般不需要改。
+### Xray / AI 变量
 
-本地大模型分类示例：
+完整示例见：
 
-```env
-OPENAI_BASE_URL=http://host.docker.internal:11434/v1
-OPENAI_MODEL=qwen2.5:14b
-OPENAI_ALLOW_NO_KEY=1
-```
+- [app/xray/.env.example](app/xray/.env.example)
+- [app/xray/README.md](app/xray/README.md)
 
-说明：
+最关键的几组变量如下。
 
-- `xray-ai-domain-manager` 运行在容器里，访问宿主机本地模型时应使用 `host.docker.internal`
-- 如果你的本地服务直接兼容 `POST /v1/chat/completions`，只填到 `/v1` 即可，管理器会自动补全接口路径
-- 官方 OpenAI 默认仍走 `https://api.openai.com/v1/responses`
+必填的 REALITY 基础参数：
+
+- `XRAY_PUBLIC_HOST`
+- `XRAY_CLIENT_UUID`
+- `XRAY_REALITY_PRIVATE_KEY`
+- `XRAY_REALITY_PUBLIC_KEY`
+- `XRAY_REALITY_SHORT_ID`
+- `XRAY_SERVER_NAME`
+- `XRAY_DEST`
+
+常用监听和路由参数：
+
+- `XRAY_LISTEN_PORT`
+- `XRAY_PUBLIC_PORT`
+- `AI_UPSTREAM_HOST`
+- `AI_UPSTREAM_PORT`
+- `AI_UPSTREAM_FALLBACK_URL`
+- `AI_UPSTREAM_FALLBACKS`
+- `AI_UPSTREAMS`
+- `AI_UPSTREAM_PROBE_TIMEOUT_SECONDS`
+- `PANEL_ROUTE_LISTEN_PORT`
+
+分类与模型参数：
+
+- `CODEX_CLASSIFIER_ENABLED`
+- `CODEX_TIMEOUT_SECONDS`
+- `CODEX_MODEL`
+- `CODEX_CLI_JS`
+- `CODEX_BIN`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_BASE_URL`
+- `OPENAI_ALLOW_NO_KEY`
+
+Google Search MCP / OpenRouter 参数：
+
+- `GOOGLE_SEARCH_NUM_RESULTS`
+- `GOOGLE_SEARCH_QUERY_TEMPLATE`
+- `GOOGLE_SEARCH_USER_AGENT`
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL`
+- `OPENROUTER_BASE_URL`
+- `OPENROUTER_TIMEOUT_SECONDS`
 
 ## 目录结构
 
 ```text
 .
-├── .env.example              # docker compose 覆盖示例
+├── .env.example                  # 面板公开地址和管理员认证模板
+├── Dockerfile                    # 面板镜像；内置 Python、Docker CLI 和 Xray 二进制
+├── docker-compose.yml            # 完整 compose 入口
+├── PANEL_MIGRATION.md            # 迁移说明
 ├── app/
-│   ├── panel.py              # Flask 应用和 Nginx 管理逻辑
-│   ├── xray/
-│   │   ├── .env.example      # REALITY 参数和 AI 管理器配置模板
-│   │   ├── README.md         # Xray REALITY 和 AI 域名管理详细说明
-│   │   ├── ai_domain_manager.py
-│   │   ├── render_config.py
-│   │   ├── generate-secrets.sh
-│   │   ├── assets/
-│   │   │   └── ai-proxy-outbound.example.json
-│   │   ├── logs/             # Xray 访问日志，AI 管理器从这里读入域名
-│   │   ├── reports/          # 按小时输出 AI 域名报告
-│   │   └── runtime/          # 渲染配置、分类缓存、动态路由片段
-│   ├── templates/index.html  # Vue 单页面板模板
-│   ├── templates/login.html
-│   ├── templates/probe_dashboard.html
-│   ├── templates/tenant_panel.html
-│   └── static/
-│       ├── panel.js          # Vue 前端状态和 API 调用
-│       └── style.css         # 页面样式
-├── backups/                  # SQLite 备份输出目录
-├── data/
-│   └── panel.db              # SQLite 数据库
-├── logs/
-│   ├── error.log             # Nginx 错误日志
-│   └── stream-access.log     # Nginx stream 访问日志
-├── PANEL_MIGRATION.md        # 迁移文档
-├── docker-compose.yml
-├── Dockerfile
-├── nginx.conf
+│   ├── panel.py                  # 程序入口
+│   ├── web.py                    # Flask 路由
+│   ├── state.py                  # 数据库、流量同步、Xray 配置刷新
+│   ├── subscriptions.py          # 订阅与分享链接生成
+│   ├── templates/                # 页面模板
+│   ├── static/                   # 前端资源
+│   └── xray/
+│       ├── .env.example          # Xray / AI 配置模板
+│       ├── README.md             # Xray 子系统详细文档
+│       ├── render_config.py      # 渲染 Xray 配置和客户端配置
+│       ├── ai_domain_manager.py  # AI 域名分析与动态路由
+│       ├── google_search_mcp.py  # 可选 MCP server
+│       ├── ai-proxy-outbound.json
+│       ├── assets/
+│       ├── logs/
+│       ├── reports/
+│       └── runtime/
 ├── scripts/
-│   ├── backup_db.py          # SQLite 备份脚本
-│   └── start-backup-cron.sh  # 备份定时任务启动脚本
+│   ├── backup_db.py
+│   ├── render_config.py
+│   ├── ai_domain_manager.py
+│   └── google_search_mcp.py
+├── data/                         # SQLite 数据库
+├── backups/                      # 数据库备份
+└── k8s/                          # Kubernetes 清单
 ```
 
-## 数据与统计
+说明：
 
-统计数据来自 Nginx `stream` 访问日志，日志格式为：
-
-```text
-$time_iso8601    $server_port    $bytes_sent    $bytes_received
-```
-
-程序会把日志增量同步到 SQLite 中的这些表：
-
-- `ports`：端口配置
-- `traffic_totals`：每个监听端口的累计统计
-- `traffic_daily`：按天统计
-- `app_state`：日志同步偏移量等运行状态
-
-如果启用了 `xray` profile 中的 AI 域名管理服务，还会新增：
-
-- `ai_domains`：当前 AI 域名聚合状态
-- `ai_domain_observations`：按统计窗口保存的 AI 域名命中历史
-
-流量上限判断使用：
-
-```text
-累计出站 + 累计入站
-```
-
-## 健康检查
-
-服务提供健康检查接口：
-
-```text
-GET /healthz
-```
-
-当 Nginx 运行正常时返回 `200`，否则返回 `500`。
-
-## 数据备份与迁移
-
-- 根目录 `docker-compose.yml` 默认会启动 `xray-routing-panel-db-backup`，按 `DB_BACKUP_CRON_SCHEDULE` 定时备份 `panel.db`
-- 默认备份目录是 `./backups`
-- 手动备份可执行：
-
-```bash
-python3 ./scripts/backup_db.py --db-path ./data/panel.db --backup-dir ./backups
-```
-
-- 迁移到新机器时，核心数据通常是：
-  - `data/panel.db`
-  - `logs/stream-access.log`
-- 完整迁移步骤见：[PANEL_MIGRATION.md](PANEL_MIGRATION.md)
-
-## 部署注意事项
-
-- `docker-compose.yml` 使用的是 `network_mode: host`，更适合 Linux 主机。
-- 面板里创建的监听端口会直接在宿主机生效，避免和宿主机已有服务端口冲突。
-- `xray-routing-panel-db-backup` 服务会按定时表达式把 `panel.db` 备份到 `./backups`。
-- 如果设置了 `PANEL_USERNAME` 或 `PANEL_PASSWORD`，面板会启用登录页和 Session 鉴权；API 仍兼容 `Authorization: Basic ...`。
-- 删除端口时会同时删除该端口对应的累计统计数据。
-- 程序依赖 `nginx-full` 的 `stream` 能力，镜像里已经安装好。
-- 如果你手动修改 `/etc/nginx/streams-enabled/ports.conf`，下次面板操作会被重新生成覆盖。
-- 首页默认从 `https://cdn.jsdelivr.net/npm/vue@3.5.16/dist/vue.global.prod.js` 加载 Vue 运行时；如果你的浏览器环境无法访问 jsDelivr，需要改成自托管静态资源。
+- `logs/stream-access.log`、旧的 `nginx-*` 备份文件名只属于历史遗留
+- 当前实现真正使用的是 `app/xray/logs/access.log`
 
 ## 常见排障
 
-- `GET /healthz` 返回 `500`：
-  先执行 `docker compose logs -f xray-routing-panel`，再进入容器运行 `nginx -t`，最后检查 `/etc/nginx/streams-enabled/ports.conf` 是否生成了非法端口配置。
-- 页面里订阅链接显示不可用：
-  先确认你已经执行过 `python -m app.xray.render_config`，并且 `app/xray/runtime/client-test.json` 在容器里可见。
-- AI 域名始终没有新增分类结果：
-  先看 `docker compose --profile xray logs -f xray-ai-domain-manager`，再手动执行一次 `--once`；同时确认 `app/xray/logs/access.log` 有新日志，以及宿主机 `codex login status` 或 `OPENAI_API_KEY` 可用。
-- 面板重启后登录状态全部失效：
-  根目录 `.env` 里显式设置 `PANEL_SECRET_KEY`，不要依赖进程启动时随机生成的值。
-- 第一次启动后没有出现默认端口：
-  检查是否把 `SEED_LISTEN_PORT` 清空了，或者数据库 `data/panel.db` 里已经有旧记录，程序不会重复插入初始化端口。
+- `GET /healthz` 返回 `500`
+  - 先看 `docker compose logs -f xray-routing-panel`
+  - 再确认 `xray-reality` 是否真的在运行
+  - 再确认 `XRAY_API_SERVER` 是否可访问
+  - 如果你当前只启动了面板且不需要检查 Xray，把 `PANEL_HEALTH_REQUIRES_XRAY=0`
+- 页面里订阅链接显示不可用
+  - 先执行 `python -m app.xray.render_config`
+  - 再确认 `app/xray/runtime/client-test.json` 存在且能被容器看到
+- 创建端口后没有真正开始承载流量
+  - 确认 `xray-reality` 容器已启动，或者你已经正确配置 `XRAY_LOCAL_BIN` + 本地 Xray
+  - 只启动面板本身并不会自动提供 Xray 数据面
+- AI 域名没有新增分类结果
+  - 看 `docker compose --profile xray logs -f xray-ai-domain-manager`
+  - 手动执行一次 `--once`
+  - 确认 `app/xray/logs/access.log` 里有新访问
+  - 确认宿主机 `codex login status` 可用，或者 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 已正确配置
+- 面板重启后管理员登录失效
+  - 显式设置 `PANEL_SECRET_KEY`
+- 第一次启动后没有出现默认端口
+  - 检查 `SEED_LISTEN_PORT` 是否被清空
+  - 如果 `data/panel.db` 里已经有旧数据，就不会再次注入初始化端口
 
 ## 常用命令
 
 ```bash
-docker compose up -d --build
-docker compose logs -f
-docker compose restart
+python -m app.xray.render_config
+docker compose --profile xray up -d --build
+docker compose --profile xray logs -f xray-reality
+docker compose --profile xray logs -f xray-ai-domain-manager
+docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
 docker compose down
 ```
 
-如果需要进入容器检查：
-
-```bash
-docker exec -it xray-routing-panel bash
-nginx -t
-cat /etc/nginx/streams-enabled/ports.conf
-```
-
-查看数据库备份：
+手动备份数据库：
 
 ```bash
 python3 ./scripts/backup_db.py --db-path ./data/panel.db --backup-dir ./backups
-ls -lh ./backups
-tail -f ./logs/xray-routing-panel-db-backup.log
 ```
 
-## 后续可扩展方向
+查看 AI 域名聚合结果：
 
-- 补充和整理现有 JSON API 文档
-- 为每个端口增加创建人或租户字段
-- 支持导出统计报表
-- 支持 UDP 转发开关
-- 支持更细粒度的认证和操作审计
+```bash
+python3 - <<'PY'
+import sqlite3
+conn = sqlite3.connect('./data/panel.db')
+for row in conn.execute('select domain, classification, total_hits from ai_domains order by domain'):
+    print(row)
+PY
+```
+
+## 相关文档
+
+- Xray 子系统说明：[app/xray/README.md](app/xray/README.md)
+- Kubernetes 部署说明：[k8s/README.md](k8s/README.md)
+- 迁移说明：[PANEL_MIGRATION.md](PANEL_MIGRATION.md)

@@ -27,6 +27,7 @@ from .config import (
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
     PANEL_HOST,
+    PANEL_HEALTH_REQUIRES_XRAY,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
     PANEL_SECRET_KEY,
@@ -368,9 +369,10 @@ def tenant_panel(tenant_token):
 @app.route("/healthz", methods=["GET"])
 def healthz():
     state.sync_traffic_state()
-    healthy = state.xray_running()
+    xray_running = state.xray_running()
+    healthy = xray_running if PANEL_HEALTH_REQUIRES_XRAY else True
     status_code = 200 if healthy else 500
-    return jsonify({"ok": healthy, "xray_running": healthy}), status_code
+    return jsonify({"ok": healthy, "xray_running": xray_running}), status_code
 
 
 @app.route("/api/dashboard", methods=["GET"])

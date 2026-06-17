@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xray-reloader-scripts
+data:
+  watch-xray-config.sh: |
+    #!/bin/sh
+    set -eu
+
+    CONFIG_PATH="${XRAY_CONFIG_PATH:-/etc/xray/config.json}"
+    POLL_INTERVAL="${XRAY_POLL_INTERVAL_SECONDS:-2}"
+    LAST_CHECKSUM=""
+
+    current_checksum() {
+      if [ ! -f "$CONFIG_PATH" ]; then
+        echo ""
+        return
+      fi
+      sha256sum "$CONFIG_PATH" | awk '{print $1}'
+    }
+
+    restart_xray() {
+      PID="$(pidof xray || true)"
+      if [ -z "$PID" ]; then
+        return
+      fi
+      echo "[xray-reloader] config changed, restarting xray pid=$PID"
+      kill -TERM $PID || true
+    }
+
+    while true; do
+      NEXT_CHECKSUM="$(current_checksum)"
+      if [ -n "$NEXT_CHECKSUM" ] && [ -n "$LAST_CHECKSUM" ] && [ "$NEXT_CHECKSUM" != "$LAST_CHECKSUM" ]; then
+        restart_xray
+      fi
+      if [ -n "$NEXT_CHECKSUM" ]; then
+        LAST_CHECKSUM="$NEXT_CHECKSUM"
+      fi
+      sleep "$POLL_INTERVAL"
+    done

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xray-routing-panel-config
+data:
+  PANEL_PUBLIC_URL: "http://your-node-or-domain:18080"
+  DEFAULT_UPSTREAM_HOST: "127.0.0.1"
+  DEFAULT_UPSTREAM_PORT: "443"
+  SEED_LISTEN_PORT: "31098"
+  PROBE_ENABLED: "1"
+  PROBE_INTERVAL: "180"
+  PROBE_TEST_LISTEN_PORT: "31098"
+  DB_BACKUP_KEEP_DAYS: "7"
+  DB_BACKUP_PREFIX: "xray-routing-panel"

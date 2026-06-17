@@ -1577,16 +1577,22 @@ def classify_pending_domains(decisions, decisions_path, observed_domains, args):
     if not remaining or not args.openai_classifier_enabled:
         return remaining
 
+    unresolved = []
     for start in range(0, len(remaining), args.batch_size):
         batch = remaining[start:start + args.batch_size]
-        results = classify_domains_via_openai(
-            batch,
-            args.openai_api_key,
-            args.openai_model,
-            args.openai_base_url,
-            args.openai_timeout_seconds,
-            allow_no_key=args.openai_allow_no_key,
-        )
+        try:
+            results = classify_domains_via_openai(
+                batch,
+                args.openai_api_key,
+                args.openai_model,
+                args.openai_base_url,
+                args.openai_timeout_seconds,
+                allow_no_key=args.openai_allow_no_key,
+            )
+        except Exception as exc:
+            print(f"[ai_domain_manager] openai classifier unavailable: {exc}", file=sys.stderr, flush=True)
+            unresolved = remaining[start:]
+            break
         classified_at = format_timestamp(utc_now())
         for domain in batch:
             result = results[domain]
@@ -1598,7 +1604,9 @@ def classify_pending_domains(decisions, decisions_path, observed_domains, args):
                 "model": args.openai_model,
             }
         save_json(decisions_path, decisions)
-    return []
+    else:
+        return []
+    return unresolved
 
 
 def run_once(args):

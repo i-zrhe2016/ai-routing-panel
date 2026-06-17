@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -29,6 +30,7 @@ from .config import (
     XRAY_CONTAINER_NAME,
     XRAY_DOCKER_BIN,
     XRAY_ENV_FILE_PATH,
+    XRAY_LOCAL_BIN,
     XRAY_PANEL_PORTS_PATH,
     XRAY_PROBE_HOST,
     XRAY_STATS_QUERY_TIMEOUT,
@@ -1315,6 +1317,40 @@ class PanelState:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
+    def xray_uses_local_mode(self):
+        return bool(XRAY_LOCAL_BIN)
+
+    def resolve_xray_local_bin(self):
+        if not XRAY_LOCAL_BIN:
+            return None
+        if os.path.sep not in XRAY_LOCAL_BIN:
+            return shutil.which(XRAY_LOCAL_BIN)
+        return XRAY_LOCAL_BIN if os.path.isfile(XRAY_LOCAL_BIN) else None
+
+    def parse_xray_api_endpoint(self):
+        raw = str(XRAY_API_SERVER or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("tcp://"):
+            raw = raw.removeprefix("tcp://")
+        if raw.startswith("["):
+            closing = raw.find("]")
+            if closing <= 0 or closing + 2 >= len(raw) or raw[closing + 1] != ":":
+                return None
+            host = raw[1:closing]
+            port_text = raw[closing + 2:]
+        else:
+            host, separator, port_text = raw.rpartition(":")
+            if not separator:
+                return None
+        try:
+            port = int(port_text)
+        except ValueError:
+            return None
+        if port < 1 or port > 65535:
+            return None
+        return (host or "127.0.0.1", port)
+
     def render_xray_config(self):
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
         self.run_command(
@@ -1337,6 +1373,21 @@ class PanelState:
         )
 
     def xray_config_test(self):
+        if self.xray_uses_local_mode():
+            local_bin = self.resolve_xray_local_bin()
+            if not local_bin:
+                return
+            self.run_command(
+                [
+                    local_bin,
+                    "run",
+                    "-test",
+                    "-config",
+                    str(XRAY_CONFIG_PATH),
+                ],
+                "Xray 配置校验失败",
+            )
+            return
         if not self.xray_container_exists() or not self.xray_running():
             return
         self.run_command(
@@ -1354,12 +1405,16 @@ class PanelState:
         )
 
     def xray_restart(self):
+        if self.xray_uses_local_mode():
+            return
         if not self.xray_container_exists():
             return
         command = [XRAY_DOCKER_BIN, "start" if not self.xray_running() else "restart", XRAY_CONTAINER_NAME]
         self.run_command(command, "Xray 重启失败")
 
     def xray_container_exists(self):
+        if self.xray_uses_local_mode():
+            return bool(self.resolve_xray_local_bin())
         if not XRAY_CONTAINER_NAME:
             return False
         completed = subprocess.run(
@@ -1371,6 +1426,15 @@ class PanelState:
         return completed.returncode == 0
 
     def xray_running(self):
+        if self.xray_uses_local_mode():
+            endpoint = self.parse_xray_api_endpoint()
+            if endpoint is None:
+                return False
+            try:
+                with socket.create_connection(endpoint, timeout=1):
+                    return True
+            except OSError:
+                return False
         if not self.xray_container_exists():
             return False
         completed = subprocess.run(
@@ -1384,22 +1448,39 @@ class PanelState:
     def read_xray_traffic_stats(self):
         if not self.xray_running():
             return {}
+        if self.xray_uses_local_mode():
+            local_bin = self.resolve_xray_local_bin()
+            if not local_bin:
+                return {}
+            command = [
+                local_bin,
+                "api",
+                "statsquery",
+                f"--server={XRAY_API_SERVER}",
+                "-timeout",
+                str(XRAY_STATS_QUERY_TIMEOUT),
+                "-pattern",
+                "inbound>>>panel-",
+                "-reset",
+            ]
+        else:
+            command = [
+                XRAY_DOCKER_BIN,
+                "exec",
+                XRAY_CONTAINER_NAME,
+                "/usr/local/bin/xray",
+                "api",
+                "statsquery",
+                f"--server={XRAY_API_SERVER}",
+                "-timeout",
+                str(XRAY_STATS_QUERY_TIMEOUT),
+                "-pattern",
+                "inbound>>>panel-",
+                "-reset",
+            ]
         try:
             completed = self.run_command(
-                [
-                    XRAY_DOCKER_BIN,
-                    "exec",
-                    XRAY_CONTAINER_NAME,
-                    "/usr/local/bin/xray",
-                    "api",
-                    "statsquery",
-                    f"--server={XRAY_API_SERVER}",
-                    "-timeout",
-                    str(XRAY_STATS_QUERY_TIMEOUT),
-                    "-pattern",
-                    "inbound>>>panel-",
-                    "-reset",
-                ],
+                command,
                 "Xray 流量查询失败",
             )
             payload = json.loads(completed.stdout or "{}")

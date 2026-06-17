@@ -42,6 +42,7 @@ XRAY_PANEL_PORTS_PATH = Path(
 )
 XRAY_ACCESS_LOG_PATH = Path(os.environ.get("XRAY_ACCESS_LOG_PATH", BASE_DIR / "xray" / "logs" / "access.log"))
 XRAY_API_SERVER = os.environ.get("XRAY_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
+XRAY_LOCAL_BIN = os.environ.get("XRAY_LOCAL_BIN", "").strip()
 XRAY_CONTAINER_NAME = os.environ.get("XRAY_CONTAINER_NAME", "xray-reality-local").strip()
 XRAY_DOCKER_BIN = os.environ.get("XRAY_DOCKER_BIN", "docker").strip() or "docker"
 XRAY_STATS_QUERY_TIMEOUT = parse_nonnegative_env_int(
@@ -72,6 +73,7 @@ PROBE_TEST_LISTEN_PORT = parse_optional_env_port(
     os.environ.get("PROBE_TEST_LISTEN_PORT", ""),
     "PROBE_TEST_LISTEN_PORT",
 )
+PANEL_HEALTH_REQUIRES_XRAY = parse_bool_env(os.environ.get("PANEL_HEALTH_REQUIRES_XRAY"), default=True)
 AUTH_ENABLED = bool(PANEL_USERNAME or PANEL_PASSWORD)
 AUTH_SESSION_KEY = "panel_auth_marker"
 AUTH_SESSION_MARKER = hashlib.sha256(f"{PANEL_USERNAME}\0{PANEL_PASSWORD}".encode("utf-8")).hexdigest()

@@ -1,5 +1,6 @@
 import io
 import json
+import tempfile
 import unittest
 from unittest import mock
 
@@ -111,6 +112,37 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
         payload = json.loads(request.data.decode("utf-8"))
         self.assertIn("input", payload)
+
+    @mock.patch("app.xray.ai_domain_manager.classify_domains_via_openai")
+    def test_classify_pending_domains_keeps_pending_when_openai_unavailable(self, mocked_openai):
+        mocked_openai.side_effect = RuntimeError("openai http 401")
+        decisions = {"domains": {}}
+        observed_domains = {"unknown.example"}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            decisions_path = f"{tmpdir}/ai-domain-decisions.json"
+            args = mock.Mock(
+                batch_size=50,
+                codex_classifier_enabled=False,
+                openai_classifier_enabled=True,
+                openai_api_key="bad-key",
+                openai_model="openai/gpt-5-nano",
+                openai_base_url="https://openrouter.ai/api/v1/chat/completions",
+                openai_timeout_seconds=45,
+                openai_allow_no_key=False,
+            )
+
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                pending = ai_domain_manager.classify_pending_domains(
+                    decisions,
+                    decisions_path,
+                    observed_domains,
+                    args,
+                )
+
+        self.assertEqual(pending, ["unknown.example"])
+        self.assertEqual(decisions["domains"], {})
+        self.assertIn("openai classifier unavailable", stderr.getvalue())
 
 
 if __name__ == "__main__":

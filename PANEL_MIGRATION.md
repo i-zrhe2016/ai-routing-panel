@@ -2,107 +2,200 @@
 
 本文档用于把当前这套 `xray-routing-panel` 从旧机器迁移到新机器。
 
-> 当前版本已去除 Nginx，入口端口由 Xray 直接监听。
-> 如果本文后续仍出现旧的 `nginx` / `stream-access.log` 说法，请优先参考当前 `docker-compose.yml`、`Dockerfile` 和 `app/state.py` 的实现。
+> 当前版本不再使用 `nginx`。入口端口由 Xray 直接监听，面板负责维护数据库、渲染 Xray 配置并在需要时重启 `xray-reality`。
 
 ## 迁移目标
 
-- 保留现有端口规则
-- 保留面板配置
-- 可选保留历史流量统计
-- 迁移后自动恢复 Nginx 转发
+- 保留端口规则、租户凭据和订阅 token
+- 保留管理员配置
+- 可选保留历史统计和 AI 域名聚合结果
+- 在新机器恢复完整的 Xray + 面板运行链路
 
 ## 需要迁移的内容
 
-最关键的是这两个目录：
+最关键的是这些文件或目录：
 
 - `data/panel.db`
-- `logs/stream-access.log`
+- `app/xray/.env`
+- `.env`，如果你启用了 `PANEL_PUBLIC_URL`、管理员认证或自定义 `PANEL_SECRET_KEY`
 
-如果你想把配置也完全一致，建议一并保留：
+按需迁移：
 
-- `docker-compose.yml`
-- `nginx.conf`
-- 你手动改过的环境变量
+- `app/xray/ai-proxy-outbound.json`
+  - 如果你自定义过 AI 出站模板
+- `app/xray/runtime/ai-domain-decisions.json`
+  - 如果你想保留已分类域名缓存
+- `app/xray/runtime/dynamic-routing.json`
+  - 一般可重新生成；只在你想保留当前路由快照时一并带走
+- `app/xray/logs/access.log`
+  - 只在你想让 AI 管理器在新机器继续参考最近访问窗口时保留
+- `backups/`
+  - 只在你想顺带迁移历史数据库备份时保留
 
-不要迁移生成文件：
+通常**不需要**迁移这些生成文件：
 
-- `/etc/nginx/streams-enabled/ports.conf`
+- `app/xray/runtime/config.json`
+- `app/xray/runtime/client-test.json`
+- `app/xray/runtime/client-share.txt`
+- `app/xray/runtime/panel-ports.json`
 
-这个文件会在启动时自动重建。
+这些文件都可以在新机器上重新渲染生成。
 
-## 迁移方式
+## 推荐迁移方式
 
-### 方案 A：规则 + 统计一起迁
+### 方案 A：完整迁移
 
-适合需要保留累计连接数、总流量、今日流量的场景。
+适合想保留：
 
-### 方案 B：只迁规则
+- 端口规则
+- 租户凭据和订阅地址
+- 累计统计
+- AI 域名聚合结果
+- 最近分类缓存
 
-只复制 `panel.db` 即可，历史统计可重新开始。
+建议打包：
+
+- `data`
+- `app/xray/.env`
+- `.env`
+- `app/xray/ai-proxy-outbound.json`
+- `app/xray/runtime/ai-domain-decisions.json`
+- `app/xray/logs`
+
+### 方案 B：只迁核心配置
+
+适合只想恢复服务，不关心最近缓存和报告。
+
+至少复制：
+
+- `data/panel.db`
+- `app/xray/.env`
+- `.env`，如果你改过
 
 ## 迁移步骤
 
-### 1. 停掉旧面板
+### 1. 在旧机器停服务
 
 ```bash
 docker compose down
 ```
 
-建议先停服务，再做备份，避免数据库和日志不同步。
+建议先停服务，再打包数据，避免数据库和运行期文件不一致。
 
-### 2. 备份旧数据
+### 2. 备份旧机器数据
+
+最小示例：
 
 ```bash
-tar -czf xray-routing-panel-backup.tar.gz data logs docker-compose.yml nginx.conf
+tar -czf xray-routing-panel-backup.tar.gz \
+  data \
+  app/xray/.env \
+  .env
 ```
 
-如果你没有改过 `docker-compose.yml` 或 `nginx.conf`，也可以只备份 `data` 和 `logs`。
+如果要一并保留分类缓存、日志和自定义出站模板：
+
+```bash
+tar -czf xray-routing-panel-full-backup.tar.gz \
+  data \
+  .env \
+  app/xray/.env \
+  app/xray/ai-proxy-outbound.json \
+  app/xray/runtime/ai-domain-decisions.json \
+  app/xray/logs
+```
 
 ### 3. 在新机器准备环境
 
 - 拉取同一份项目代码
 - 安装 Docker 和 Docker Compose
-- 确认监听端口未被占用
-- 确认 `PANEL_PORT`、`DEFAULT_UPSTREAM_HOST`、`DEFAULT_UPSTREAM_PORT` 等配置和旧机一致
+- 确认 `18080`、`443` 和你实际使用的入口端口没有冲突
+- 如果你依赖 `codex` 自动分类，确认新机器上的挂载路径也可用：
+  - `/root/.codex`
+  - `/root/.nvm/versions/node`
+  - 或者同步修改 `docker-compose.yml`
 
-### 4. 恢复数据
+### 4. 恢复备份
 
 ```bash
 tar -xzf xray-routing-panel-backup.tar.gz
 ```
 
-如果只迁规则，把旧机器的 `panel.db` 复制到新机器的 `./data/panel.db`。
+如果你只迁移最关键数据，也可以手工复制：
 
-### 5. 启动新面板
+- `./data/panel.db`
+- `./app/xray/.env`
+- `./.env`
+
+### 5. 在新机器重新渲染配置
+
+```bash
+python -m app.xray.render_config
+```
+
+### 6. 启动新环境
+
+完整栈：
+
+```bash
+docker compose --profile xray up -d --build
+```
+
+如果你当前只想先恢复面板：
 
 ```bash
 docker compose up -d --build
 ```
 
-### 6. 验证
+## 迁移后验证
 
 ```bash
 docker compose ps
-docker compose logs -f
+docker compose logs -f xray-routing-panel
 curl http://127.0.0.1:18080/healthz
 ```
 
-也可以检查生成的转发配置：
+完整栈建议再检查：
 
 ```bash
-docker exec -it xray-routing-panel cat /etc/nginx/streams-enabled/ports.conf
+docker compose --profile xray logs -f xray-reality
+docker compose --profile xray logs -f xray-ai-domain-manager
 ```
 
-## 迁移后检查项
+同时确认这些文件已经生成：
 
-- 面板能正常打开
-- 端口列表和旧机器一致
-- 端口启停正常
-- 统计数据是否符合预期
-- 目标端口在新机器上没有冲突
+- `app/xray/runtime/config.json`
+- `app/xray/runtime/client-test.json`
+- `app/xray/runtime/panel-ports.json`
 
-## 回滚方法
+如果你保留了 AI 分类状态，可以再检查：
+
+```bash
+cat app/xray/reports/hourly-domains/latest.txt
+python3 - <<'PY'
+import sqlite3
+conn = sqlite3.connect('./data/panel.db')
+for row in conn.execute('select domain, classification, total_hits from ai_domains order by domain'):
+    print(row)
+PY
+```
+
+## 常见问题
+
+- 只复制 `panel.db` 可以吗
+  - 可以，端口规则、租户凭据、订阅 token 和历史累计统计都在里面
+  - 但 `app/xray/.env` 不同步的话，新机器上的 REALITY 参数可能不一致
+- `app/xray/runtime/*` 要不要带走
+  - 一般不需要，重新执行 `python -m app.xray.render_config` 即可
+- `access.log` 不复制会怎样
+  - 不影响已有数据库累计统计
+  - 但会丢失“最近一小时访问窗口”这部分原始输入，AI 管理器需要重新积累新日志
+- 新机器上 `/healthz` 返回 `500`
+  - 先确认 `xray-reality` 是否已启动
+  - 再确认 `XRAY_API_SERVER` 默认的 `127.0.0.1:10085` 是否可访问
+  - 如果你只恢复了面板而没有恢复 Xray，可临时设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
+
+## 回滚
 
 如果新机器验证失败：
 
@@ -110,11 +203,8 @@ docker exec -it xray-routing-panel cat /etc/nginx/streams-enabled/ports.conf
 docker compose down
 ```
 
-然后把旧机器的数据目录恢复回来，重新启动旧环境即可。
+然后保留旧机器原目录，重新在旧机器执行：
 
-## 常见问题
-
-- 如果只复制了 `panel.db`，但没复制 `stream-access.log`，历史统计会重置。
-- 如果复制了 `panel.db` 和 `stream-access.log`，建议一定先停旧服务，再打包。
-- `ports.conf` 不需要手工迁移，启动后会自动生成。
-- 如果新机器上端口已被占用，先改监听端口再启动。
+```bash
+docker compose --profile xray up -d --build
+```
