@@ -77,6 +77,68 @@ path = pathlib.Path(sys.argv[1])
 path.unlink(missing_ok=True)
 """
 
+REMOTE_READ_FILE_SCRIPT = """
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+if not path.is_file():
+    print(json.dumps({"exists": False, "data": ""}))
+    raise SystemExit(0)
+
+print(
+    json.dumps(
+        {
+            "exists": True,
+            "data": path.read_text(encoding="utf-8", errors="ignore"),
+        }
+    )
+)
+"""
+
+REMOTE_AI_DOMAINS_SNAPSHOT_SCRIPT = """
+import json
+import pathlib
+import sqlite3
+import sys
+
+db_path = pathlib.Path(sys.argv[1])
+result = {"exists": False, "ai_domains": []}
+if not db_path.is_file():
+    print(json.dumps(result))
+    raise SystemExit(0)
+
+conn = sqlite3.connect(db_path)
+conn.row_factory = sqlite3.Row
+try:
+    rows = conn.execute(
+        '''
+        SELECT
+            domain,
+            classification,
+            reason,
+            source,
+            model,
+            first_seen,
+            last_seen,
+            total_hits,
+            last_protocols,
+            last_report_window_start,
+            last_report_window_end,
+            updated_at
+        FROM ai_domains
+        ORDER BY total_hits DESC, domain ASC
+        '''
+    ).fetchall()
+finally:
+    conn.close()
+
+result["exists"] = True
+result["ai_domains"] = [{key: row[key] for key in row.keys()} for row in rows]
+print(json.dumps(result, ensure_ascii=True))
+"""
+
 REMOTE_SOCKET_CHECK_SCRIPT = """
 import socket
 import sys
@@ -130,6 +192,15 @@ def join_shell_args(args):
     return " ".join(shlex.quote(str(arg)) for arg in args)
 
 
+def build_temp_target_path(path_text):
+    path = Path(str(path_text))
+    suffix = "".join(path.suffixes)
+    if not suffix:
+        return f"{path}.codex-tmp"
+    base_name = path.name[: -len(suffix)]
+    return str(path.with_name(f"{base_name}.codex-tmp{suffix}"))
+
+
 @dataclass(frozen=True)
 class ManagedNodeConfig:
     role: str
@@ -144,9 +215,14 @@ class ManagedNodeConfig:
     ssh_bin: str = "ssh"
     ssh_options: tuple[str, ...] = ()
     config_path: str = ""
+    dynamic_routing_path: str = ""
+    ai_report_path: str = ""
+    panel_db_path: str = ""
     access_log_path: str = ""
     panel_ports_path: str = ""
     source_config_path: Path | None = None
+    source_dynamic_routing_path: Path | None = None
+    source_ai_report_path: Path | None = None
     source_panel_ports_path: Path | None = None
     upstream_host: str = ""
     upstream_port: int | None = None
@@ -190,6 +266,23 @@ class ManagedNodeController:
             and self.config.config_path
             and self.config.source_config_path
         )
+
+    def supports_dynamic_routing_pull(self):
+        return bool(
+            self.mode == "ssh"
+            and self.config.dynamic_routing_path
+            and self.config.source_dynamic_routing_path
+        )
+
+    def supports_ai_report_pull(self):
+        return bool(
+            self.mode == "ssh"
+            and self.config.ai_report_path
+            and self.config.source_ai_report_path
+        )
+
+    def supports_ai_domains_snapshot_pull(self):
+        return bool(self.mode == "ssh" and self.config.panel_db_path)
 
     def supports_stats(self):
         return bool(self.mode in {"ssh", "local", "docker"} and self.config.api_server)
@@ -354,7 +447,7 @@ class ManagedNodeController:
             if not source.is_file():
                 raise RuntimeError(f"{self.config.label} source config not found: {source}")
             content = source.read_text(encoding="utf-8")
-            remote_tmp = f"{self.config.config_path}.codex-tmp"
+            remote_tmp = build_temp_target_path(self.config.config_path)
             try:
                 self._run_remote(
                     ["python3", "-c", REMOTE_WRITE_FILE_SCRIPT, remote_tmp],
@@ -388,6 +481,72 @@ class ManagedNodeController:
             uploaded.append(self.config.panel_ports_path)
 
         return uploaded
+
+    def sync_text_file_from_remote(self, remote_path, local_path, error_prefix):
+        completed = self._run_remote(
+            ["python3", "-c", REMOTE_READ_FILE_SCRIPT, remote_path],
+            error_prefix,
+        )
+        try:
+            payload = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"{self.config.label} 远端文件返回无效 JSON") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"{self.config.label} 远端文件返回格式无效")
+
+        if not payload.get("exists"):
+            local_path.unlink(missing_ok=True)
+            return False
+
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(str(payload.get("data", "")), encoding="utf-8")
+        return True
+
+    def sync_dynamic_routing_from_remote(self):
+        if not self.supports_dynamic_routing_pull():
+            return False
+
+        local_path = self.config.source_dynamic_routing_path
+        if local_path is None:
+            return False
+        return self.sync_text_file_from_remote(
+            self.config.dynamic_routing_path,
+            local_path,
+            f"{self.config.label} 动态路由读取失败",
+        )
+
+    def sync_ai_report_from_remote(self):
+        if not self.supports_ai_report_pull():
+            return False
+        local_path = self.config.source_ai_report_path
+        if local_path is None:
+            return False
+        return self.sync_text_file_from_remote(
+            self.config.ai_report_path,
+            local_path,
+            f"{self.config.label} AI 域名报告读取失败",
+        )
+
+    def read_ai_domains_snapshot_from_remote(self):
+        if not self.supports_ai_domains_snapshot_pull():
+            return {"exists": False, "ai_domains": []}
+        completed = self._run_remote(
+            ["python3", "-c", REMOTE_AI_DOMAINS_SNAPSHOT_SCRIPT, self.config.panel_db_path],
+            f"{self.config.label} AI 域名快照读取失败",
+        )
+        try:
+            payload = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"{self.config.label} AI 域名快照返回无效 JSON") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"{self.config.label} AI 域名快照返回格式无效")
+        rows = payload.get("ai_domains", [])
+        if not isinstance(rows, list):
+            raise RuntimeError(f"{self.config.label} AI 域名快照数据格式无效")
+        return {
+            "exists": bool(payload.get("exists")),
+            "ai_domains": [item for item in rows if isinstance(item, dict)],
+        }
 
     def test_config(self, config_path=None):
         active_config_path = str(config_path or self.config.config_path or "").strip()

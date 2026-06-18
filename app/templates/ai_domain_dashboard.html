@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI 域名统计 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="page-header">
+        <div class="header-copy">
+          <div class="header-kicker-row">
+            <p class="eyebrow">AI DOMAIN DASHBOARD</p>
+            <span class="status-pill {{ 'good' if xray_running else 'bad' }}">
+              <span class="status-pill-dot"></span>
+              {{ 'Xray 运行中' if xray_running else 'Xray 未运行' }}
+            </span>
+          </div>
+          <h1 class="page-title">AI 域名统计</h1>
+          <p class="page-subtitle">
+            数据面继续执行 AI 域名识别和动态路由，控制面这里统一展示最近窗口报告和聚合快照，便于确认回传链路是否稳定。
+          </p>
+        </div>
+
+        <div class="header-aside">
+          <div class="quick-info-grid">
+            <div class="info-tile">
+              <span>面板地址</span>
+              <strong>{{ panel_public_url or (panel_host ~ ':' ~ panel_port) }}</strong>
+            </div>
+            <div class="info-tile">
+              <span>时区</span>
+              <strong>{{ timezone_label }}</strong>
+            </div>
+            <div class="info-tile">
+              <span>同步模式</span>
+              <strong>{{ dashboard.sync_mode_label }}</strong>
+            </div>
+            <div class="info-tile">
+              <span>最近同步</span>
+              <strong>{{ dashboard.aggregate.updated_at_display }}</strong>
+            </div>
+          </div>
+
+          <div class="header-actions">
+            <a class="text-button" href="{{ url_for('index') }}">返回控制台</a>
+            {% if auth_enabled %}
+            <form method="post" action="{{ url_for('logout') }}" class="inline-form">
+              <button class="secondary" type="submit">退出登录</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      {% if dashboard.sync_error %}
+      <section class="banner error">
+        <div class="banner-row">
+          <span>远端 AI 状态同步失败：{{ dashboard.sync_error }}</span>
+        </div>
+      </section>
+      {% endif %}
+
+      {% if dashboard.available %}
+      <section class="stats-grid">
+        <article class="stat-card stat-card-emphasis">
+          <span>当前窗口 AI 域名</span>
+          <strong class="{{ dashboard.report.route_status_tone }}">{{ dashboard.report.ai_domain_count }}</strong>
+          <small>{{ dashboard.report.route_status_label }}</small>
+        </article>
+        <article class="stat-card">
+          <span>当前窗口唯一域名</span>
+          <strong>{{ dashboard.report.unique_domains }}</strong>
+          <small>最近报告窗口内的全部唯一域名</small>
+        </article>
+        <article class="stat-card">
+          <span>聚合 AI 域名</span>
+          <strong>{{ dashboard.aggregate.total_ai_domains }}</strong>
+          <small>控制面本地镜像的去重 AI 域名数</small>
+        </article>
+        <article class="stat-card">
+          <span>聚合命中次数</span>
+          <strong>{{ dashboard.aggregate.total_hits }}</strong>
+          <small>本地镜像中的累计命中次数</small>
+        </article>
+      </section>
+
+      <section class="panel range-panel">
+        <div class="section-head">
+          <div>
+            <p class="section-eyebrow">WINDOW</p>
+            <h2>当前报告窗口</h2>
+            <p>展示数据面最近一次回传的 AI 域名窗口和路由应用状态。</p>
+          </div>
+        </div>
+
+        <div class="quick-info-grid">
+          <div class="info-tile">
+            <span>报告生成时间</span>
+            <strong>{{ dashboard.report.generated_at_display }}</strong>
+          </div>
+          <div class="info-tile">
+            <span>窗口开始</span>
+            <strong>{{ dashboard.report.window_start_display }}</strong>
+          </div>
+          <div class="info-tile">
+            <span>窗口结束</span>
+            <strong>{{ dashboard.report.window_end_display }}</strong>
+          </div>
+          <div class="info-tile">
+            <span>路由状态</span>
+            <strong class="{{ dashboard.report.route_status_tone }}">{{ dashboard.report.route_status_label }}</strong>
+          </div>
+          <div class="info-tile">
+            <span>待分类域名</span>
+            <strong>{{ dashboard.report.pending_domains_without_classifier }}</strong>
+          </div>
+          <div class="info-tile">
+            <span>配置变更</span>
+            <strong>{{ '已变更' if dashboard.report.config_changed else '无变化' }}</strong>
+          </div>
+          <div class="info-tile">
+            <span>AI 目标</span>
+            <strong>
+              {% if dashboard.report.ai_target %}
+              {{ dashboard.report.ai_target.upstream_host }}:{{ dashboard.report.ai_target.upstream_port }}
+              {% else %}
+              暂无
+              {% endif %}
+            </strong>
+          </div>
+          <div class="info-tile">
+            <span>面板目标</span>
+            <strong>
+              {% if dashboard.report.panel_target %}
+              {{ dashboard.report.panel_target.upstream_host }}:{{ dashboard.report.panel_target.upstream_port }}
+              {% else %}
+              暂无
+              {% endif %}
+            </strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="section-eyebrow">WINDOW DOMAINS</p>
+            <h2>当前窗口 AI 域名</h2>
+            <p>这里只列出最近一次报告窗口内被识别为 AI 的域名。</p>
+          </div>
+        </div>
+        {% if dashboard.report.current_ai_domains %}
+        <div class="table-card">
+          <div class="table-scroll">
+            <table class="ports-table">
+              <thead>
+                <tr>
+                  <th>域名</th>
+                  <th>命中</th>
+                  <th>协议</th>
+                  <th>首次出现</th>
+                  <th>最后出现</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.report.current_ai_domains %}
+                <tr>
+                  <td>
+                    <div class="table-primary">
+                      <strong>{{ item.domain }}</strong>
+                      <span>{{ item.classification }}</span>
+                    </div>
+                  </td>
+                  <td>{{ item.hits }}</td>
+                  <td>{{ item.protocols_display }}</td>
+                  <td>{{ item.first_seen_display }}</td>
+                  <td>{{ item.last_seen_display }}</td>
+                  <td>{{ item.reason or '暂无' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% else %}
+        <div class="empty-state">当前窗口没有识别到 AI 域名。</div>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="section-eyebrow">AGGREGATE</p>
+            <h2>聚合 AI 域名快照</h2>
+            <p>这部分来自数据面 `panel.db` 的 `ai_domains` 镜像，只保留控制面展示所需的聚合结果。</p>
+          </div>
+        </div>
+        {% if dashboard.top_ai_domains %}
+        <div class="table-card">
+          <div class="table-scroll">
+            <table class="ports-table">
+              <thead>
+                <tr>
+                  <th>域名</th>
+                  <th>累计命中</th>
+                  <th>来源</th>
+                  <th>最后出现</th>
+                  <th>最近窗口</th>
+                  <th>协议</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.top_ai_domains %}
+                <tr>
+                  <td>
+                    <div class="table-primary">
+                      <strong>{{ item.domain }}</strong>
+                      <span>{{ item.reason or item.model or item.classification }}</span>
+                    </div>
+                  </td>
+                  <td>{{ item.total_hits }}</td>
+                  <td>{{ item.source_display }}</td>
+                  <td>{{ item.last_seen_display }}</td>
+                  <td>{{ item.last_report_window_end_display }}</td>
+                  <td>{{ item.protocols_display }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% else %}
+        <div class="empty-state">本地镜像里还没有可展示的 AI 域名聚合数据。</div>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="section-eyebrow">SOURCES</p>
+            <h2>分类来源分布</h2>
+            <p>用来快速判断当前聚合结果主要来自哪条识别链路。</p>
+          </div>
+        </div>
+        {% if dashboard.source_breakdown %}
+        <div class="table-card">
+          <div class="table-scroll">
+            <table class="ports-table">
+              <thead>
+                <tr>
+                  <th>来源</th>
+                  <th>域名数</th>
+                  <th>累计命中</th>
+                  <th>最近更新</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.source_breakdown %}
+                <tr>
+                  <td>{{ item.source_display }}</td>
+                  <td>{{ item.domain_count }}</td>
+                  <td>{{ item.total_hits }}</td>
+                  <td>{{ item.updated_at_display }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% else %}
+        <div class="empty-state">当前没有可用的来源分布统计。</div>
+        {% endif %}
+      </section>
+      {% else %}
+      <section class="empty-state">
+        当前还没有 AI 域名镜像数据。请确认数据面已生成 `latest.json`，并配置回传同步链路。
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

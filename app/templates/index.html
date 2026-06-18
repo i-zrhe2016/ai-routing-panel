@@ -50,6 +50,7 @@
 
           <div class="header-actions">
             <a v-if="meta.probe_enabled" class="text-button" :href="meta.probe_dashboard_url">查看探针监控</a>
+            <a class="text-button" :href="meta.ai_domain_dashboard_url">查看 AI 域名统计</a>
             {% if auth_enabled %}
             <form method="post" action="{{ url_for('logout') }}" class="inline-form">
               <button class="secondary" type="submit">退出登录</button>
@@ -80,6 +81,18 @@
           <span>AI 节点状态</span>
           <strong :class="meta.ai_node_status.running ? 'ok' : 'bad'" v-text="nodeRunningLabel(meta.ai_node_status)"></strong>
           <small>AI 专用节点运行状态</small>
+        </article>
+        <article class="stat-card" v-if="meta.ai_domain_stats">
+          <span>AI 域名窗口</span>
+          <strong
+            :class="meta.ai_domain_stats.available ? meta.ai_domain_stats.route_status_tone : 'bad'"
+            v-text="meta.ai_domain_stats.current_ai_domains"
+          ></strong>
+          <small
+            v-text="meta.ai_domain_stats.available
+              ? ('聚合 ' + meta.ai_domain_stats.total_ai_domains + ' 个，' + meta.ai_domain_stats.route_status_label)
+              : (meta.ai_domain_stats.sync_error || '等待数据面回传 AI 域名报告')"
+          ></small>
         </article>
         <article class="stat-card">
           <span>运行中端口</span>

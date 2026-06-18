@@ -324,6 +324,10 @@ label span {
   color: var(--ok);
 }
 
+.warn {
+  color: var(--warn);
+}
+
 .bad {
   color: var(--bad);
 }

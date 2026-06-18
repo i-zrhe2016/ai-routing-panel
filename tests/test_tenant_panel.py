@@ -13,9 +13,11 @@ def load_panel_module(temp_root, panel_username="", panel_password=""):
     xray_dir = temp_root / "xray"
     runtime_dir = xray_dir / "runtime"
     logs_dir = xray_dir / "logs"
+    reports_dir = xray_dir / "reports" / "hourly-domains"
     data_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     client_config_path = temp_root / "client-test.json"
     client_config_path.write_text(
@@ -124,6 +126,72 @@ class TenantPanelTest(unittest.TestCase):
             if port["listen_port"] == listen_port:
                 return port
         self.fail(f"port {listen_port} was not created")
+
+    def seed_ai_domain_dashboard(self):
+        report_path = self.panel.state.default_node.config.source_ai_report_path
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "generated_at": "2026-06-18T00:00:00+00:00",
+                    "window_start": "2026-06-17T23:00:00+00:00",
+                    "window_end": "2026-06-18T00:00:00+00:00",
+                    "unique_domains": 3,
+                    "domains": [
+                        {
+                            "domain": "openai.com",
+                            "hits": 6,
+                            "first_seen": "2026-06-17T23:10:00+00:00",
+                            "last_seen": "2026-06-17T23:58:00+00:00",
+                            "protocols": ["tcp", "tls"],
+                            "classification": "ai",
+                            "reason": "known ai",
+                        },
+                        {
+                            "domain": "example.com",
+                            "hits": 2,
+                            "first_seen": "2026-06-17T23:20:00+00:00",
+                            "last_seen": "2026-06-17T23:30:00+00:00",
+                            "protocols": ["tcp"],
+                            "classification": "not_ai",
+                            "reason": "normal site",
+                        },
+                    ],
+                    "protocols": [{"protocol": "tcp", "hits": 8}],
+                    "ai_target": {"upstream_host": "ai.example.com", "upstream_port": 443},
+                    "panel_target": {
+                        "listen_port": 31098,
+                        "upstream_host": "panel.example.com",
+                        "upstream_port": 443,
+                    },
+                    "route_status": {
+                        "status": "applied",
+                        "reason": "",
+                        "config_changed": True,
+                        "pending_domains_without_classifier": 1,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.panel.state.replace_ai_domains_snapshot(
+            [
+                {
+                    "domain": "openai.com",
+                    "classification": "ai",
+                    "reason": "known ai",
+                    "source": "codex",
+                    "model": "gpt-5.5",
+                    "first_seen": "2026-06-17T23:10:00+00:00",
+                    "last_seen": "2026-06-17T23:58:00+00:00",
+                    "total_hits": 9,
+                    "last_protocols": "[\"tcp\", \"tls\"]",
+                    "last_report_window_start": "2026-06-17T23:00:00+00:00",
+                    "last_report_window_end": "2026-06-18T00:00:00+00:00",
+                    "updated_at": "2026-06-18T00:00:00+00:00",
+                }
+            ]
+        )
 
     def assert_login_redirect_target(self, response, expected_next):
         location = response.headers["Location"]
@@ -247,6 +315,32 @@ class TenantPanelTest(unittest.TestCase):
                 (port["listen_port"],),
             ).fetchone()
         self.assertIsNone(row)
+
+    def test_api_dashboard_includes_ai_domain_summary(self):
+        self.seed_ai_domain_dashboard()
+
+        response = self.client.get("/api/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        ai_stats = payload["dashboard"]["meta"]["ai_domain_stats"]
+        self.assertTrue(ai_stats["available"])
+        self.assertEqual(ai_stats["current_ai_domains"], 1)
+        self.assertEqual(ai_stats["total_ai_domains"], 1)
+        self.assertEqual(ai_stats["route_status"], "applied")
+        self.assertEqual(payload["dashboard"]["meta"]["ai_domain_dashboard_url"], "/ai-domain-dashboard")
+
+    def test_ai_domain_dashboard_renders_mirrored_report(self):
+        self.seed_ai_domain_dashboard()
+
+        response = self.client.get("/ai-domain-dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("AI 域名统计", body)
+        self.assertIn("openai.com", body)
+        self.assertIn("已应用 AI 路由", body)
+        self.assertIn("2026-06-18 00:00:00", body)
 
 
 class UnifiedAdminLoginTest(unittest.TestCase):

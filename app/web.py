@@ -144,7 +144,7 @@ def build_subscription_snapshot(ports):
     return subscription
 
 
-def collect_dashboard_state(message="", level="info"):
+def collect_dashboard_state(message="", level="info", ai_sync_error=""):
     ports = state.query_ports()
     summary = state.query_summary(ports)
     subscription = build_subscription_snapshot(ports)
@@ -161,12 +161,14 @@ def collect_dashboard_state(message="", level="info"):
             "timezone_label": datetime.now().astimezone().strftime("%Z"),
             "probe_enabled": PROBE_ENABLED,
             "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
+            "ai_domain_dashboard_url": url_for("ai_domain_dashboard"),
             "default_upstream_host": DEFAULT_UPSTREAM_HOST,
             "default_upstream_port": DEFAULT_UPSTREAM_PORT,
             "tenant_panel_prefix": "/tenant/",
             "default_node_status": default_node_status,
             "ai_node_status": ai_node_status,
             "node_statuses": [default_node_status, ai_node_status],
+            "ai_domain_stats": state.query_ai_domain_overview(sync_error=ai_sync_error),
         },
         "summary": summary,
         "subscription": subscription,
@@ -205,7 +207,12 @@ def build_tenant_dashboard_state(tenant_token, message="", level="info"):
 def build_dashboard_state(message="", level="info"):
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
-    return collect_dashboard_state(message=message, level=level)
+    ai_sync_error = ""
+    try:
+        state.sync_default_node_ai_state()
+    except RuntimeError as exc:
+        ai_sync_error = str(exc)
+    return collect_dashboard_state(message=message, level=level, ai_sync_error=ai_sync_error)
 
 
 def json_success_response(message="", level="success", status_code=200):
@@ -312,6 +319,26 @@ def probe_dashboard():
     dashboard = state.get_probe_dashboard(request.args.get("range", "24h").strip())
     return render_template(
         "probe_dashboard.html",
+        dashboard=dashboard,
+        timezone_label=datetime.now().astimezone().strftime("%Z"),
+        xray_running=state.xray_running(),
+        panel_host=PANEL_HOST,
+        panel_port=PANEL_PORT,
+        panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
+        auth_enabled=AUTH_ENABLED,
+    )
+
+
+@app.route("/ai-domain-dashboard", methods=["GET"])
+def ai_domain_dashboard():
+    ai_sync_error = ""
+    try:
+        state.sync_default_node_ai_state()
+    except RuntimeError as exc:
+        ai_sync_error = str(exc)
+    dashboard = state.get_ai_domain_dashboard(sync_error=ai_sync_error)
+    return render_template(
+        "ai_domain_dashboard.html",
         dashboard=dashboard,
         timezone_label=datetime.now().astimezone().strftime("%Z"),
         xray_running=state.xray_running(),

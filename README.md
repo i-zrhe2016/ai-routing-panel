@@ -93,6 +93,8 @@ docker compose up -d --build
 - 默认节点至少配置：
   - `DEFAULT_NODE_SSH_TARGET`
   - `DEFAULT_NODE_CONFIG_PATH`
+  - 如果 AI 域名自动分类在数据面执行，再配置 `DEFAULT_NODE_DYNAMIC_ROUTING_PATH`
+  - 如果要在控制面展示 AI 域名统计，再配置 `DEFAULT_NODE_AI_REPORT_PATH` 和 `DEFAULT_NODE_PANEL_DB_PATH`
   - `DEFAULT_NODE_PANEL_PORTS_PATH`
   - `DEFAULT_NODE_ACCESS_LOG_PATH`
   - `DEFAULT_NODE_RESTART_COMMAND`，或者配置可访问的 `DEFAULT_NODE_CONTAINER_NAME`
@@ -107,6 +109,8 @@ docker compose up -d --build
 - 控制面先在本地渲染 `config.json` / `panel-ports.json`
 - 再通过 SSH 上传到默认数据面节点
 - 默认节点连接数统计通过 SSH 增量读取远端 `access.log`
+- 如果 AI 域名分类在数据面执行，控制面会先拉回远端 `dynamic-routing.json`
+- 如果配置了 `DEFAULT_NODE_AI_REPORT_PATH` / `DEFAULT_NODE_PANEL_DB_PATH`，控制面会镜像远端 `latest.json` 和 `ai_domains` 快照，用于首页概览和 AI 域名统计页展示
 - 默认节点字节流量统计继续走远端 Xray API `statsquery`
 - 首页会显示“默认节点”和“AI 节点”两个独立状态，并支持分别重启
 
@@ -442,6 +446,9 @@ curl -u admin:secret \
 | `DEFAULT_NODE_SSH_TARGET` | 空 | 默认数据面节点 SSH 目标，例如 `root@node-a` |
 | `DEFAULT_NODE_SSH_OPTIONS` | 空 | 默认节点 SSH 附加参数 |
 | `DEFAULT_NODE_CONFIG_PATH` | 空 | 远端默认节点 `config.json` 路径 |
+| `DEFAULT_NODE_DYNAMIC_ROUTING_PATH` | 空 | 当 AI 域名自动分类在数据面执行时，远端 `dynamic-routing.json` 路径 |
+| `DEFAULT_NODE_AI_REPORT_PATH` | 空 | 当 AI 域名统计在数据面生成时，远端 `reports/hourly-domains/latest.json` 路径 |
+| `DEFAULT_NODE_PANEL_DB_PATH` | 空 | 当 AI 域名统计在数据面生成时，远端 `panel.db` 路径，用于回传 `ai_domains` 聚合快照 |
 | `DEFAULT_NODE_PANEL_PORTS_PATH` | 空 | 远端默认节点 `panel-ports.json` 路径 |
 | `DEFAULT_NODE_ACCESS_LOG_PATH` | 空 | 远端默认节点 `access.log` 路径 |
 | `DEFAULT_NODE_RESTART_COMMAND` | 空 | 默认节点远程重启命令 |

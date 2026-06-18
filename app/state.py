@@ -25,10 +25,13 @@ from .config import (
     DB_PATH,
     DEFAULT_NODE_ACCESS_LOG_PATH,
     DEFAULT_NODE_API_SERVER,
+    DEFAULT_NODE_AI_REPORT_PATH,
     DEFAULT_NODE_CONFIG_PATH,
     DEFAULT_NODE_CONTAINER_NAME,
     DEFAULT_NODE_DOCKER_BIN,
+    DEFAULT_NODE_DYNAMIC_ROUTING_PATH,
     DEFAULT_NODE_LOCAL_BIN,
+    DEFAULT_NODE_PANEL_DB_PATH,
     DEFAULT_NODE_PANEL_PORTS_PATH,
     DEFAULT_NODE_RESTART_COMMAND,
     DEFAULT_NODE_SSH_BIN,
@@ -48,6 +51,7 @@ from .config import (
     XRAY_ACCESS_LOG_PATH,
     XRAY_CLIENT_CONFIG_PATH,
     XRAY_CONFIG_PATH,
+    XRAY_DYNAMIC_ROUTING_PATH,
     XRAY_ENV_FILE_PATH,
     XRAY_PANEL_PORTS_PATH,
     XRAY_PROBE_HOST,
@@ -71,6 +75,7 @@ from .helpers import (
     utc_iso_now,
     utc_now,
 )
+from .xray.ai_domain_manager import ensure_ai_domain_schema
 from .xray.node_control import ManagedNodeConfig, ManagedNodeController
 
 XRAY_ACCESS_LOG_LINE_RE = re.compile(
@@ -99,9 +104,14 @@ class PanelState:
                 ssh_bin=DEFAULT_NODE_SSH_BIN,
                 ssh_options=DEFAULT_NODE_SSH_OPTIONS,
                 config_path=self.default_node_config_path(),
+                dynamic_routing_path=DEFAULT_NODE_DYNAMIC_ROUTING_PATH.strip(),
+                ai_report_path=DEFAULT_NODE_AI_REPORT_PATH.strip(),
+                panel_db_path=DEFAULT_NODE_PANEL_DB_PATH.strip(),
                 access_log_path=DEFAULT_NODE_ACCESS_LOG_PATH.strip() or str(XRAY_ACCESS_LOG_PATH),
                 panel_ports_path=DEFAULT_NODE_PANEL_PORTS_PATH.strip(),
                 source_config_path=XRAY_CONFIG_PATH,
+                source_dynamic_routing_path=XRAY_DYNAMIC_ROUTING_PATH,
+                source_ai_report_path=self.default_node_ai_report_source_path(),
                 source_panel_ports_path=XRAY_PANEL_PORTS_PATH,
                 upstream_host=DEFAULT_UPSTREAM_HOST,
                 upstream_port=DEFAULT_UPSTREAM_PORT,
@@ -135,6 +145,9 @@ class PanelState:
         if DEFAULT_NODE_LOCAL_BIN:
             return str(XRAY_CONFIG_PATH)
         return "/etc/xray/config.json"
+
+    def default_node_ai_report_source_path(self):
+        return XRAY_ENV_FILE_PATH.parent / "reports" / "hourly-domains" / "latest.json"
 
     def default_node_status(self):
         return self.default_node.status_summary()
@@ -765,6 +778,352 @@ class PanelState:
             else:
                 summary["disabled_ports"] += 1
         return summary
+
+    def sync_default_node_ai_state(self):
+        result = {
+            "report_synced": False,
+            "snapshot_synced": False,
+        }
+        if self.default_node.supports_ai_report_pull():
+            result["report_synced"] = self.default_node.sync_ai_report_from_remote()
+        if self.default_node.supports_ai_domains_snapshot_pull():
+            snapshot = self.default_node.read_ai_domains_snapshot_from_remote()
+            if snapshot.get("exists"):
+                self.replace_ai_domains_snapshot(snapshot.get("ai_domains", []))
+                result["snapshot_synced"] = True
+        return result
+
+    def replace_ai_domains_snapshot(self, rows):
+        def operation(conn):
+            ensure_ai_domain_schema(conn)
+            conn.execute("DELETE FROM ai_domain_observations")
+            conn.execute("DELETE FROM ai_domains")
+
+            payloads = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                domain = str(row.get("domain", "")).strip()
+                if not domain:
+                    continue
+                last_protocols = row.get("last_protocols", "[]")
+                if isinstance(last_protocols, list):
+                    last_protocols = json.dumps(last_protocols, ensure_ascii=True)
+                else:
+                    last_protocols = str(last_protocols or "[]")
+                payloads.append(
+                    (
+                        domain,
+                        str(row.get("classification", "ai") or "ai").strip() or "ai",
+                        str(row.get("reason", "") or "").strip(),
+                        str(row.get("source", "") or "").strip(),
+                        str(row.get("model", "") or "").strip(),
+                        str(row.get("first_seen") or "").strip() or None,
+                        str(row.get("last_seen") or "").strip() or None,
+                        int(row.get("total_hits", 0) or 0),
+                        last_protocols,
+                        str(row.get("last_report_window_start") or "").strip() or None,
+                        str(row.get("last_report_window_end") or "").strip() or None,
+                        str(row.get("updated_at") or "").strip() or utc_iso_now(),
+                    )
+                )
+
+            if payloads:
+                conn.executemany(
+                    """
+                    INSERT INTO ai_domains (
+                        domain,
+                        classification,
+                        reason,
+                        source,
+                        model,
+                        first_seen,
+                        last_seen,
+                        total_hits,
+                        last_protocols,
+                        last_report_window_start,
+                        last_report_window_end,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    payloads,
+                )
+            return len(payloads)
+
+        return self.apply_state_update(operation)
+
+    def format_optional_display_time(self, value, default="暂无"):
+        localized = localize_time(value)
+        if localized is None:
+            return default
+        return localized.strftime("%Y-%m-%d %H:%M:%S")
+
+    def ai_domain_sync_mode_label(self):
+        mode = self.default_node.mode
+        if mode == "ssh":
+            return "远端镜像"
+        if mode in {"local", "docker"}:
+            return "本地运行"
+        return "本地缓存"
+
+    def ai_route_status_label(self, status, reason=""):
+        status_text = str(status or "").strip().lower()
+        if status_text == "applied":
+            return "已应用 AI 路由"
+        if status_text == "idle":
+            return "当前窗口无 AI 域名"
+        if status_text == "pending_proxy_template":
+            return "等待代理模板"
+        if status_text == "disabled":
+            return "AI 路由未启用"
+        if reason:
+            return reason
+        return "未知状态"
+
+    def ai_route_status_tone(self, status):
+        status_text = str(status or "").strip().lower()
+        if status_text == "applied":
+            return "ok"
+        if status_text in {"idle", "disabled"}:
+            return "warn"
+        return "bad"
+
+    def ai_source_label(self, value):
+        text = str(value or "").strip()
+        return text or "未标记"
+
+    def decode_json_text_list(self, value):
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raw = str(value or "").strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(item).strip() for item in parsed if str(item).strip()]
+
+    def serialize_ai_report_domain(self, item):
+        protocols = self.decode_json_text_list(item.get("protocols", []))
+        return {
+            "domain": str(item.get("domain", "")).strip(),
+            "hits": int(item.get("hits", 0) or 0),
+            "classification": str(item.get("classification", "unknown") or "unknown").strip() or "unknown",
+            "reason": str(item.get("reason", "") or "").strip(),
+            "protocols": protocols,
+            "protocols_display": ", ".join(protocols) if protocols else "暂无",
+            "first_seen": str(item.get("first_seen") or "").strip() or None,
+            "last_seen": str(item.get("last_seen") or "").strip() or None,
+            "first_seen_display": self.format_optional_display_time(item.get("first_seen")),
+            "last_seen_display": self.format_optional_display_time(item.get("last_seen")),
+        }
+
+    def serialize_ai_domain_snapshot_row(self, row):
+        item = dict(row)
+        protocols = self.decode_json_text_list(item.get("last_protocols", "[]"))
+        return {
+            **item,
+            "classification": str(item.get("classification", "ai") or "ai").strip() or "ai",
+            "source_display": self.ai_source_label(item.get("source")),
+            "protocols": protocols,
+            "protocols_display": ", ".join(protocols) if protocols else "暂无",
+            "first_seen_display": self.format_optional_display_time(item.get("first_seen")),
+            "last_seen_display": self.format_optional_display_time(item.get("last_seen")),
+            "updated_at_display": self.format_optional_display_time(item.get("updated_at")),
+            "last_report_window_start_display": self.format_optional_display_time(
+                item.get("last_report_window_start")
+            ),
+            "last_report_window_end_display": self.format_optional_display_time(
+                item.get("last_report_window_end")
+            ),
+        }
+
+    def read_ai_domain_report(self):
+        report_path = self.default_node.config.source_ai_report_path or self.default_node_ai_report_source_path()
+        if not report_path.is_file():
+            return None
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+
+        route_status = payload.get("route_status", {})
+        if not isinstance(route_status, dict):
+            route_status = {}
+        route_status_code = str(route_status.get("status", "unknown") or "unknown").strip() or "unknown"
+        route_status_reason = str(route_status.get("reason", "") or "").strip()
+
+        domains = []
+        for raw_item in payload.get("domains", []):
+            if not isinstance(raw_item, dict):
+                continue
+            domain_item = self.serialize_ai_report_domain(raw_item)
+            if domain_item["domain"]:
+                domains.append(domain_item)
+        current_ai_domains = [item for item in domains if item["classification"] == "ai"]
+
+        ai_target = payload.get("ai_target")
+        if not isinstance(ai_target, dict):
+            ai_target = None
+        panel_target = payload.get("panel_target")
+        if not isinstance(panel_target, dict):
+            panel_target = None
+
+        return {
+            "generated_at": str(payload.get("generated_at") or "").strip() or None,
+            "generated_at_display": self.format_optional_display_time(payload.get("generated_at")),
+            "window_start": str(payload.get("window_start") or "").strip() or None,
+            "window_start_display": self.format_optional_display_time(payload.get("window_start")),
+            "window_end": str(payload.get("window_end") or "").strip() or None,
+            "window_end_display": self.format_optional_display_time(payload.get("window_end")),
+            "unique_domains": int(payload.get("unique_domains", len(domains)) or 0),
+            "ai_domain_count": len(current_ai_domains),
+            "domains": domains,
+            "current_ai_domains": current_ai_domains,
+            "protocols": [item for item in payload.get("protocols", []) if isinstance(item, dict)],
+            "route_status": route_status_code,
+            "route_status_reason": route_status_reason,
+            "route_status_label": self.ai_route_status_label(route_status_code, route_status_reason),
+            "route_status_tone": self.ai_route_status_tone(route_status_code),
+            "config_changed": bool(route_status.get("config_changed")),
+            "pending_domains_without_classifier": int(route_status.get("pending_domains_without_classifier", 0) or 0),
+            "ai_target": ai_target,
+            "panel_target": panel_target,
+        }
+
+    def query_ai_domain_aggregate(self):
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_ai_domains,
+                    COALESCE(SUM(total_hits), 0) AS total_hits,
+                    MAX(updated_at) AS updated_at
+                FROM ai_domains
+                """
+            ).fetchone()
+        return {
+            "total_ai_domains": int(row["total_ai_domains"] or 0),
+            "total_hits": int(row["total_hits"] or 0),
+            "updated_at": row["updated_at"],
+            "updated_at_display": self.format_optional_display_time(row["updated_at"]),
+        }
+
+    def query_top_ai_domains(self, limit=100):
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    domain,
+                    classification,
+                    reason,
+                    source,
+                    model,
+                    first_seen,
+                    last_seen,
+                    total_hits,
+                    last_protocols,
+                    last_report_window_start,
+                    last_report_window_end,
+                    updated_at
+                FROM ai_domains
+                ORDER BY total_hits DESC, last_seen DESC, domain ASC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [self.serialize_ai_domain_snapshot_row(row) for row in rows]
+
+    def query_ai_domain_source_breakdown(self):
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    CASE
+                        WHEN TRIM(source) = '' THEN ''
+                        ELSE source
+                    END AS source,
+                    COUNT(*) AS domain_count,
+                    COALESCE(SUM(total_hits), 0) AS total_hits,
+                    MAX(updated_at) AS updated_at
+                FROM ai_domains
+                GROUP BY source
+                ORDER BY total_hits DESC, domain_count DESC, source ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "source": row["source"],
+                "source_display": self.ai_source_label(row["source"]),
+                "domain_count": int(row["domain_count"] or 0),
+                "total_hits": int(row["total_hits"] or 0),
+                "updated_at": row["updated_at"],
+                "updated_at_display": self.format_optional_display_time(row["updated_at"]),
+            }
+            for row in rows
+        ]
+
+    def query_ai_domain_overview(self, sync_error=""):
+        report = self.read_ai_domain_report()
+        aggregate = self.query_ai_domain_aggregate()
+        return {
+            "available": bool(report or aggregate["total_ai_domains"] > 0),
+            "sync_mode": self.default_node.mode,
+            "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "sync_error": str(sync_error or "").strip(),
+            "report_available": report is not None,
+            "current_ai_domains": report["ai_domain_count"] if report else 0,
+            "unique_domains": report["unique_domains"] if report else 0,
+            "report_generated_at_display": (
+                report["generated_at_display"] if report else "暂无"
+            ),
+            "route_status": report["route_status"] if report else "unknown",
+            "route_status_label": report["route_status_label"] if report else "暂无报告",
+            "route_status_tone": report["route_status_tone"] if report else "warn",
+            "total_ai_domains": aggregate["total_ai_domains"],
+            "total_hits": aggregate["total_hits"],
+            "aggregate_updated_at_display": aggregate["updated_at_display"],
+        }
+
+    def get_ai_domain_dashboard(self, sync_error=""):
+        report = self.read_ai_domain_report()
+        aggregate = self.query_ai_domain_aggregate()
+        top_ai_domains = self.query_top_ai_domains()
+        source_breakdown = self.query_ai_domain_source_breakdown()
+        return {
+            "available": bool(report or top_ai_domains),
+            "sync_mode": self.default_node.mode,
+            "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "sync_error": str(sync_error or "").strip(),
+            "report": (
+                report
+                if report is not None
+                else {
+                    "generated_at_display": "暂无",
+                    "window_start_display": "暂无",
+                    "window_end_display": "暂无",
+                    "unique_domains": 0,
+                    "ai_domain_count": 0,
+                    "domains": [],
+                    "current_ai_domains": [],
+                    "route_status": "unknown",
+                    "route_status_label": "暂无报告",
+                    "route_status_tone": "warn",
+                    "config_changed": False,
+                    "pending_domains_without_classifier": 0,
+                    "ai_target": None,
+                    "panel_target": None,
+                }
+            ),
+            "aggregate": aggregate,
+            "top_ai_domains": top_ai_domains,
+            "source_breakdown": source_breakdown,
+        }
 
     def validate_port_payload(self, form):
         return {
@@ -1424,6 +1783,7 @@ class PanelState:
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
     def render_xray_config(self):
+        self.sync_default_node_dynamic_routing()
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
         self.run_command(
             [
@@ -1443,6 +1803,11 @@ class PanelState:
             ],
             "Xray 配置渲染失败",
         )
+
+    def sync_default_node_dynamic_routing(self):
+        if not self.default_node.supports_dynamic_routing_pull():
+            return False
+        return self.default_node.sync_dynamic_routing_from_remote()
 
     def sync_default_node_artifacts(self):
         if not self.default_node.supports_sync():

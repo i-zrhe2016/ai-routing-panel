@@ -48,6 +48,9 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = Path(os.environ.get("DB_PATH", DATA_DIR / "panel.db"))
 XRAY_ENV_FILE_PATH = Path(os.environ.get("XRAY_ENV_FILE_PATH", BASE_DIR / "xray" / ".env"))
 XRAY_CONFIG_PATH = Path(os.environ.get("XRAY_CONFIG_PATH", BASE_DIR / "xray" / "runtime" / "config.json"))
+XRAY_DYNAMIC_ROUTING_PATH = Path(
+    os.environ.get("XRAY_DYNAMIC_ROUTING_PATH", XRAY_CONFIG_PATH.parent / "dynamic-routing.json")
+)
 XRAY_PANEL_PORTS_PATH = Path(
     os.environ.get("XRAY_PANEL_PORTS_PATH", BASE_DIR / "xray" / "runtime" / "panel-ports.json")
 )
@@ -79,6 +82,9 @@ DEFAULT_NODE_CONTAINER_NAME = os.environ.get("DEFAULT_NODE_CONTAINER_NAME", XRAY
 DEFAULT_NODE_DOCKER_BIN = os.environ.get("DEFAULT_NODE_DOCKER_BIN", XRAY_DOCKER_BIN).strip() or XRAY_DOCKER_BIN
 DEFAULT_NODE_RESTART_COMMAND = os.environ.get("DEFAULT_NODE_RESTART_COMMAND", "").strip()
 DEFAULT_NODE_CONFIG_PATH = os.environ.get("DEFAULT_NODE_CONFIG_PATH", "").strip()
+DEFAULT_NODE_DYNAMIC_ROUTING_PATH = os.environ.get("DEFAULT_NODE_DYNAMIC_ROUTING_PATH", "").strip()
+DEFAULT_NODE_AI_REPORT_PATH = os.environ.get("DEFAULT_NODE_AI_REPORT_PATH", "").strip()
+DEFAULT_NODE_PANEL_DB_PATH = os.environ.get("DEFAULT_NODE_PANEL_DB_PATH", "").strip()
 DEFAULT_NODE_PANEL_PORTS_PATH = os.environ.get("DEFAULT_NODE_PANEL_PORTS_PATH", "").strip()
 DEFAULT_NODE_ACCESS_LOG_PATH = os.environ.get("DEFAULT_NODE_ACCESS_LOG_PATH", "").strip()
 
