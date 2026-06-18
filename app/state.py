@@ -1,7 +1,5 @@
 import json
-import os
 import re
-import shutil
 import socket
 import sqlite3
 import subprocess
@@ -11,8 +9,32 @@ import time
 from datetime import datetime, timezone
 
 from .config import (
+    AI_NODE_API_SERVER,
+    AI_NODE_CONFIG_PATH,
+    AI_NODE_CONTAINER_NAME,
+    AI_NODE_DOCKER_BIN,
+    AI_NODE_HOST,
+    AI_NODE_LOCAL_BIN,
+    AI_NODE_PORT,
+    AI_NODE_RESTART_COMMAND,
+    AI_NODE_SSH_BIN,
+    AI_NODE_SSH_OPTIONS,
+    AI_NODE_SSH_TARGET,
+    AI_NODE_XRAY_BIN,
     DATA_DIR,
     DB_PATH,
+    DEFAULT_NODE_ACCESS_LOG_PATH,
+    DEFAULT_NODE_API_SERVER,
+    DEFAULT_NODE_CONFIG_PATH,
+    DEFAULT_NODE_CONTAINER_NAME,
+    DEFAULT_NODE_DOCKER_BIN,
+    DEFAULT_NODE_LOCAL_BIN,
+    DEFAULT_NODE_PANEL_PORTS_PATH,
+    DEFAULT_NODE_RESTART_COMMAND,
+    DEFAULT_NODE_SSH_BIN,
+    DEFAULT_NODE_SSH_OPTIONS,
+    DEFAULT_NODE_SSH_TARGET,
+    DEFAULT_NODE_XRAY_BIN,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
     LOCAL_TZ,
@@ -24,13 +46,9 @@ from .config import (
     PROBE_TIMEOUT,
     SEED_LISTEN_PORT,
     XRAY_ACCESS_LOG_PATH,
-    XRAY_API_SERVER,
     XRAY_CLIENT_CONFIG_PATH,
     XRAY_CONFIG_PATH,
-    XRAY_CONTAINER_NAME,
-    XRAY_DOCKER_BIN,
     XRAY_ENV_FILE_PATH,
-    XRAY_LOCAL_BIN,
     XRAY_PANEL_PORTS_PATH,
     XRAY_PROBE_HOST,
     XRAY_STATS_QUERY_TIMEOUT,
@@ -53,6 +71,7 @@ from .helpers import (
     utc_iso_now,
     utc_now,
 )
+from .xray.node_control import ManagedNodeConfig, ManagedNodeController
 
 XRAY_ACCESS_LOG_LINE_RE = re.compile(
     r"^(?P<seen_at>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?) .* \[(?P<tag>[^\]]+) >> [^\]]+\]$"
@@ -66,6 +85,72 @@ class PanelState:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         XRAY_PANEL_PORTS_PATH.parent.mkdir(parents=True, exist_ok=True)
         XRAY_ACCESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self.default_node = ManagedNodeController(
+            ManagedNodeConfig(
+                role="default",
+                label="默认节点",
+                api_server=DEFAULT_NODE_API_SERVER,
+                xray_bin=DEFAULT_NODE_XRAY_BIN,
+                local_bin=DEFAULT_NODE_LOCAL_BIN,
+                docker_bin=DEFAULT_NODE_DOCKER_BIN,
+                container_name=DEFAULT_NODE_CONTAINER_NAME,
+                restart_command=DEFAULT_NODE_RESTART_COMMAND,
+                ssh_target=DEFAULT_NODE_SSH_TARGET,
+                ssh_bin=DEFAULT_NODE_SSH_BIN,
+                ssh_options=DEFAULT_NODE_SSH_OPTIONS,
+                config_path=self.default_node_config_path(),
+                access_log_path=DEFAULT_NODE_ACCESS_LOG_PATH.strip() or str(XRAY_ACCESS_LOG_PATH),
+                panel_ports_path=DEFAULT_NODE_PANEL_PORTS_PATH.strip(),
+                source_config_path=XRAY_CONFIG_PATH,
+                source_panel_ports_path=XRAY_PANEL_PORTS_PATH,
+                upstream_host=DEFAULT_UPSTREAM_HOST,
+                upstream_port=DEFAULT_UPSTREAM_PORT,
+            )
+        )
+        self.ai_node = ManagedNodeController(
+            ManagedNodeConfig(
+                role="ai",
+                label="AI 节点",
+                api_server=AI_NODE_API_SERVER,
+                xray_bin=AI_NODE_XRAY_BIN,
+                local_bin=AI_NODE_LOCAL_BIN,
+                docker_bin=AI_NODE_DOCKER_BIN,
+                container_name=AI_NODE_CONTAINER_NAME,
+                restart_command=AI_NODE_RESTART_COMMAND,
+                ssh_target=AI_NODE_SSH_TARGET,
+                ssh_bin=AI_NODE_SSH_BIN,
+                ssh_options=AI_NODE_SSH_OPTIONS,
+                config_path=AI_NODE_CONFIG_PATH.strip(),
+                upstream_host=AI_NODE_HOST,
+                upstream_port=AI_NODE_PORT,
+            )
+        )
+
+    def default_node_config_path(self):
+        explicit = DEFAULT_NODE_CONFIG_PATH.strip()
+        if explicit:
+            return explicit
+        if DEFAULT_NODE_SSH_TARGET:
+            return str(XRAY_CONFIG_PATH)
+        if DEFAULT_NODE_LOCAL_BIN:
+            return str(XRAY_CONFIG_PATH)
+        return "/etc/xray/config.json"
+
+    def default_node_status(self):
+        return self.default_node.status_summary()
+
+    def ai_node_status(self):
+        return self.ai_node.status_summary()
+
+    def node_statuses(self):
+        return [self.default_node_status(), self.ai_node_status()]
+
+    def resolve_node(self, role):
+        if role == "default":
+            return self.default_node
+        if role == "ai":
+            return self.ai_node
+        raise ValidationError("节点类型不存在。")
 
     def connect(self):
         conn = sqlite3.connect(DB_PATH)
@@ -374,36 +459,52 @@ class PanelState:
             }
 
     def sync_xray_access_log_in_tx(self, conn):
-        if not XRAY_ACCESS_LOG_PATH.exists():
-            return 0
-
-        stat = XRAY_ACCESS_LOG_PATH.stat()
-        current_inode = str(stat.st_ino)
         current_offset = int(self.get_state(conn, "xray_access_log_offset", "0"))
         recorded_inode = self.get_state(conn, "xray_access_log_inode", "")
+        current_inode = ""
+        new_offset = 0
+        lines = []
 
-        if recorded_inode != current_inode or stat.st_size < current_offset:
-            current_offset = 0
+        if self.default_node.supports_logs():
+            try:
+                payload = self.default_node.read_access_log_delta(recorded_inode, current_offset)
+            except RuntimeError:
+                return 0
+            if not payload["exists"]:
+                return 0
+            current_inode = payload["inode"]
+            new_offset = int(payload["offset"])
+            lines = str(payload["data"]).splitlines()
+        else:
+            if not XRAY_ACCESS_LOG_PATH.exists():
+                return 0
+
+            stat = XRAY_ACCESS_LOG_PATH.stat()
+            current_inode = str(stat.st_ino)
+            if recorded_inode != current_inode or stat.st_size < current_offset:
+                current_offset = 0
+
+            with XRAY_ACCESS_LOG_PATH.open("r", encoding="utf-8", errors="ignore") as handle:
+                handle.seek(current_offset)
+                lines = handle.readlines()
+                new_offset = handle.tell()
 
         aggregates = {}
-        with XRAY_ACCESS_LOG_PATH.open("r", encoding="utf-8", errors="ignore") as handle:
-            handle.seek(current_offset)
-            for line in handle:
-                parsed = self.parse_xray_access_log_line(line)
-                if parsed is None:
-                    continue
-                listen_port, stat_date, seen_at = parsed
-                item = aggregates.setdefault(
-                    (listen_port, stat_date),
-                    {
-                        "connections": 0,
-                        "last_seen": seen_at,
-                    },
-                )
-                item["connections"] += 1
-                if seen_at > item["last_seen"]:
-                    item["last_seen"] = seen_at
-            new_offset = handle.tell()
+        for line in lines:
+            parsed = self.parse_xray_access_log_line(line)
+            if parsed is None:
+                continue
+            listen_port, stat_date, seen_at = parsed
+            item = aggregates.setdefault(
+                (listen_port, stat_date),
+                {
+                    "connections": 0,
+                    "last_seen": seen_at,
+                },
+            )
+            item["connections"] += 1
+            if seen_at > item["last_seen"]:
+                item["last_seen"] = seen_at
 
         for (listen_port, stat_date), item in aggregates.items():
             conn.execute(
@@ -1282,6 +1383,11 @@ class PanelState:
                 XRAY_CONFIG_PATH.unlink(missing_ok=True)
             else:
                 XRAY_CONFIG_PATH.write_text(previous_config, encoding="utf-8")
+            if self.default_node.supports_sync():
+                try:
+                    self.default_node.sync_generated_files(validate_config=True)
+                except RuntimeError:
+                    pass
             raise
         conn.commit()
 
@@ -1317,40 +1423,6 @@ class PanelState:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
-    def xray_uses_local_mode(self):
-        return bool(XRAY_LOCAL_BIN)
-
-    def resolve_xray_local_bin(self):
-        if not XRAY_LOCAL_BIN:
-            return None
-        if os.path.sep not in XRAY_LOCAL_BIN:
-            return shutil.which(XRAY_LOCAL_BIN)
-        return XRAY_LOCAL_BIN if os.path.isfile(XRAY_LOCAL_BIN) else None
-
-    def parse_xray_api_endpoint(self):
-        raw = str(XRAY_API_SERVER or "").strip()
-        if not raw:
-            return None
-        if raw.startswith("tcp://"):
-            raw = raw.removeprefix("tcp://")
-        if raw.startswith("["):
-            closing = raw.find("]")
-            if closing <= 0 or closing + 2 >= len(raw) or raw[closing + 1] != ":":
-                return None
-            host = raw[1:closing]
-            port_text = raw[closing + 2:]
-        else:
-            host, separator, port_text = raw.rpartition(":")
-            if not separator:
-                return None
-        try:
-            port = int(port_text)
-        except ValueError:
-            return None
-        if port < 1 or port > 65535:
-            return None
-        return (host or "127.0.0.1", port)
-
     def render_xray_config(self):
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
         self.run_command(
@@ -1372,117 +1444,36 @@ class PanelState:
             "Xray 配置渲染失败",
         )
 
+    def sync_default_node_artifacts(self):
+        if not self.default_node.supports_sync():
+            return []
+        return self.default_node.sync_generated_files(validate_config=True)
+
     def xray_config_test(self):
-        if self.xray_uses_local_mode():
-            local_bin = self.resolve_xray_local_bin()
-            if not local_bin:
-                return
-            self.run_command(
-                [
-                    local_bin,
-                    "run",
-                    "-test",
-                    "-config",
-                    str(XRAY_CONFIG_PATH),
-                ],
-                "Xray 配置校验失败",
-            )
+        if self.default_node.supports_sync():
+            self.sync_default_node_artifacts()
             return
-        if not self.xray_container_exists() or not self.xray_running():
-            return
-        self.run_command(
-            [
-                XRAY_DOCKER_BIN,
-                "exec",
-                XRAY_CONTAINER_NAME,
-                "/usr/local/bin/xray",
-                "run",
-                "-test",
-                "-config",
-                "/etc/xray/config.json",
-            ],
-            "Xray 配置校验失败",
-        )
+        self.default_node.test_config()
 
     def xray_restart(self):
-        if self.xray_uses_local_mode():
-            return
-        if not self.xray_container_exists():
-            return
-        command = [XRAY_DOCKER_BIN, "start" if not self.xray_running() else "restart", XRAY_CONTAINER_NAME]
-        self.run_command(command, "Xray 重启失败")
+        return self.default_node.restart()
 
     def xray_container_exists(self):
-        if self.xray_uses_local_mode():
-            return bool(self.resolve_xray_local_bin())
-        if not XRAY_CONTAINER_NAME:
-            return False
-        completed = subprocess.run(
-            [XRAY_DOCKER_BIN, "container", "inspect", XRAY_CONTAINER_NAME],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return completed.returncode == 0
+        return self.default_node.is_configured()
 
     def xray_running(self):
-        if self.xray_uses_local_mode():
-            endpoint = self.parse_xray_api_endpoint()
-            if endpoint is None:
-                return False
-            try:
-                with socket.create_connection(endpoint, timeout=1):
-                    return True
-            except OSError:
-                return False
-        if not self.xray_container_exists():
-            return False
-        completed = subprocess.run(
-            [XRAY_DOCKER_BIN, "inspect", "--format", "{{.State.Running}}", XRAY_CONTAINER_NAME],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return completed.returncode == 0 and completed.stdout.strip().lower() == "true"
+        return self.default_node.is_running()
 
     def read_xray_traffic_stats(self):
         if not self.xray_running():
             return {}
-        if self.xray_uses_local_mode():
-            local_bin = self.resolve_xray_local_bin()
-            if not local_bin:
-                return {}
-            command = [
-                local_bin,
-                "api",
-                "statsquery",
-                f"--server={XRAY_API_SERVER}",
-                "-timeout",
-                str(XRAY_STATS_QUERY_TIMEOUT),
-                "-pattern",
-                "inbound>>>panel-",
-                "-reset",
-            ]
-        else:
-            command = [
-                XRAY_DOCKER_BIN,
-                "exec",
-                XRAY_CONTAINER_NAME,
-                "/usr/local/bin/xray",
-                "api",
-                "statsquery",
-                f"--server={XRAY_API_SERVER}",
-                "-timeout",
-                str(XRAY_STATS_QUERY_TIMEOUT),
-                "-pattern",
-                "inbound>>>panel-",
-                "-reset",
-            ]
         try:
-            completed = self.run_command(
-                command,
-                "Xray 流量查询失败",
+            completed = self.default_node.run_statsquery(
+                XRAY_STATS_QUERY_TIMEOUT,
+                "inbound>>>panel-",
             )
+            if completed is None:
+                return {}
             payload = json.loads(completed.stdout or "{}")
         except (RuntimeError, json.JSONDecodeError):
             return {}
@@ -1515,6 +1506,17 @@ class PanelState:
             elif parts[3] == "downlink":
                 counter["bytes_sent"] += value
         return counters
+
+    def restart_node(self, role):
+        node = self.resolve_node(role)
+        if not node.is_configured():
+            raise ValidationError("节点未配置。")
+        if not node.supports_restart():
+            raise ValidationError("该节点未配置可用的重启方式。")
+        restarted = node.restart()
+        if not restarted:
+            raise ValidationError("节点当前不可重启。")
+        return node.status_summary()
 
     def run_command(self, command, error_prefix, timeout=None):
         completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)

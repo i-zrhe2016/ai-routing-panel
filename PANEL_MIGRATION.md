@@ -18,6 +18,9 @@
 - `data/panel.db`
 - `app/xray/.env`
 - `.env`，如果你启用了 `PANEL_PUBLIC_URL`、管理员认证或自定义 `PANEL_SECRET_KEY`
+- 如果已经拆成控制面 / 数据面分离，也要保留 `.env` 里新增的远程节点配置：
+  - `DEFAULT_NODE_*`
+  - `AI_NODE_*`
 
 按需迁移：
 

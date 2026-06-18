@@ -148,6 +148,8 @@ def collect_dashboard_state(message="", level="info"):
     ports = state.query_ports()
     summary = state.query_summary(ports)
     subscription = build_subscription_snapshot(ports)
+    default_node_status = state.default_node_status()
+    ai_node_status = state.ai_node_status()
     return {
         "flash": {
             "message": message,
@@ -162,6 +164,9 @@ def collect_dashboard_state(message="", level="info"):
             "default_upstream_host": DEFAULT_UPSTREAM_HOST,
             "default_upstream_port": DEFAULT_UPSTREAM_PORT,
             "tenant_panel_prefix": "/tenant/",
+            "default_node_status": default_node_status,
+            "ai_node_status": ai_node_status,
+            "node_statuses": [default_node_status, ai_node_status],
         },
         "summary": summary,
         "subscription": subscription,
@@ -461,6 +466,16 @@ def api_rotate_port_subscription_token(port_id):
     try:
         state.rotate_port_subscription_token(port_id)
         return json_success_response("租户订阅地址已重置，旧链接已失效。")
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
+
+
+@app.route("/api/nodes/<role>/restart", methods=["POST"])
+def api_restart_node(role):
+    try:
+        summary = state.restart_node(role)
+        label = summary.get("label", "节点")
+        return json_success_response(f"{label} 已执行重启。")
     except (ValidationError, RuntimeError) as exc:
         return json_error_response(str(exc), status_code=400)
 

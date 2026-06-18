@@ -1,5 +1,6 @@
 import hashlib
 import os
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +33,16 @@ def parse_bool_env(value, default=False):
     return raw not in {"0", "false", "no", "off", ""}
 
 
+def parse_shell_words_env(value, field_name):
+    raw = str(value or "").strip()
+    if not raw:
+        return ()
+    try:
+        return tuple(shlex.split(raw))
+    except ValueError as exc:
+        raise ValueError(f"{field_name} 配置格式无效。") from exc
+
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = Path(os.environ.get("DB_PATH", DATA_DIR / "panel.db"))
@@ -54,6 +65,41 @@ XRAY_CLIENT_CONFIG_PATH = Path(
     os.environ.get("XRAY_CLIENT_CONFIG_PATH", BASE_DIR / "xray" / "runtime" / "client-test.json")
 )
 SUBSCRIPTION_NAME_PREFIX = os.environ.get("SUBSCRIPTION_NAME_PREFIX", "reality").strip() or "reality"
+
+DEFAULT_NODE_SSH_TARGET = os.environ.get("DEFAULT_NODE_SSH_TARGET", "").strip()
+DEFAULT_NODE_SSH_BIN = os.environ.get("DEFAULT_NODE_SSH_BIN", "ssh").strip() or "ssh"
+DEFAULT_NODE_SSH_OPTIONS = parse_shell_words_env(
+    os.environ.get("DEFAULT_NODE_SSH_OPTIONS", ""),
+    "DEFAULT_NODE_SSH_OPTIONS",
+)
+DEFAULT_NODE_API_SERVER = os.environ.get("DEFAULT_NODE_API_SERVER", XRAY_API_SERVER).strip() or XRAY_API_SERVER
+DEFAULT_NODE_XRAY_BIN = os.environ.get("DEFAULT_NODE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
+DEFAULT_NODE_LOCAL_BIN = os.environ.get("DEFAULT_NODE_LOCAL_BIN", XRAY_LOCAL_BIN).strip()
+DEFAULT_NODE_CONTAINER_NAME = os.environ.get("DEFAULT_NODE_CONTAINER_NAME", XRAY_CONTAINER_NAME).strip()
+DEFAULT_NODE_DOCKER_BIN = os.environ.get("DEFAULT_NODE_DOCKER_BIN", XRAY_DOCKER_BIN).strip() or XRAY_DOCKER_BIN
+DEFAULT_NODE_RESTART_COMMAND = os.environ.get("DEFAULT_NODE_RESTART_COMMAND", "").strip()
+DEFAULT_NODE_CONFIG_PATH = os.environ.get("DEFAULT_NODE_CONFIG_PATH", "").strip()
+DEFAULT_NODE_PANEL_PORTS_PATH = os.environ.get("DEFAULT_NODE_PANEL_PORTS_PATH", "").strip()
+DEFAULT_NODE_ACCESS_LOG_PATH = os.environ.get("DEFAULT_NODE_ACCESS_LOG_PATH", "").strip()
+
+AI_NODE_HOST = os.environ.get("AI_NODE_HOST", "").strip()
+AI_NODE_PORT = parse_optional_env_port(
+    os.environ.get("AI_NODE_PORT", ""),
+    "AI_NODE_PORT",
+)
+AI_NODE_SSH_TARGET = os.environ.get("AI_NODE_SSH_TARGET", "").strip()
+AI_NODE_SSH_BIN = os.environ.get("AI_NODE_SSH_BIN", "ssh").strip() or "ssh"
+AI_NODE_SSH_OPTIONS = parse_shell_words_env(
+    os.environ.get("AI_NODE_SSH_OPTIONS", ""),
+    "AI_NODE_SSH_OPTIONS",
+)
+AI_NODE_API_SERVER = os.environ.get("AI_NODE_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
+AI_NODE_XRAY_BIN = os.environ.get("AI_NODE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
+AI_NODE_LOCAL_BIN = os.environ.get("AI_NODE_LOCAL_BIN", "").strip()
+AI_NODE_CONTAINER_NAME = os.environ.get("AI_NODE_CONTAINER_NAME", "").strip()
+AI_NODE_DOCKER_BIN = os.environ.get("AI_NODE_DOCKER_BIN", XRAY_DOCKER_BIN).strip() or XRAY_DOCKER_BIN
+AI_NODE_RESTART_COMMAND = os.environ.get("AI_NODE_RESTART_COMMAND", "").strip()
+AI_NODE_CONFIG_PATH = os.environ.get("AI_NODE_CONFIG_PATH", "").strip()
 
 PANEL_HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))

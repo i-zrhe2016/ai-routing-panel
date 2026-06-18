@@ -16,7 +16,8 @@
   - 管理 `data/panel.db`
   - 根据数据库中的有效端口生成 `app/xray/runtime/panel-ports.json`
   - 调用 `python -m app.xray.render_config` 渲染 `app/xray/runtime/config.json`
-  - 在容器模式下校验并重启 `xray-reality`
+  - 在本地或通过 SSH 远程校验、同步并重启默认数据面节点
+  - 可独立显示并重启 AI 节点
 - `xray-reality`
   - 实际承载 `VLESS + REALITY` 入口流量
   - 默认监听 `0.0.0.0:443`
@@ -84,6 +85,30 @@ docker compose up -d --build
 - 这种模式下，面板会渲染配置并校验 `xray run -test`
 - 但**不会自动重启**你自己的本地 Xray 进程
 - Xray 进程的启动、重载和守护需要你自己负责
+
+### 4. 控制面 / 数据面分离模式
+
+如果你要把控制面独立部署，并远程控制默认节点和 AI 节点：
+
+- 默认节点至少配置：
+  - `DEFAULT_NODE_SSH_TARGET`
+  - `DEFAULT_NODE_CONFIG_PATH`
+  - `DEFAULT_NODE_PANEL_PORTS_PATH`
+  - `DEFAULT_NODE_ACCESS_LOG_PATH`
+  - `DEFAULT_NODE_RESTART_COMMAND`，或者配置可访问的 `DEFAULT_NODE_CONTAINER_NAME`
+- AI 节点按需配置：
+  - `AI_NODE_HOST`
+  - `AI_NODE_PORT`
+  - `AI_NODE_SSH_TARGET`
+  - `AI_NODE_RESTART_COMMAND`，或者配置 `AI_NODE_CONTAINER_NAME`
+
+在这个模式下：
+
+- 控制面先在本地渲染 `config.json` / `panel-ports.json`
+- 再通过 SSH 上传到默认数据面节点
+- 默认节点连接数统计通过 SSH 增量读取远端 `access.log`
+- 默认节点字节流量统计继续走远端 Xray API `statsquery`
+- 首页会显示“默认节点”和“AI 节点”两个独立状态，并支持分别重启
 
 ## 快速开始
 
@@ -345,6 +370,8 @@ python scripts/google_search_mcp.py
 | `POST` | `/api/ports/<port_id>/rotate-tenant-credentials` | 重置租户用户名和密码 |
 | `POST` | `/api/ports/<port_id>/rotate-subscription-token` | 重置租户订阅地址 |
 | `POST` | `/api/subscriptions/rotate` | 重置历史兼容的全局订阅 token |
+| `POST` | `/api/nodes/default/restart` | 重启默认数据面节点 |
+| `POST` | `/api/nodes/ai/restart` | 重启 AI 节点 |
 
 创建 / 更新端口的请求字段：
 
@@ -412,6 +439,17 @@ curl -u admin:secret \
 | `XRAY_STATS_QUERY_TIMEOUT` | `5` | Xray `statsquery` 超时，单位秒 |
 | `XRAY_PROBE_HOST` | `127.0.0.1` | 探针连接使用的目标主机 |
 | `SUBSCRIPTION_NAME_PREFIX` | `reality` | 生成订阅名称和分享备注时使用的前缀 |
+| `DEFAULT_NODE_SSH_TARGET` | 空 | 默认数据面节点 SSH 目标，例如 `root@node-a` |
+| `DEFAULT_NODE_SSH_OPTIONS` | 空 | 默认节点 SSH 附加参数 |
+| `DEFAULT_NODE_CONFIG_PATH` | 空 | 远端默认节点 `config.json` 路径 |
+| `DEFAULT_NODE_PANEL_PORTS_PATH` | 空 | 远端默认节点 `panel-ports.json` 路径 |
+| `DEFAULT_NODE_ACCESS_LOG_PATH` | 空 | 远端默认节点 `access.log` 路径 |
+| `DEFAULT_NODE_RESTART_COMMAND` | 空 | 默认节点远程重启命令 |
+| `AI_NODE_HOST` | 空 | AI 节点主机 |
+| `AI_NODE_PORT` | 空 | AI 节点端口 |
+| `AI_NODE_SSH_TARGET` | 空 | AI 节点 SSH 目标 |
+| `AI_NODE_SSH_OPTIONS` | 空 | AI 节点 SSH 附加参数 |
+| `AI_NODE_RESTART_COMMAND` | 空 | AI 节点远程重启命令 |
 
 内部路径和备份相关变量：
 

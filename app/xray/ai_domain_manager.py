@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import socket
 import sqlite3
 import shutil
@@ -19,6 +20,7 @@ from urllib.parse import parse_qsl, unquote, urlparse
 from app.xray.config import BASE_DIR, DEFAULT_RENDER_MODULE
 from app.xray.envfile import load_env_file as shared_load_env_file
 from app.xray.envfile import read_env_or_file as shared_read_env_or_file
+from app.xray.node_control import ManagedNodeConfig, ManagedNodeController
 
 
 TIMESTAMP_RE = re.compile(r"^(?P<date>\d{4}/\d{2}/\d{2}) (?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?) ")
@@ -1524,6 +1526,32 @@ def restart_xray_command(command, timeout_seconds):
         raise RuntimeError(detail)
 
 
+def build_ai_managed_node(args):
+    upstream_host = ""
+    upstream_port = None
+    if getattr(args, "ai_upstream_candidates", None):
+        upstream_host = str(args.ai_upstream_candidates[0]["upstream_host"])
+        upstream_port = int(args.ai_upstream_candidates[0]["upstream_port"])
+    return ManagedNodeController(
+        ManagedNodeConfig(
+            role="ai",
+            label="AI 节点",
+            api_server=args.ai_node_api_server,
+            xray_bin=args.ai_node_xray_bin,
+            local_bin=args.ai_node_local_bin,
+            docker_bin=args.ai_node_docker_bin,
+            container_name=args.ai_node_container_name,
+            restart_command=args.ai_node_restart_command,
+            ssh_target=args.ai_node_ssh_target,
+            ssh_bin=args.ai_node_ssh_bin,
+            ssh_options=tuple(args.ai_node_ssh_options),
+            config_path=args.ai_node_config_path,
+            upstream_host=upstream_host,
+            upstream_port=upstream_port,
+        )
+    )
+
+
 def classify_pending_domains(decisions, decisions_path, observed_domains, args):
     known = set(decisions["domains"])
     pending = sorted(domain for domain in observed_domains if domain not in known)
@@ -1652,6 +1680,7 @@ def run_once(args):
         route_status = {"status": "idle", "reason": "no_ai_domains"}
 
     previous_config = args.config_out.read_text(encoding="utf-8") if args.config_out.is_file() else ""
+    ai_managed_node = build_ai_managed_node(args)
 
     rerender_config(
         args.render_script,
@@ -1664,12 +1693,15 @@ def run_once(args):
     current_config = args.config_out.read_text(encoding="utf-8") if args.config_out.is_file() else ""
     config_changed = current_config != previous_config
     if config_changed:
-        if args.restart_command:
+        if ai_managed_node.is_configured() and ai_managed_node.supports_restart():
+            ai_managed_node.restart()
+        elif args.restart_command:
             restart_xray_command(args.restart_command, args.docker_timeout_seconds)
         elif args.restart_container_name:
             restart_xray_container(args.restart_container_name, args.docker_timeout_seconds)
 
     report = build_domain_report(log_state, cutoff, now, decisions, ai_target, panel_target, route_status)
+    report["ai_node"] = ai_managed_node.status_summary()
     if pending_without_classifier:
         report["route_status"]["pending_domains_without_classifier"] = pending_without_classifier
     report["route_status"]["config_changed"] = config_changed
@@ -1730,6 +1762,18 @@ def build_args():
     env_file_values = load_env_file_values(args.env_file)
     args.restart_container_name = os.environ.get("XRAY_RESTART_CONTAINER", "").strip()
     args.restart_command = os.environ.get("XRAY_RESTART_COMMAND", "").strip()
+    args.ai_node_ssh_target = os.environ.get("AI_NODE_SSH_TARGET", "").strip()
+    args.ai_node_ssh_bin = os.environ.get("AI_NODE_SSH_BIN", "ssh").strip() or "ssh"
+    args.ai_node_ssh_options = tuple(
+        shlex.split(os.environ.get("AI_NODE_SSH_OPTIONS", "").strip())
+    ) if os.environ.get("AI_NODE_SSH_OPTIONS", "").strip() else ()
+    args.ai_node_api_server = os.environ.get("AI_NODE_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
+    args.ai_node_xray_bin = os.environ.get("AI_NODE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
+    args.ai_node_local_bin = os.environ.get("AI_NODE_LOCAL_BIN", "").strip()
+    args.ai_node_container_name = os.environ.get("AI_NODE_CONTAINER_NAME", "").strip()
+    args.ai_node_docker_bin = os.environ.get("AI_NODE_DOCKER_BIN", "docker").strip() or "docker"
+    args.ai_node_restart_command = os.environ.get("AI_NODE_RESTART_COMMAND", "").strip()
+    args.ai_node_config_path = os.environ.get("AI_NODE_CONFIG_PATH", "").strip()
     args.codex_classifier_enabled = env_bool("CODEX_CLASSIFIER_ENABLED", "1")
     args.codex_source_home = Path(os.environ.get("CODEX_SOURCE_HOME", "/host-codex-home"))
     args.codex_runtime_home = Path(

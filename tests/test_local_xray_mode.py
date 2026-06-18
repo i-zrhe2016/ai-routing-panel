@@ -80,18 +80,17 @@ class LocalXrayModeTest(unittest.TestCase):
         state = state_module.PanelState()
         calls = []
 
-        def fake_run_command(command, error_message):
-            calls.append((command, error_message))
+        def fake_test_config(config_path=None):
+            calls.append((config_path,))
             return SimpleNamespace(stdout="")
 
-        state.run_command = fake_run_command
+        state.default_node.test_config = fake_test_config
         state.xray_config_test()
 
         self.assertEqual(len(calls), 1)
-        command, error_message = calls[0]
-        self.assertEqual(command[0], os.environ["XRAY_LOCAL_BIN"])
-        self.assertEqual(command[1:], ["run", "-test", "-config", os.environ["XRAY_CONFIG_PATH"]])
-        self.assertEqual(error_message, "Xray 配置校验失败")
+        (config_path,) = calls[0]
+        self.assertIsNone(config_path)
+        self.assertEqual(state.default_node.config.local_bin, os.environ["XRAY_LOCAL_BIN"])
 
     def test_read_xray_traffic_stats_uses_local_binary(self):
         state_module = load_state_module(self.root, "127.0.0.1:10085")
@@ -99,15 +98,14 @@ class LocalXrayModeTest(unittest.TestCase):
         commands = []
         state.xray_running = lambda: True
 
-        def fake_run_command(command, error_message):
-            commands.append((command, error_message))
+        def fake_run_statsquery(timeout_seconds, pattern):
+            commands.append((timeout_seconds, pattern))
             return SimpleNamespace(stdout=json.dumps({"stat": []}))
 
-        state.run_command = fake_run_command
+        state.default_node.run_statsquery = fake_run_statsquery
         self.assertEqual(state.read_xray_traffic_stats(), {})
         self.assertEqual(len(commands), 1)
-        command, error_message = commands[0]
-        self.assertEqual(command[0], os.environ["XRAY_LOCAL_BIN"])
-        self.assertEqual(command[1], "api")
-        self.assertIn("--server=127.0.0.1:10085", command)
-        self.assertEqual(error_message, "Xray 流量查询失败")
+        timeout_seconds, pattern = commands[0]
+        self.assertEqual(timeout_seconds, int(os.environ.get("XRAY_STATS_QUERY_TIMEOUT", "5")))
+        self.assertEqual(pattern, "inbound>>>panel-")
+        self.assertEqual(state.default_node.config.local_bin, os.environ["XRAY_LOCAL_BIN"])

@@ -72,9 +72,14 @@
 
       <section class="stats-grid">
         <article class="stat-card stat-card-emphasis">
-          <span>Xray 状态</span>
+          <span>默认节点状态</span>
           <strong :class="meta.xray_running ? 'ok' : 'bad'" v-text="meta.xray_running ? '运行中' : '未运行'"></strong>
-          <small>当前 Reality 入站服务健康状态</small>
+          <small>当前默认数据面健康状态</small>
+        </article>
+        <article class="stat-card" v-if="meta.ai_node_status">
+          <span>AI 节点状态</span>
+          <strong :class="meta.ai_node_status.running ? 'ok' : 'bad'" v-text="nodeRunningLabel(meta.ai_node_status)"></strong>
+          <small>AI 专用节点运行状态</small>
         </article>
         <article class="stat-card">
           <span>运行中端口</span>
@@ -145,6 +150,33 @@
               </button>
             </div>
           </form>
+        </section>
+
+        <section class="panel workspace-card">
+          <div class="panel-head subscription-panel-head">
+            <div>
+              <p class="section-eyebrow">NODES</p>
+              <h2>节点控制</h2>
+              <p>控制面与数据面分离后，这里统一显示默认节点和 AI 节点状态，并支持远程重启。</p>
+            </div>
+          </div>
+
+          <div class="subscription-overview" v-if="nodes.length">
+            <div class="info-tile" v-for="node in nodes" :key="node.role">
+              <span v-text="node.label"></span>
+              <strong v-text="nodeRunningLabel(node)"></strong>
+              <small v-text="node.target || node.mode"></small>
+              <button
+                class="secondary"
+                type="button"
+                v-if="node.configured && node.supports_restart"
+                :disabled="isBusy(`restart-node:${node.role}`)"
+                @click="restartNode(node)"
+              >
+                <span v-text="isBusy(`restart-node:${node.role}`) ? '重启中...' : '重启节点'"></span>
+              </button>
+            </div>
+          </div>
         </section>
 
         <section class="panel workspace-card">

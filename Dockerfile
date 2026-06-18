@@ -9,6 +9,7 @@ RUN apt-get update \
         docker.io \
         python3 \
         python3-flask \
+        openssh-client \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /data /app/xray/runtime /app/xray/logs
 

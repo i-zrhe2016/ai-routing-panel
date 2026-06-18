@@ -28,6 +28,7 @@ function createPanelApp(initialState) {
         summary: {},
         subscription: {},
         ports: [],
+        nodes: [],
         flash: { message: "", level: "info" },
         createForm: createEmptyPortForm(),
         filters: {
@@ -86,6 +87,7 @@ function createPanelApp(initialState) {
         this.meta = dashboard.meta || {};
         this.summary = dashboard.summary || {};
         this.subscription = dashboard.subscription || {};
+        this.nodes = dashboard.meta?.node_statuses || [];
         this.flash = dashboard.flash || { message: "", level: "info" };
         this.ports = (dashboard.ports || []).map((port) => this.preparePort(port));
       },
@@ -316,6 +318,34 @@ function createPanelApp(initialState) {
         }
         await this.runAction(`rotate-subscription:${port.id}`, async () => {
           const data = await this.requestJson(`/api/ports/${port.id}/rotate-subscription-token`, {
+            method: "POST",
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      nodeRunningLabel(node) {
+        if (!node || !node.configured) {
+          return "未配置";
+        }
+        if (node.running === true) {
+          return "运行中";
+        }
+        if (node.running === false) {
+          return "未运行";
+        }
+        return "未知";
+      },
+
+      async restartNode(node) {
+        if (!node || !node.role) {
+          return;
+        }
+        if (!window.confirm(`确认重启${node.label}吗？`)) {
+          return;
+        }
+        await this.runAction(`restart-node:${node.role}`, async () => {
+          const data = await this.requestJson(`/api/nodes/${node.role}/restart`, {
             method: "POST",
           });
           this.applyResponse(data);

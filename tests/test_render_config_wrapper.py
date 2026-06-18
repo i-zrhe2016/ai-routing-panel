@@ -93,8 +93,7 @@ class RenderConfigWrapperTest(unittest.TestCase):
         share_out = output_dir / "share.txt"
         dynamic_out = output_dir / "dynamic.json"
         panel_ports_file = output_dir / "panel-ports.json"
-        if panel_ports is not None:
-            panel_ports_file.write_text(json.dumps({"ports": panel_ports}), encoding="utf-8")
+        panel_ports_file.write_text(json.dumps({"ports": panel_ports or []}), encoding="utf-8")
 
         command = base_cmd + [
             "--env-file",
@@ -107,9 +106,9 @@ class RenderConfigWrapperTest(unittest.TestCase):
             str(share_out),
             "--dynamic-routing-file",
             str(dynamic_out),
+            "--panel-ports-file",
+            str(panel_ports_file),
         ]
-        if panel_ports is not None:
-            command.extend(["--panel-ports-file", str(panel_ports_file)])
 
         completed = subprocess.run(
             command,
