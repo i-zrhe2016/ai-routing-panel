@@ -9,35 +9,25 @@ import time
 from datetime import datetime, timezone
 
 from .config import (
-    AI_NODE_API_SERVER,
-    AI_NODE_CONFIG_PATH,
-    AI_NODE_CONTAINER_NAME,
-    AI_NODE_DOCKER_BIN,
-    AI_NODE_HOST,
-    AI_NODE_LOCAL_BIN,
-    AI_NODE_PORT,
-    AI_NODE_RESTART_COMMAND,
-    AI_NODE_SSH_BIN,
-    AI_NODE_SSH_OPTIONS,
-    AI_NODE_SSH_TARGET,
-    AI_NODE_XRAY_BIN,
+    AI_ROUTING_ENABLED,
+    DATAPLANE_ACCESS_LOG_PATH,
+    DATAPLANE_API_SERVER,
+    DATAPLANE_AI_REPORT_PATH,
+    DATAPLANE_CONFIG_PATH,
+    DATAPLANE_CONTAINER_NAME,
+    DATAPLANE_DOCKER_BIN,
+    DATAPLANE_DYNAMIC_ROUTING_PATH,
+    DATAPLANE_LOCAL_BIN,
+    DATAPLANE_PANEL_DB_PATH,
+    DATAPLANE_PANEL_PORTS_PATH,
+    DATAPLANE_PROBE_HOST,
+    DATAPLANE_RESTART_COMMAND,
+    DATAPLANE_SSH_BIN,
+    DATAPLANE_SSH_OPTIONS,
+    DATAPLANE_SSH_TARGET,
+    DATAPLANE_XRAY_BIN,
     DATA_DIR,
     DB_PATH,
-    DEFAULT_NODE_ACCESS_LOG_PATH,
-    DEFAULT_NODE_API_SERVER,
-    DEFAULT_NODE_AI_REPORT_PATH,
-    DEFAULT_NODE_CONFIG_PATH,
-    DEFAULT_NODE_CONTAINER_NAME,
-    DEFAULT_NODE_DOCKER_BIN,
-    DEFAULT_NODE_DYNAMIC_ROUTING_PATH,
-    DEFAULT_NODE_LOCAL_BIN,
-    DEFAULT_NODE_PANEL_DB_PATH,
-    DEFAULT_NODE_PANEL_PORTS_PATH,
-    DEFAULT_NODE_RESTART_COMMAND,
-    DEFAULT_NODE_SSH_BIN,
-    DEFAULT_NODE_SSH_OPTIONS,
-    DEFAULT_NODE_SSH_TARGET,
-    DEFAULT_NODE_XRAY_BIN,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
     LOCAL_TZ,
@@ -54,7 +44,6 @@ from .config import (
     XRAY_DYNAMIC_ROUTING_PATH,
     XRAY_ENV_FILE_PATH,
     XRAY_PANEL_PORTS_PATH,
-    XRAY_PROBE_HOST,
     XRAY_STATS_QUERY_TIMEOUT,
 )
 from .errors import ValidationError
@@ -76,7 +65,7 @@ from .helpers import (
     utc_now,
 )
 from .xray.ai_domain_manager import ensure_ai_domain_schema
-from .xray.node_control import ManagedNodeConfig, ManagedNodeController
+from .xray.node_control import DataPlaneConfig, DataPlaneController
 
 XRAY_ACCESS_LOG_LINE_RE = re.compile(
     r"^(?P<seen_at>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?) .* \[(?P<tag>[^\]]+) >> [^\]]+\]$"
@@ -90,80 +79,49 @@ class PanelState:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         XRAY_PANEL_PORTS_PATH.parent.mkdir(parents=True, exist_ok=True)
         XRAY_ACCESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        self.default_node = ManagedNodeController(
-            ManagedNodeConfig(
-                role="default",
-                label="默认节点",
-                api_server=DEFAULT_NODE_API_SERVER,
-                xray_bin=DEFAULT_NODE_XRAY_BIN,
-                local_bin=DEFAULT_NODE_LOCAL_BIN,
-                docker_bin=DEFAULT_NODE_DOCKER_BIN,
-                container_name=DEFAULT_NODE_CONTAINER_NAME,
-                restart_command=DEFAULT_NODE_RESTART_COMMAND,
-                ssh_target=DEFAULT_NODE_SSH_TARGET,
-                ssh_bin=DEFAULT_NODE_SSH_BIN,
-                ssh_options=DEFAULT_NODE_SSH_OPTIONS,
-                config_path=self.default_node_config_path(),
-                dynamic_routing_path=DEFAULT_NODE_DYNAMIC_ROUTING_PATH.strip(),
-                ai_report_path=DEFAULT_NODE_AI_REPORT_PATH.strip(),
-                panel_db_path=DEFAULT_NODE_PANEL_DB_PATH.strip(),
-                access_log_path=DEFAULT_NODE_ACCESS_LOG_PATH.strip() or str(XRAY_ACCESS_LOG_PATH),
-                panel_ports_path=DEFAULT_NODE_PANEL_PORTS_PATH.strip(),
+        self.data_plane = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                api_server=DATAPLANE_API_SERVER,
+                xray_bin=DATAPLANE_XRAY_BIN,
+                local_bin=DATAPLANE_LOCAL_BIN,
+                docker_bin=DATAPLANE_DOCKER_BIN,
+                container_name=DATAPLANE_CONTAINER_NAME,
+                restart_command=DATAPLANE_RESTART_COMMAND,
+                ssh_target=DATAPLANE_SSH_TARGET,
+                ssh_bin=DATAPLANE_SSH_BIN,
+                ssh_options=DATAPLANE_SSH_OPTIONS,
+                config_path=self.data_plane_config_path(),
+                dynamic_routing_path=DATAPLANE_DYNAMIC_ROUTING_PATH.strip(),
+                ai_report_path=DATAPLANE_AI_REPORT_PATH.strip(),
+                panel_db_path=DATAPLANE_PANEL_DB_PATH.strip(),
+                access_log_path=DATAPLANE_ACCESS_LOG_PATH.strip() or str(XRAY_ACCESS_LOG_PATH),
+                panel_ports_path=DATAPLANE_PANEL_PORTS_PATH.strip(),
                 source_config_path=XRAY_CONFIG_PATH,
                 source_dynamic_routing_path=XRAY_DYNAMIC_ROUTING_PATH,
-                source_ai_report_path=self.default_node_ai_report_source_path(),
+                source_ai_report_path=self.data_plane_ai_report_source_path(),
                 source_panel_ports_path=XRAY_PANEL_PORTS_PATH,
                 upstream_host=DEFAULT_UPSTREAM_HOST,
                 upstream_port=DEFAULT_UPSTREAM_PORT,
             )
         )
-        self.ai_node = ManagedNodeController(
-            ManagedNodeConfig(
-                role="ai",
-                label="AI 节点",
-                api_server=AI_NODE_API_SERVER,
-                xray_bin=AI_NODE_XRAY_BIN,
-                local_bin=AI_NODE_LOCAL_BIN,
-                docker_bin=AI_NODE_DOCKER_BIN,
-                container_name=AI_NODE_CONTAINER_NAME,
-                restart_command=AI_NODE_RESTART_COMMAND,
-                ssh_target=AI_NODE_SSH_TARGET,
-                ssh_bin=AI_NODE_SSH_BIN,
-                ssh_options=AI_NODE_SSH_OPTIONS,
-                config_path=AI_NODE_CONFIG_PATH.strip(),
-                upstream_host=AI_NODE_HOST,
-                upstream_port=AI_NODE_PORT,
-            )
-        )
 
-    def default_node_config_path(self):
-        explicit = DEFAULT_NODE_CONFIG_PATH.strip()
+    def data_plane_config_path(self):
+        explicit = DATAPLANE_CONFIG_PATH.strip()
         if explicit:
             return explicit
-        if DEFAULT_NODE_SSH_TARGET:
+        if DATAPLANE_SSH_TARGET:
             return str(XRAY_CONFIG_PATH)
-        if DEFAULT_NODE_LOCAL_BIN:
+        if DATAPLANE_LOCAL_BIN:
             return str(XRAY_CONFIG_PATH)
         return "/etc/xray/config.json"
 
-    def default_node_ai_report_source_path(self):
+    def data_plane_ai_report_source_path(self):
         return XRAY_ENV_FILE_PATH.parent / "reports" / "hourly-domains" / "latest.json"
 
-    def default_node_status(self):
-        return self.default_node.status_summary()
-
-    def ai_node_status(self):
-        return self.ai_node.status_summary()
-
-    def node_statuses(self):
-        return [self.default_node_status(), self.ai_node_status()]
-
-    def resolve_node(self, role):
-        if role == "default":
-            return self.default_node
-        if role == "ai":
-            return self.ai_node
-        raise ValidationError("节点类型不存在。")
+    def data_plane_status(self):
+        return self.data_plane.status_summary()
 
     def connect(self):
         conn = sqlite3.connect(DB_PATH)
@@ -478,9 +436,9 @@ class PanelState:
         new_offset = 0
         lines = []
 
-        if self.default_node.supports_logs():
+        if self.data_plane.supports_logs():
             try:
-                payload = self.default_node.read_access_log_delta(recorded_inode, current_offset)
+                payload = self.data_plane.read_access_log_delta(recorded_inode, current_offset)
             except RuntimeError:
                 return 0
             if not payload["exists"]:
@@ -779,15 +737,15 @@ class PanelState:
                 summary["disabled_ports"] += 1
         return summary
 
-    def sync_default_node_ai_state(self):
+    def sync_data_plane_ai_state(self):
         result = {
             "report_synced": False,
             "snapshot_synced": False,
         }
-        if self.default_node.supports_ai_report_pull():
-            result["report_synced"] = self.default_node.sync_ai_report_from_remote()
-        if self.default_node.supports_ai_domains_snapshot_pull():
-            snapshot = self.default_node.read_ai_domains_snapshot_from_remote()
+        if self.data_plane.supports_ai_report_pull():
+            result["report_synced"] = self.data_plane.sync_ai_report_from_remote()
+        if self.data_plane.supports_ai_domains_snapshot_pull():
+            snapshot = self.data_plane.read_ai_domains_snapshot_from_remote()
             if snapshot.get("exists"):
                 self.replace_ai_domains_snapshot(snapshot.get("ai_domains", []))
                 result["snapshot_synced"] = True
@@ -859,7 +817,7 @@ class PanelState:
         return localized.strftime("%Y-%m-%d %H:%M:%S")
 
     def ai_domain_sync_mode_label(self):
-        mode = self.default_node.mode
+        mode = self.data_plane.mode
         if mode == "ssh":
             return "远端镜像"
         if mode in {"local", "docker"}:
@@ -942,7 +900,7 @@ class PanelState:
         }
 
     def read_ai_domain_report(self):
-        report_path = self.default_node.config.source_ai_report_path or self.default_node_ai_report_source_path()
+        report_path = self.data_plane.config.source_ai_report_path or self.data_plane_ai_report_source_path()
         if not report_path.is_file():
             return None
         try:
@@ -1068,12 +1026,45 @@ class PanelState:
             for row in rows
         ]
 
+    def ai_routing_status(self, sync_error=""):
+        report = self.read_ai_domain_report()
+        aggregate = self.query_ai_domain_aggregate()
+        configured = AI_ROUTING_ENABLED
+        if not configured:
+            status_code = "disabled"
+            status_label = "AI 路由未启用"
+            tone = "warn"
+        elif report is not None:
+            status_code = report["route_status"]
+            status_label = report["route_status_label"]
+            tone = report["route_status_tone"]
+        elif sync_error:
+            status_code = "sync_error"
+            status_label = "AI 路由同步失败"
+            tone = "bad"
+        else:
+            status_code = "waiting_report"
+            status_label = "等待 AI 路由报告"
+            tone = "warn"
+        return {
+            "configured": configured,
+            "status": status_code,
+            "status_label": status_label,
+            "status_tone": tone,
+            "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "report_generated_at_display": report["generated_at_display"] if report else "暂无",
+            "current_ai_domains": report["ai_domain_count"] if report else 0,
+            "total_ai_domains": aggregate["total_ai_domains"],
+            "sync_error": str(sync_error or "").strip(),
+        }
+
     def query_ai_domain_overview(self, sync_error=""):
         report = self.read_ai_domain_report()
         aggregate = self.query_ai_domain_aggregate()
         return {
-            "available": bool(report or aggregate["total_ai_domains"] > 0),
-            "sync_mode": self.default_node.mode,
+            "available": AI_ROUTING_ENABLED and bool(report or aggregate["total_ai_domains"] > 0),
+            "enabled": AI_ROUTING_ENABLED,
+            "sync_mode": self.data_plane.mode,
             "sync_mode_label": self.ai_domain_sync_mode_label(),
             "sync_error": str(sync_error or "").strip(),
             "report_available": report is not None,
@@ -1096,8 +1087,9 @@ class PanelState:
         top_ai_domains = self.query_top_ai_domains()
         source_breakdown = self.query_ai_domain_source_breakdown()
         return {
-            "available": bool(report or top_ai_domains),
-            "sync_mode": self.default_node.mode,
+            "available": AI_ROUTING_ENABLED and bool(report or top_ai_domains),
+            "enabled": AI_ROUTING_ENABLED,
+            "sync_mode": self.data_plane.mode,
             "sync_mode_label": self.ai_domain_sync_mode_label(),
             "sync_error": str(sync_error or "").strip(),
             "report": (
@@ -1235,6 +1227,7 @@ class PanelState:
                 """
                 SELECT listen_port
                 FROM ports
+                WHERE enabled = 1
                 ORDER BY listen_port ASC
                 """
             ).fetchall()
@@ -1246,7 +1239,7 @@ class PanelState:
             failure_reason = ""
             try:
                 with socket.create_connection(
-                    (XRAY_PROBE_HOST, int(row["listen_port"])),
+                    (DATAPLANE_PROBE_HOST, int(row["listen_port"])),
                     timeout=PROBE_TIMEOUT,
                 ):
                     reachable = 1
@@ -1732,7 +1725,7 @@ class PanelState:
             self.render_xray_config()
             self.xray_config_test()
             if reload_xray:
-                self.xray_restart()
+                self.restart_data_plane()
         except Exception:
             if previous_panel_ports is None:
                 XRAY_PANEL_PORTS_PATH.unlink(missing_ok=True)
@@ -1742,9 +1735,9 @@ class PanelState:
                 XRAY_CONFIG_PATH.unlink(missing_ok=True)
             else:
                 XRAY_CONFIG_PATH.write_text(previous_config, encoding="utf-8")
-            if self.default_node.supports_sync():
+            if self.data_plane.supports_sync():
                 try:
-                    self.default_node.sync_generated_files(validate_config=True)
+                    self.data_plane.sync_generated_files(validate_config=True)
                 except RuntimeError:
                     pass
             raise
@@ -1783,7 +1776,7 @@ class PanelState:
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
     def render_xray_config(self):
-        self.sync_default_node_dynamic_routing()
+        self.sync_data_plane_dynamic_routing()
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
         self.run_command(
             [
@@ -1804,36 +1797,36 @@ class PanelState:
             "Xray 配置渲染失败",
         )
 
-    def sync_default_node_dynamic_routing(self):
-        if not self.default_node.supports_dynamic_routing_pull():
+    def sync_data_plane_dynamic_routing(self):
+        if not self.data_plane.supports_dynamic_routing_pull():
             return False
-        return self.default_node.sync_dynamic_routing_from_remote()
+        return self.data_plane.sync_dynamic_routing_from_remote()
 
-    def sync_default_node_artifacts(self):
-        if not self.default_node.supports_sync():
+    def sync_data_plane_artifacts(self):
+        if not self.data_plane.supports_sync():
             return []
-        return self.default_node.sync_generated_files(validate_config=True)
+        return self.data_plane.sync_generated_files(validate_config=True)
 
     def xray_config_test(self):
-        if self.default_node.supports_sync():
-            self.sync_default_node_artifacts()
+        if self.data_plane.supports_sync():
+            self.sync_data_plane_artifacts()
             return
-        self.default_node.test_config()
+        self.data_plane.test_config()
 
-    def xray_restart(self):
-        return self.default_node.restart()
+    def restart_data_plane(self):
+        return self.data_plane.restart()
 
-    def xray_container_exists(self):
-        return self.default_node.is_configured()
+    def data_plane_configured(self):
+        return self.data_plane.is_configured()
 
-    def xray_running(self):
-        return self.default_node.is_running()
+    def data_plane_running(self):
+        return self.data_plane.is_running()
 
     def read_xray_traffic_stats(self):
-        if not self.xray_running():
+        if not self.data_plane_running():
             return {}
         try:
-            completed = self.default_node.run_statsquery(
+            completed = self.data_plane.run_statsquery(
                 XRAY_STATS_QUERY_TIMEOUT,
                 "inbound>>>panel-",
             )
@@ -1872,16 +1865,15 @@ class PanelState:
                 counter["bytes_sent"] += value
         return counters
 
-    def restart_node(self, role):
-        node = self.resolve_node(role)
-        if not node.is_configured():
-            raise ValidationError("节点未配置。")
-        if not node.supports_restart():
-            raise ValidationError("该节点未配置可用的重启方式。")
-        restarted = node.restart()
+    def restart_data_plane_or_raise(self):
+        if not self.data_plane.is_configured():
+            raise ValidationError("数据面未配置。")
+        if not self.data_plane.supports_restart():
+            raise ValidationError("当前数据面未配置可用的重启方式。")
+        restarted = self.data_plane.restart()
         if not restarted:
-            raise ValidationError("节点当前不可重启。")
-        return node.status_summary()
+            raise ValidationError("当前数据面不可重启。")
+        return self.data_plane.status_summary()
 
     def run_command(self, command, error_prefix, timeout=None):
         completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)

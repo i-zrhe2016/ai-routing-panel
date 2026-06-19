@@ -28,7 +28,8 @@ function createPanelApp(initialState) {
         summary: {},
         subscription: {},
         ports: [],
-        nodes: [],
+        dataPlaneStatus: {},
+        aiRoutingStatus: {},
         flash: { message: "", level: "info" },
         createForm: createEmptyPortForm(),
         filters: {
@@ -87,7 +88,8 @@ function createPanelApp(initialState) {
         this.meta = dashboard.meta || {};
         this.summary = dashboard.summary || {};
         this.subscription = dashboard.subscription || {};
-        this.nodes = dashboard.meta?.node_statuses || [];
+        this.dataPlaneStatus = dashboard.meta?.data_plane_status || {};
+        this.aiRoutingStatus = dashboard.meta?.ai_routing_status || {};
         this.flash = dashboard.flash || { message: "", level: "info" };
         this.ports = (dashboard.ports || []).map((port) => this.preparePort(port));
       },
@@ -324,28 +326,35 @@ function createPanelApp(initialState) {
         });
       },
 
-      nodeRunningLabel(node) {
-        if (!node || !node.configured) {
+      dataPlaneRunningLabel(status) {
+        if (!status || !status.configured) {
           return "未配置";
         }
-        if (node.running === true) {
+        if (status.xray_running === true) {
           return "运行中";
         }
-        if (node.running === false) {
+        if (status.xray_running === false) {
           return "未运行";
         }
         return "未知";
       },
 
-      async restartNode(node) {
-        if (!node || !node.role) {
+      aiRoutingLabel(status) {
+        if (!status || !status.configured) {
+          return "未启用";
+        }
+        return status.status_label || "未知";
+      },
+
+      async restartDataPlane() {
+        if (!this.dataPlaneStatus || !this.dataPlaneStatus.configured) {
           return;
         }
-        if (!window.confirm(`确认重启${node.label}吗？`)) {
+        if (!window.confirm("确认重启数据面吗？")) {
           return;
         }
-        await this.runAction(`restart-node:${node.role}`, async () => {
-          const data = await this.requestJson(`/api/nodes/${node.role}/restart`, {
+        await this.runAction("restart-data-plane", async () => {
+          const data = await this.requestJson("/api/data-plane/restart", {
             method: "POST",
           });
           this.applyResponse(data);

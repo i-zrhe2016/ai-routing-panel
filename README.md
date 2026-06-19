@@ -74,10 +74,10 @@ docker compose up -d --build
 
 ### 3. 外部 / 本地 Xray 模式
 
-如果你不想使用 `docker-compose.yml` 里的 `xray-reality` 容器，也可以让面板对接宿主机自己的 Xray：
+如果你不想使用 `docker-compose.yml` 里的 `xray-reality` 容器，也可以让面板对接宿主机自己的数据面：
 
-- 设置 `XRAY_LOCAL_BIN=/path/to/xray`
-- 设置 `XRAY_API_SERVER=127.0.0.1:10085`
+- 设置 `DATAPLANE_LOCAL_BIN=/path/to/xray`
+- 设置 `DATAPLANE_API_SERVER=127.0.0.1:10085`
 - 让你的本地 Xray 进程自行加载 `app/xray/runtime/config.json`
 
 注意：
@@ -88,31 +88,26 @@ docker compose up -d --build
 
 ### 4. 控制面 / 数据面分离模式
 
-如果你要把控制面独立部署，并远程控制默认节点和 AI 节点：
+如果你要把控制面独立部署，并远程控制唯一数据面：
 
-- 默认节点至少配置：
-  - `DEFAULT_NODE_SSH_TARGET`
-  - `DEFAULT_NODE_CONFIG_PATH`
-  - 如果 AI 域名自动分类在数据面执行，再配置 `DEFAULT_NODE_DYNAMIC_ROUTING_PATH`
-  - 如果要在控制面展示 AI 域名统计，再配置 `DEFAULT_NODE_AI_REPORT_PATH` 和 `DEFAULT_NODE_PANEL_DB_PATH`
-  - `DEFAULT_NODE_PANEL_PORTS_PATH`
-  - `DEFAULT_NODE_ACCESS_LOG_PATH`
-  - `DEFAULT_NODE_RESTART_COMMAND`，或者配置可访问的 `DEFAULT_NODE_CONTAINER_NAME`
-- AI 节点按需配置：
-  - `AI_NODE_HOST`
-  - `AI_NODE_PORT`
-  - `AI_NODE_SSH_TARGET`
-  - `AI_NODE_RESTART_COMMAND`，或者配置 `AI_NODE_CONTAINER_NAME`
+- 数据面至少配置：
+  - `DATAPLANE_SSH_TARGET`
+  - `DATAPLANE_CONFIG_PATH`
+  - 如果 AI 域名自动分类在数据面执行，再配置 `DATAPLANE_DYNAMIC_ROUTING_PATH`
+  - 如果要在控制面展示 AI 域名统计，再配置 `DATAPLANE_AI_REPORT_PATH` 和 `DATAPLANE_PANEL_DB_PATH`
+  - `DATAPLANE_PANEL_PORTS_PATH`
+  - `DATAPLANE_ACCESS_LOG_PATH`
+  - `DATAPLANE_RESTART_COMMAND`，或者配置可访问的 `DATAPLANE_CONTAINER_NAME`
 
 在这个模式下：
 
 - 控制面先在本地渲染 `config.json` / `panel-ports.json`
-- 再通过 SSH 上传到默认数据面节点
-- 默认节点连接数统计通过 SSH 增量读取远端 `access.log`
+- 再通过 SSH 上传到数据面
+- 数据面连接数统计通过 SSH 增量读取远端 `access.log`
 - 如果 AI 域名分类在数据面执行，控制面会先拉回远端 `dynamic-routing.json`
-- 如果配置了 `DEFAULT_NODE_AI_REPORT_PATH` / `DEFAULT_NODE_PANEL_DB_PATH`，控制面会镜像远端 `latest.json` 和 `ai_domains` 快照，用于首页概览和 AI 域名统计页展示
-- 默认节点字节流量统计继续走远端 Xray API `statsquery`
-- 首页会显示“默认节点”和“AI 节点”两个独立状态，并支持分别重启
+- 如果配置了 `DATAPLANE_AI_REPORT_PATH` / `DATAPLANE_PANEL_DB_PATH`，控制面会镜像远端 `latest.json` 和 `ai_domains` 快照，用于首页概览和 AI 域名统计页展示
+- 数据面字节流量统计继续走远端 Xray API `statsquery`
+- 首页只显示“数据面状态”和“AI 路由状态”；AI 不再作为独立节点展示
 
 ## 快速开始
 
@@ -291,7 +286,7 @@ docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray
 
 ## 探针监控
 
-当 `PROBE_ENABLED=1` 时，服务会周期性对 `XRAY_PROBE_HOST:<listen_port>` 做 TCP 连通性探测，并提供独立监控页：
+当 `PROBE_ENABLED=1` 时，服务会周期性对 `DATAPLANE_PROBE_HOST:<listen_port>` 做 TCP 连通性探测，并提供独立监控页：
 
 - 页面：`/probe-dashboard`
 - 时间范围：`1h`、`24h`、`7d`
@@ -374,8 +369,7 @@ python scripts/google_search_mcp.py
 | `POST` | `/api/ports/<port_id>/rotate-tenant-credentials` | 重置租户用户名和密码 |
 | `POST` | `/api/ports/<port_id>/rotate-subscription-token` | 重置租户订阅地址 |
 | `POST` | `/api/subscriptions/rotate` | 重置历史兼容的全局订阅 token |
-| `POST` | `/api/nodes/default/restart` | 重启默认数据面节点 |
-| `POST` | `/api/nodes/ai/restart` | 重启 AI 节点 |
+| `POST` | `/api/data-plane/restart` | 重启唯一数据面 |
 
 创建 / 更新端口的请求字段：
 
@@ -436,27 +430,23 @@ curl -u admin:secret \
 | `PROBE_INTERVAL` | `60` | 探针间隔，单位秒 |
 | `PROBE_TIMEOUT` | `3` | 单次探针超时，单位秒 |
 | `PROBE_TEST_LISTEN_PORT` | 空 | 监控页固定展示的测试端口 |
-| `XRAY_API_SERVER` | `127.0.0.1:10085` | Xray API 地址 |
-| `XRAY_LOCAL_BIN` | 空 | 设置后进入“本地 Xray 模式” |
-| `XRAY_CONTAINER_NAME` | `xray-reality-local` | 面板管理的 Xray 容器名 |
-| `XRAY_DOCKER_BIN` | `docker` | Docker 可执行文件名 |
+| `DATAPLANE_API_SERVER` | `127.0.0.1:10085` | 数据面 Xray API 地址 |
+| `DATAPLANE_LOCAL_BIN` | 空 | 设置后进入“本地数据面模式” |
+| `DATAPLANE_CONTAINER_NAME` | `xray-reality-local` | 面板管理的数据面容器名 |
+| `DATAPLANE_DOCKER_BIN` | `docker` | 数据面 Docker 可执行文件名 |
 | `XRAY_STATS_QUERY_TIMEOUT` | `5` | Xray `statsquery` 超时，单位秒 |
-| `XRAY_PROBE_HOST` | `127.0.0.1` | 探针连接使用的目标主机 |
+| `DATAPLANE_PROBE_HOST` | `127.0.0.1` | 探针连接使用的数据面目标主机 |
 | `SUBSCRIPTION_NAME_PREFIX` | `reality` | 生成订阅名称和分享备注时使用的前缀 |
-| `DEFAULT_NODE_SSH_TARGET` | 空 | 默认数据面节点 SSH 目标，例如 `root@node-a` |
-| `DEFAULT_NODE_SSH_OPTIONS` | 空 | 默认节点 SSH 附加参数 |
-| `DEFAULT_NODE_CONFIG_PATH` | 空 | 远端默认节点 `config.json` 路径 |
-| `DEFAULT_NODE_DYNAMIC_ROUTING_PATH` | 空 | 当 AI 域名自动分类在数据面执行时，远端 `dynamic-routing.json` 路径 |
-| `DEFAULT_NODE_AI_REPORT_PATH` | 空 | 当 AI 域名统计在数据面生成时，远端 `reports/hourly-domains/latest.json` 路径 |
-| `DEFAULT_NODE_PANEL_DB_PATH` | 空 | 当 AI 域名统计在数据面生成时，远端 `panel.db` 路径，用于回传 `ai_domains` 聚合快照 |
-| `DEFAULT_NODE_PANEL_PORTS_PATH` | 空 | 远端默认节点 `panel-ports.json` 路径 |
-| `DEFAULT_NODE_ACCESS_LOG_PATH` | 空 | 远端默认节点 `access.log` 路径 |
-| `DEFAULT_NODE_RESTART_COMMAND` | 空 | 默认节点远程重启命令 |
-| `AI_NODE_HOST` | 空 | AI 节点主机 |
-| `AI_NODE_PORT` | 空 | AI 节点端口 |
-| `AI_NODE_SSH_TARGET` | 空 | AI 节点 SSH 目标 |
-| `AI_NODE_SSH_OPTIONS` | 空 | AI 节点 SSH 附加参数 |
-| `AI_NODE_RESTART_COMMAND` | 空 | AI 节点远程重启命令 |
+| `AI_ROUTING_ENABLED` | `1` | 是否启用 AI 路由状态展示 |
+| `DATAPLANE_SSH_TARGET` | 空 | 数据面 SSH 目标，例如 `root@node-a` |
+| `DATAPLANE_SSH_OPTIONS` | 空 | 数据面 SSH 附加参数 |
+| `DATAPLANE_CONFIG_PATH` | 空 | 远端数据面 `config.json` 路径 |
+| `DATAPLANE_DYNAMIC_ROUTING_PATH` | 空 | 当 AI 域名自动分类在数据面执行时，远端 `dynamic-routing.json` 路径 |
+| `DATAPLANE_AI_REPORT_PATH` | 空 | 当 AI 域名统计在数据面生成时，远端 `reports/hourly-domains/latest.json` 路径 |
+| `DATAPLANE_PANEL_DB_PATH` | 空 | 当 AI 域名统计在数据面生成时，远端 `panel.db` 路径，用于回传 `ai_domains` 聚合快照 |
+| `DATAPLANE_PANEL_PORTS_PATH` | 空 | 远端数据面 `panel-ports.json` 路径 |
+| `DATAPLANE_ACCESS_LOG_PATH` | 空 | 远端数据面 `access.log` 路径 |
+| `DATAPLANE_RESTART_COMMAND` | 空 | 数据面远程重启命令 |
 
 内部路径和备份相关变量：
 
@@ -577,7 +567,7 @@ Google Search MCP / OpenRouter 参数：
   - 先执行 `python -m app.xray.render_config`
   - 再确认 `app/xray/runtime/client-test.json` 存在且能被容器看到
 - 创建端口后没有真正开始承载流量
-  - 确认 `xray-reality` 容器已启动，或者你已经正确配置 `XRAY_LOCAL_BIN` + 本地 Xray
+  - 确认 `xray-reality` 容器已启动，或者你已经正确配置 `DATAPLANE_LOCAL_BIN` + 本地 Xray
   - 只启动面板本身并不会自动提供 Xray 数据面
 - AI 域名没有新增分类结果
   - 看 `docker compose --profile xray logs -f xray-ai-domain-manager`

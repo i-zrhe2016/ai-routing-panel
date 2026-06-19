@@ -12,9 +12,9 @@
         <div class="header-copy">
           <div class="header-kicker-row">
             <p class="eyebrow">PROBE DASHBOARD</p>
-            <span class="status-pill {{ 'good' if xray_running else 'bad' }}">
+            <span class="status-pill {{ 'good' if data_plane_running else 'bad' }}">
               <span class="status-pill-dot"></span>
-              {{ 'Xray 运行中' if xray_running else 'Xray 未运行' }}
+              {{ '数据面运行中' if data_plane_running else '数据面未运行' }}
             </span>
           </div>
           <h1 class="page-title">端口连通性监控</h1>

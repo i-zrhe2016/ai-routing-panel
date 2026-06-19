@@ -27,9 +27,9 @@ def load_state_module(temp_root, api_server):
     os.environ["XRAY_CONFIG_PATH"] = str(runtime_dir / "config.json")
     os.environ["XRAY_PANEL_PORTS_PATH"] = str(runtime_dir / "panel-ports.json")
     os.environ["XRAY_ACCESS_LOG_PATH"] = str(logs_dir / "access.log")
-    os.environ["XRAY_API_SERVER"] = api_server
-    os.environ["XRAY_LOCAL_BIN"] = shutil.which("true") or "/bin/true"
-    os.environ["XRAY_CONTAINER_NAME"] = ""
+    os.environ["DATAPLANE_API_SERVER"] = api_server
+    os.environ["DATAPLANE_LOCAL_BIN"] = shutil.which("true") or "/bin/true"
+    os.environ["DATAPLANE_CONTAINER_NAME"] = ""
 
     if "flask" not in sys.modules:
         flask_stub = ModuleType("flask")
@@ -61,16 +61,23 @@ class LocalXrayModeTest(unittest.TestCase):
             sys.modules["flask"] = self.original_flask_module
         self.tempdir.cleanup()
 
-    def test_xray_running_uses_local_api_socket(self):
+    def test_data_plane_running_uses_local_api_socket(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(("127.0.0.1", 0))
         server.listen(1)
         host, port = server.getsockname()
         state_module = load_state_module(self.root, f"{host}:{port}")
-        accepted = threading.Thread(target=lambda: server.accept()[0].close(), daemon=True)
+        def accept_once():
+            try:
+                connection, _address = server.accept()
+            except OSError:
+                return
+            connection.close()
+
+        accepted = threading.Thread(target=accept_once, daemon=True)
         accepted.start()
         try:
-            self.assertTrue(state_module.PanelState().xray_running())
+            self.assertTrue(state_module.PanelState().data_plane_running())
         finally:
             server.close()
             accepted.join(timeout=1)
@@ -84,28 +91,28 @@ class LocalXrayModeTest(unittest.TestCase):
             calls.append((config_path,))
             return SimpleNamespace(stdout="")
 
-        state.default_node.test_config = fake_test_config
+        state.data_plane.test_config = fake_test_config
         state.xray_config_test()
 
         self.assertEqual(len(calls), 1)
         (config_path,) = calls[0]
         self.assertIsNone(config_path)
-        self.assertEqual(state.default_node.config.local_bin, os.environ["XRAY_LOCAL_BIN"])
+        self.assertEqual(state.data_plane.config.local_bin, os.environ["DATAPLANE_LOCAL_BIN"])
 
     def test_read_xray_traffic_stats_uses_local_binary(self):
         state_module = load_state_module(self.root, "127.0.0.1:10085")
         state = state_module.PanelState()
         commands = []
-        state.xray_running = lambda: True
+        state.data_plane_running = lambda: True
 
         def fake_run_statsquery(timeout_seconds, pattern):
             commands.append((timeout_seconds, pattern))
             return SimpleNamespace(stdout=json.dumps({"stat": []}))
 
-        state.default_node.run_statsquery = fake_run_statsquery
+        state.data_plane.run_statsquery = fake_run_statsquery
         self.assertEqual(state.read_xray_traffic_stats(), {})
         self.assertEqual(len(commands), 1)
         timeout_seconds, pattern = commands[0]
         self.assertEqual(timeout_seconds, int(os.environ.get("XRAY_STATS_QUERY_TIMEOUT", "5")))
         self.assertEqual(pattern, "inbound>>>panel-")
-        self.assertEqual(state.default_node.config.local_bin, os.environ["XRAY_LOCAL_BIN"])
+        self.assertEqual(state.data_plane.config.local_bin, os.environ["DATAPLANE_LOCAL_BIN"])

@@ -12,9 +12,9 @@
         <div class="header-copy">
           <div class="header-kicker-row">
             <p class="eyebrow">AI DOMAIN DASHBOARD</p>
-            <span class="status-pill {{ 'good' if xray_running else 'bad' }}">
+            <span class="status-pill {{ 'good' if data_plane_running else 'bad' }}">
               <span class="status-pill-dot"></span>
-              {{ 'Xray 运行中' if xray_running else 'Xray 未运行' }}
+              {{ '数据面运行中' if data_plane_running else '数据面未运行' }}
             </span>
           </div>
           <h1 class="page-title">AI 域名统计</h1>
@@ -34,11 +34,11 @@
               <strong>{{ timezone_label }}</strong>
             </div>
             <div class="info-tile">
-              <span>同步模式</span>
+          <span>回传模式</span>
               <strong>{{ dashboard.sync_mode_label }}</strong>
             </div>
             <div class="info-tile">
-              <span>最近同步</span>
+          <span>最近回传</span>
               <strong>{{ dashboard.aggregate.updated_at_display }}</strong>
             </div>
           </div>
@@ -57,7 +57,7 @@
       {% if dashboard.sync_error %}
       <section class="banner error">
         <div class="banner-row">
-          <span>远端 AI 状态同步失败：{{ dashboard.sync_error }}</span>
+          <span>AI 路由回传同步失败：{{ dashboard.sync_error }}</span>
         </div>
       </section>
       {% endif %}

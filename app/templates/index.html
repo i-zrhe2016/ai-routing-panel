@@ -17,9 +17,9 @@
         <div class="header-copy">
           <div class="header-kicker-row">
             <p class="eyebrow">ROUTING CONTROL</p>
-            <span class="status-pill" :class="meta.xray_running ? 'good' : 'bad'">
+            <span class="status-pill" :class="meta.data_plane_running ? 'good' : 'bad'">
               <span class="status-pill-dot"></span>
-              <span v-text="meta.xray_running ? 'Xray 运行中' : 'Xray 未运行'"></span>
+              <span v-text="meta.data_plane_running ? '数据面运行中' : '数据面未运行'"></span>
             </span>
           </div>
           <h1 class="page-title">xray-routing-panel</h1>
@@ -73,14 +73,20 @@
 
       <section class="stats-grid">
         <article class="stat-card stat-card-emphasis">
-          <span>默认节点状态</span>
-          <strong :class="meta.xray_running ? 'ok' : 'bad'" v-text="meta.xray_running ? '运行中' : '未运行'"></strong>
-          <small>当前默认数据面健康状态</small>
+          <span>数据面状态</span>
+          <strong
+            :class="dataPlaneStatus.xray_running ? 'ok' : 'bad'"
+            v-text="dataPlaneRunningLabel(dataPlaneStatus)"
+          ></strong>
+          <small>唯一受管数据面的当前运行状态</small>
         </article>
-        <article class="stat-card" v-if="meta.ai_node_status">
-          <span>AI 节点状态</span>
-          <strong :class="meta.ai_node_status.running ? 'ok' : 'bad'" v-text="nodeRunningLabel(meta.ai_node_status)"></strong>
-          <small>AI 专用节点运行状态</small>
+        <article class="stat-card" v-if="aiRoutingStatus">
+          <span>AI 路由状态</span>
+          <strong
+            :class="aiRoutingStatus.status_tone || 'warn'"
+            v-text="aiRoutingLabel(aiRoutingStatus)"
+          ></strong>
+          <small v-text="aiRoutingStatus.sync_error || ('最近报告：' + (aiRoutingStatus.report_generated_at_display || '暂无'))"></small>
         </article>
         <article class="stat-card" v-if="meta.ai_domain_stats">
           <span>AI 域名窗口</span>
@@ -169,24 +175,24 @@
           <div class="panel-head subscription-panel-head">
             <div>
               <p class="section-eyebrow">NODES</p>
-              <h2>节点控制</h2>
-              <p>控制面与数据面分离后，这里统一显示默认节点和 AI 节点状态，并支持远程重启。</p>
+              <h2>数据面控制</h2>
+              <p>控制面只管理一个数据面；AI 路由作为该数据面的子系统展示，不再单独建模成节点。</p>
             </div>
           </div>
 
-          <div class="subscription-overview" v-if="nodes.length">
-            <div class="info-tile" v-for="node in nodes" :key="node.role">
-              <span v-text="node.label"></span>
-              <strong v-text="nodeRunningLabel(node)"></strong>
-              <small v-text="node.target || node.mode"></small>
+          <div class="subscription-overview">
+            <div class="info-tile">
+              <span v-text="dataPlaneStatus.label || '数据面'"></span>
+              <strong v-text="dataPlaneRunningLabel(dataPlaneStatus)"></strong>
+              <small v-text="dataPlaneStatus.management_target || '数据面未配置'"></small>
               <button
                 class="secondary"
                 type="button"
-                v-if="node.configured && node.supports_restart"
-                :disabled="isBusy(`restart-node:${node.role}`)"
-                @click="restartNode(node)"
+                v-if="dataPlaneStatus.configured && dataPlaneStatus.supports_restart"
+                :disabled="isBusy('restart-data-plane')"
+                @click="restartDataPlane"
               >
-                <span v-text="isBusy(`restart-node:${node.role}`) ? '重启中...' : '重启节点'"></span>
+                <span v-text="isBusy('restart-data-plane') ? '重启中...' : '重启数据面'"></span>
               </button>
             </div>
           </div>

@@ -202,7 +202,7 @@ def build_temp_target_path(path_text):
 
 
 @dataclass(frozen=True)
-class ManagedNodeConfig:
+class DataPlaneConfig:
     role: str
     label: str
     api_server: str = ""
@@ -228,8 +228,8 @@ class ManagedNodeConfig:
     upstream_port: int | None = None
 
 
-class ManagedNodeController:
-    def __init__(self, config: ManagedNodeConfig):
+class DataPlaneController:
+    def __init__(self, config: DataPlaneConfig):
         self.config = config
 
     @property
@@ -735,26 +735,29 @@ class ManagedNodeController:
         return None
 
     def status_summary(self):
-        running = None
+        xray_running = None
         error = ""
-        if self.is_configured():
+        configured = self.is_configured()
+        if configured:
             try:
-                running = self.is_running()
+                xray_running = self.is_running()
             except Exception as exc:
                 error = str(exc)
         return {
             "role": self.config.role,
             "label": self.config.label,
-            "configured": self.is_configured(),
-            "mode": self.mode,
-            "target": self.display_target(),
+            "configured": configured,
+            "reachable": bool(xray_running) if xray_running is not None else False,
+            "xray_running": xray_running,
+            "management_target": self.display_target(),
             "api_server": self.config.api_server,
             "config_path": self.config.config_path,
             "access_log_path": self.config.access_log_path,
-            "upstream_host": self.config.upstream_host,
-            "upstream_port": self.config.upstream_port,
             "supports_sync": self.supports_sync(),
             "supports_restart": self.supports_restart(),
-            "running": running,
             "last_error": error,
         }
+
+
+ManagedNodeConfig = DataPlaneConfig
+ManagedNodeController = DataPlaneController

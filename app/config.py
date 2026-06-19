@@ -56,56 +56,34 @@ XRAY_PANEL_PORTS_PATH = Path(
 )
 XRAY_ACCESS_LOG_PATH = Path(os.environ.get("XRAY_ACCESS_LOG_PATH", BASE_DIR / "xray" / "logs" / "access.log"))
 XRAY_API_SERVER = os.environ.get("XRAY_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
-XRAY_LOCAL_BIN = os.environ.get("XRAY_LOCAL_BIN", "").strip()
-XRAY_CONTAINER_NAME = os.environ.get("XRAY_CONTAINER_NAME", "xray-reality-local").strip()
-XRAY_DOCKER_BIN = os.environ.get("XRAY_DOCKER_BIN", "docker").strip() or "docker"
 XRAY_STATS_QUERY_TIMEOUT = parse_nonnegative_env_int(
     os.environ.get("XRAY_STATS_QUERY_TIMEOUT", "5"),
     "XRAY_STATS_QUERY_TIMEOUT",
 )
-XRAY_PROBE_HOST = os.environ.get("XRAY_PROBE_HOST", "127.0.0.1").strip() or "127.0.0.1"
 XRAY_CLIENT_CONFIG_PATH = Path(
     os.environ.get("XRAY_CLIENT_CONFIG_PATH", BASE_DIR / "xray" / "runtime" / "client-test.json")
 )
 SUBSCRIPTION_NAME_PREFIX = os.environ.get("SUBSCRIPTION_NAME_PREFIX", "reality").strip() or "reality"
 
-DEFAULT_NODE_SSH_TARGET = os.environ.get("DEFAULT_NODE_SSH_TARGET", "").strip()
-DEFAULT_NODE_SSH_BIN = os.environ.get("DEFAULT_NODE_SSH_BIN", "ssh").strip() or "ssh"
-DEFAULT_NODE_SSH_OPTIONS = parse_shell_words_env(
-    os.environ.get("DEFAULT_NODE_SSH_OPTIONS", ""),
-    "DEFAULT_NODE_SSH_OPTIONS",
+DATAPLANE_SSH_TARGET = os.environ.get("DATAPLANE_SSH_TARGET", "").strip()
+DATAPLANE_SSH_BIN = os.environ.get("DATAPLANE_SSH_BIN", "ssh").strip() or "ssh"
+DATAPLANE_SSH_OPTIONS = parse_shell_words_env(
+    os.environ.get("DATAPLANE_SSH_OPTIONS", ""),
+    "DATAPLANE_SSH_OPTIONS",
 )
-DEFAULT_NODE_API_SERVER = os.environ.get("DEFAULT_NODE_API_SERVER", XRAY_API_SERVER).strip() or XRAY_API_SERVER
-DEFAULT_NODE_XRAY_BIN = os.environ.get("DEFAULT_NODE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
-DEFAULT_NODE_LOCAL_BIN = os.environ.get("DEFAULT_NODE_LOCAL_BIN", XRAY_LOCAL_BIN).strip()
-DEFAULT_NODE_CONTAINER_NAME = os.environ.get("DEFAULT_NODE_CONTAINER_NAME", XRAY_CONTAINER_NAME).strip()
-DEFAULT_NODE_DOCKER_BIN = os.environ.get("DEFAULT_NODE_DOCKER_BIN", XRAY_DOCKER_BIN).strip() or XRAY_DOCKER_BIN
-DEFAULT_NODE_RESTART_COMMAND = os.environ.get("DEFAULT_NODE_RESTART_COMMAND", "").strip()
-DEFAULT_NODE_CONFIG_PATH = os.environ.get("DEFAULT_NODE_CONFIG_PATH", "").strip()
-DEFAULT_NODE_DYNAMIC_ROUTING_PATH = os.environ.get("DEFAULT_NODE_DYNAMIC_ROUTING_PATH", "").strip()
-DEFAULT_NODE_AI_REPORT_PATH = os.environ.get("DEFAULT_NODE_AI_REPORT_PATH", "").strip()
-DEFAULT_NODE_PANEL_DB_PATH = os.environ.get("DEFAULT_NODE_PANEL_DB_PATH", "").strip()
-DEFAULT_NODE_PANEL_PORTS_PATH = os.environ.get("DEFAULT_NODE_PANEL_PORTS_PATH", "").strip()
-DEFAULT_NODE_ACCESS_LOG_PATH = os.environ.get("DEFAULT_NODE_ACCESS_LOG_PATH", "").strip()
-
-AI_NODE_HOST = os.environ.get("AI_NODE_HOST", "").strip()
-AI_NODE_PORT = parse_optional_env_port(
-    os.environ.get("AI_NODE_PORT", ""),
-    "AI_NODE_PORT",
-)
-AI_NODE_SSH_TARGET = os.environ.get("AI_NODE_SSH_TARGET", "").strip()
-AI_NODE_SSH_BIN = os.environ.get("AI_NODE_SSH_BIN", "ssh").strip() or "ssh"
-AI_NODE_SSH_OPTIONS = parse_shell_words_env(
-    os.environ.get("AI_NODE_SSH_OPTIONS", ""),
-    "AI_NODE_SSH_OPTIONS",
-)
-AI_NODE_API_SERVER = os.environ.get("AI_NODE_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
-AI_NODE_XRAY_BIN = os.environ.get("AI_NODE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
-AI_NODE_LOCAL_BIN = os.environ.get("AI_NODE_LOCAL_BIN", "").strip()
-AI_NODE_CONTAINER_NAME = os.environ.get("AI_NODE_CONTAINER_NAME", "").strip()
-AI_NODE_DOCKER_BIN = os.environ.get("AI_NODE_DOCKER_BIN", XRAY_DOCKER_BIN).strip() or XRAY_DOCKER_BIN
-AI_NODE_RESTART_COMMAND = os.environ.get("AI_NODE_RESTART_COMMAND", "").strip()
-AI_NODE_CONFIG_PATH = os.environ.get("AI_NODE_CONFIG_PATH", "").strip()
+DATAPLANE_API_SERVER = os.environ.get("DATAPLANE_API_SERVER", XRAY_API_SERVER).strip() or XRAY_API_SERVER
+DATAPLANE_XRAY_BIN = os.environ.get("DATAPLANE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
+DATAPLANE_LOCAL_BIN = os.environ.get("DATAPLANE_LOCAL_BIN", "").strip()
+DATAPLANE_CONTAINER_NAME = os.environ.get("DATAPLANE_CONTAINER_NAME", "xray-reality-local").strip()
+DATAPLANE_DOCKER_BIN = os.environ.get("DATAPLANE_DOCKER_BIN", "docker").strip() or "docker"
+DATAPLANE_RESTART_COMMAND = os.environ.get("DATAPLANE_RESTART_COMMAND", "").strip()
+DATAPLANE_CONFIG_PATH = os.environ.get("DATAPLANE_CONFIG_PATH", "").strip()
+DATAPLANE_DYNAMIC_ROUTING_PATH = os.environ.get("DATAPLANE_DYNAMIC_ROUTING_PATH", "").strip()
+DATAPLANE_AI_REPORT_PATH = os.environ.get("DATAPLANE_AI_REPORT_PATH", "").strip()
+DATAPLANE_PANEL_DB_PATH = os.environ.get("DATAPLANE_PANEL_DB_PATH", "").strip()
+DATAPLANE_PANEL_PORTS_PATH = os.environ.get("DATAPLANE_PANEL_PORTS_PATH", "").strip()
+DATAPLANE_ACCESS_LOG_PATH = os.environ.get("DATAPLANE_ACCESS_LOG_PATH", "").strip()
+DATAPLANE_PROBE_HOST = os.environ.get("DATAPLANE_PROBE_HOST", "127.0.0.1").strip() or "127.0.0.1"
 
 PANEL_HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))
@@ -125,6 +103,7 @@ PROBE_TEST_LISTEN_PORT = parse_optional_env_port(
     os.environ.get("PROBE_TEST_LISTEN_PORT", ""),
     "PROBE_TEST_LISTEN_PORT",
 )
+AI_ROUTING_ENABLED = parse_bool_env(os.environ.get("AI_ROUTING_ENABLED"), default=True)
 PANEL_HEALTH_REQUIRES_XRAY = parse_bool_env(os.environ.get("PANEL_HEALTH_REQUIRES_XRAY"), default=True)
 AUTH_ENABLED = bool(PANEL_USERNAME or PANEL_PASSWORD)
 AUTH_SESSION_KEY = "panel_auth_marker"

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-from app.xray.node_control import ManagedNodeConfig, ManagedNodeController
+from app.xray.node_control import DataPlaneConfig, DataPlaneController
 
 
 def load_state_module(temp_root):
@@ -30,8 +30,8 @@ def load_state_module(temp_root):
     os.environ["XRAY_CONFIG_PATH"] = str(runtime_dir / "config.json")
     os.environ["XRAY_PANEL_PORTS_PATH"] = str(runtime_dir / "panel-ports.json")
     os.environ["XRAY_ACCESS_LOG_PATH"] = str(logs_dir / "access.log")
-    os.environ["XRAY_LOCAL_BIN"] = ""
-    os.environ["XRAY_CONTAINER_NAME"] = ""
+    os.environ["DATAPLANE_LOCAL_BIN"] = ""
+    os.environ["DATAPLANE_CONTAINER_NAME"] = ""
 
     if "flask" not in sys.modules:
         flask_stub = ModuleType("flask")
@@ -63,10 +63,10 @@ class NodeControlTest(unittest.TestCase):
             sys.modules["flask"] = self.original_flask_module
         self.tempdir.cleanup()
 
-    def test_remote_default_node_syncs_before_validation(self):
-        os.environ["DEFAULT_NODE_SSH_TARGET"] = "root@default-node"
-        os.environ["DEFAULT_NODE_CONFIG_PATH"] = "/etc/xray/config.json"
-        os.environ["DEFAULT_NODE_PANEL_PORTS_PATH"] = "/etc/xray/panel-ports.json"
+    def test_remote_data_plane_syncs_before_validation(self):
+        os.environ["DATAPLANE_SSH_TARGET"] = "root@default-node"
+        os.environ["DATAPLANE_CONFIG_PATH"] = "/etc/xray/config.json"
+        os.environ["DATAPLANE_PANEL_PORTS_PATH"] = "/etc/xray/panel-ports.json"
         state_module = load_state_module(self.root)
         state = state_module.PanelState()
         calls = []
@@ -75,32 +75,32 @@ class NodeControlTest(unittest.TestCase):
             calls.append(validate_config)
             return ["/etc/xray/config.json"]
 
-        state.default_node.sync_generated_files = fake_sync
+        state.data_plane.sync_generated_files = fake_sync
         state.xray_config_test()
 
         self.assertEqual(calls, [True])
 
-    def test_restart_node_returns_ai_summary(self):
-        os.environ["AI_NODE_HOST"] = "ai.example.com"
-        os.environ["AI_NODE_PORT"] = "443"
-        os.environ["AI_NODE_RESTART_COMMAND"] = "systemctl restart xray"
+    def test_restart_data_plane_returns_summary(self):
+        os.environ["DATAPLANE_SSH_TARGET"] = "root@data-plane"
         state_module = load_state_module(self.root)
         state = state_module.PanelState()
-        state.ai_node.restart = lambda: True
-        state.ai_node.status_summary = lambda: {"role": "ai", "label": "AI 节点", "configured": True}
+        state.data_plane.is_configured = lambda: True
+        state.data_plane.supports_restart = lambda: True
+        state.data_plane.restart = lambda: True
+        state.data_plane.status_summary = lambda: {"role": "data_plane", "label": "数据面", "configured": True}
 
-        summary = state.restart_node("ai")
+        summary = state.restart_data_plane_or_raise()
 
-        self.assertEqual(summary["role"], "ai")
-        self.assertEqual(summary["label"], "AI 节点")
+        self.assertEqual(summary["role"], "data_plane")
+        self.assertEqual(summary["label"], "数据面")
 
     def test_remote_sync_keeps_json_suffix_for_temp_config(self):
         source_config = self.root / "config.json"
         source_config.write_text("{}", encoding="utf-8")
-        controller = ManagedNodeController(
-            ManagedNodeConfig(
-                role="default",
-                label="默认节点",
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
                 ssh_target="root@example.com",
                 config_path="/etc/xray/config.json",
                 source_config_path=source_config,
@@ -124,10 +124,10 @@ class NodeControlTest(unittest.TestCase):
 
     def test_remote_dynamic_routing_sync_updates_local_copy(self):
         local_path = self.root / "dynamic-routing.json"
-        controller = ManagedNodeController(
-            ManagedNodeConfig(
-                role="default",
-                label="默认节点",
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
                 ssh_target="root@example.com",
                 dynamic_routing_path="/etc/xray/dynamic-routing.json",
                 source_dynamic_routing_path=local_path,
@@ -147,10 +147,10 @@ class NodeControlTest(unittest.TestCase):
 
     def test_remote_ai_report_sync_updates_local_copy(self):
         local_path = self.root / "reports" / "hourly-domains" / "latest.json"
-        controller = ManagedNodeController(
-            ManagedNodeConfig(
-                role="default",
-                label="默认节点",
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
                 ssh_target="root@example.com",
                 ai_report_path="/srv/xray/reports/hourly-domains/latest.json",
                 source_ai_report_path=local_path,
@@ -171,13 +171,13 @@ class NodeControlTest(unittest.TestCase):
             '{"generated_at": "2026-06-18T00:00:00+00:00"}',
         )
 
-    def test_sync_default_node_ai_state_replaces_local_snapshot(self):
-        os.environ["DEFAULT_NODE_SSH_TARGET"] = "root@default-node"
-        os.environ["DEFAULT_NODE_AI_REPORT_PATH"] = "/srv/xray/reports/hourly-domains/latest.json"
-        os.environ["DEFAULT_NODE_PANEL_DB_PATH"] = "/srv/xray/data/panel.db"
+    def test_sync_data_plane_ai_state_replaces_local_snapshot(self):
+        os.environ["DATAPLANE_SSH_TARGET"] = "root@default-node"
+        os.environ["DATAPLANE_AI_REPORT_PATH"] = "/srv/xray/reports/hourly-domains/latest.json"
+        os.environ["DATAPLANE_PANEL_DB_PATH"] = "/srv/xray/data/panel.db"
         state_module = load_state_module(self.root)
         state = state_module.PanelState()
-        report_path = state.default_node.config.source_ai_report_path
+        report_path = state.data_plane.config.source_ai_report_path
 
         report = {
             "generated_at": "2026-06-18T00:00:00+00:00",
@@ -206,8 +206,8 @@ class NodeControlTest(unittest.TestCase):
             report_path.write_text(json.dumps(report), encoding="utf-8")
             return True
 
-        state.default_node.sync_ai_report_from_remote = fake_sync_report
-        state.default_node.read_ai_domains_snapshot_from_remote = lambda: {
+        state.data_plane.sync_ai_report_from_remote = fake_sync_report
+        state.data_plane.read_ai_domains_snapshot_from_remote = lambda: {
             "exists": True,
             "ai_domains": [
                 {
@@ -227,7 +227,7 @@ class NodeControlTest(unittest.TestCase):
             ],
         }
 
-        result = state.sync_default_node_ai_state()
+        result = state.sync_data_plane_ai_state()
 
         self.assertTrue(result["report_synced"])
         self.assertTrue(result["snapshot_synced"])
@@ -242,14 +242,14 @@ class NodeControlTest(unittest.TestCase):
         self.assertEqual(observations, 0)
 
     def test_render_xray_config_pulls_remote_dynamic_routing_first(self):
-        os.environ["DEFAULT_NODE_SSH_TARGET"] = "root@default-node"
-        os.environ["DEFAULT_NODE_CONFIG_PATH"] = "/etc/xray/config.json"
-        os.environ["DEFAULT_NODE_DYNAMIC_ROUTING_PATH"] = "/etc/xray/dynamic-routing.json"
+        os.environ["DATAPLANE_SSH_TARGET"] = "root@default-node"
+        os.environ["DATAPLANE_CONFIG_PATH"] = "/etc/xray/config.json"
+        os.environ["DATAPLANE_DYNAMIC_ROUTING_PATH"] = "/etc/xray/dynamic-routing.json"
         state_module = load_state_module(self.root)
         state = state_module.PanelState()
         calls = []
 
-        state.default_node.sync_dynamic_routing_from_remote = lambda: calls.append("pull")
+        state.data_plane.sync_dynamic_routing_from_remote = lambda: calls.append("pull")
         state.run_command = lambda command, error_prefix, timeout=None: calls.append("render")
 
         state.render_xray_config()

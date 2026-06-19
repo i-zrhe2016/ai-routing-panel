@@ -83,7 +83,7 @@ def load_panel_module(temp_root, panel_username="", panel_password=""):
     os.environ["XRAY_CONFIG_PATH"] = str(runtime_dir / "config.json")
     os.environ["XRAY_PANEL_PORTS_PATH"] = str(runtime_dir / "panel-ports.json")
     os.environ["XRAY_ACCESS_LOG_PATH"] = str(logs_dir / "access.log")
-    os.environ["XRAY_CONTAINER_NAME"] = "test-xray-container"
+    os.environ["DATAPLANE_CONTAINER_NAME"] = "test-xray-container"
     os.environ["XRAY_CLIENT_CONFIG_PATH"] = str(client_config_path)
     os.environ["PANEL_PUBLIC_URL"] = "http://panel.example.com"
     os.environ["SEED_LISTEN_PORT"] = ""
@@ -96,9 +96,9 @@ def load_panel_module(temp_root, panel_username="", panel_password=""):
     module = importlib.reload(module)
     module.state.render_xray_config = lambda: None
     module.state.xray_config_test = lambda: None
-    module.state.xray_restart = lambda: None
-    module.state.xray_container_exists = lambda: False
-    module.state.xray_running = lambda: False
+    module.state.restart_data_plane = lambda: None
+    module.state.data_plane_configured = lambda: False
+    module.state.data_plane_running = lambda: False
     module.state.init_db()
     return module
 
@@ -128,7 +128,7 @@ class TenantPanelTest(unittest.TestCase):
         self.fail(f"port {listen_port} was not created")
 
     def seed_ai_domain_dashboard(self):
-        report_path = self.panel.state.default_node.config.source_ai_report_path
+        report_path = self.panel.state.data_plane.config.source_ai_report_path
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
             json.dumps(

@@ -148,8 +148,8 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
     ports = state.query_ports()
     summary = state.query_summary(ports)
     subscription = build_subscription_snapshot(ports)
-    default_node_status = state.default_node_status()
-    ai_node_status = state.ai_node_status()
+    data_plane_status = state.data_plane_status()
+    ai_routing_status = state.ai_routing_status(sync_error=ai_sync_error)
     return {
         "flash": {
             "message": message,
@@ -157,7 +157,7 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
         },
         "meta": {
             "panel_address": PANEL_PUBLIC_URL or f"{PANEL_HOST}:{PANEL_PORT}",
-            "xray_running": state.xray_running(),
+            "data_plane_running": bool(data_plane_status.get("xray_running")),
             "timezone_label": datetime.now().astimezone().strftime("%Z"),
             "probe_enabled": PROBE_ENABLED,
             "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
@@ -165,9 +165,8 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
             "default_upstream_host": DEFAULT_UPSTREAM_HOST,
             "default_upstream_port": DEFAULT_UPSTREAM_PORT,
             "tenant_panel_prefix": "/tenant/",
-            "default_node_status": default_node_status,
-            "ai_node_status": ai_node_status,
-            "node_statuses": [default_node_status, ai_node_status],
+            "data_plane_status": data_plane_status,
+            "ai_routing_status": ai_routing_status,
             "ai_domain_stats": state.query_ai_domain_overview(sync_error=ai_sync_error),
         },
         "summary": summary,
@@ -209,7 +208,7 @@ def build_dashboard_state(message="", level="info"):
     state.disable_auto_stopped_ports(reload_xray=True)
     ai_sync_error = ""
     try:
-        state.sync_default_node_ai_state()
+        state.sync_data_plane_ai_state()
     except RuntimeError as exc:
         ai_sync_error = str(exc)
     return collect_dashboard_state(message=message, level=level, ai_sync_error=ai_sync_error)
@@ -321,7 +320,7 @@ def probe_dashboard():
         "probe_dashboard.html",
         dashboard=dashboard,
         timezone_label=datetime.now().astimezone().strftime("%Z"),
-        xray_running=state.xray_running(),
+        data_plane_running=state.data_plane_running(),
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
         panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
@@ -333,7 +332,7 @@ def probe_dashboard():
 def ai_domain_dashboard():
     ai_sync_error = ""
     try:
-        state.sync_default_node_ai_state()
+        state.sync_data_plane_ai_state()
     except RuntimeError as exc:
         ai_sync_error = str(exc)
     dashboard = state.get_ai_domain_dashboard(sync_error=ai_sync_error)
@@ -341,7 +340,7 @@ def ai_domain_dashboard():
         "ai_domain_dashboard.html",
         dashboard=dashboard,
         timezone_label=datetime.now().astimezone().strftime("%Z"),
-        xray_running=state.xray_running(),
+        data_plane_running=state.data_plane_running(),
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
         panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
@@ -401,10 +400,10 @@ def tenant_panel(tenant_token):
 @app.route("/healthz", methods=["GET"])
 def healthz():
     state.sync_traffic_state()
-    xray_running = state.xray_running()
-    healthy = xray_running if PANEL_HEALTH_REQUIRES_XRAY else True
+    data_plane_running = state.data_plane_running()
+    healthy = data_plane_running if PANEL_HEALTH_REQUIRES_XRAY else True
     status_code = 200 if healthy else 500
-    return jsonify({"ok": healthy, "xray_running": xray_running}), status_code
+    return jsonify({"ok": healthy, "data_plane_running": data_plane_running}), status_code
 
 
 @app.route("/api/dashboard", methods=["GET"])
@@ -497,12 +496,11 @@ def api_rotate_port_subscription_token(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/nodes/<role>/restart", methods=["POST"])
-def api_restart_node(role):
+@app.route("/api/data-plane/restart", methods=["POST"])
+def api_restart_data_plane():
     try:
-        summary = state.restart_node(role)
-        label = summary.get("label", "节点")
-        return json_success_response(f"{label} 已执行重启。")
+        state.restart_data_plane_or_raise()
+        return json_success_response("数据面已执行重启。")
     except (ValidationError, RuntimeError) as exc:
         return json_error_response(str(exc), status_code=400)
 

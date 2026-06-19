@@ -84,7 +84,7 @@ docker compose --profile xray up -d --build xray-reality xray-ai-domain-manager
 
 - `xray-reality`：代理服务本体
 - `xray-ai-domain-manager`：每小时读取 `access.log`，优先调用本机 `codex` 识别域名，必要时再回退到 OpenAI API，维护动态规则，并在配置变化后重启 `xray-reality`
-- 如果配置了 `AI_NODE_SSH_TARGET` / `AI_NODE_RESTART_COMMAND`，也可以把这一步改成远程重启独立 AI 节点
+- 如果你把数据面独立部署到远端，可以改为配置 `DATAPLANE_SSH_TARGET` / `DATAPLANE_RESTART_COMMAND`，让控制面统一下发和重启
 
 ## 生成产物
 
@@ -183,15 +183,15 @@ AI_UPSTREAM_PROBE_TIMEOUT_SECONDS=3
 
 注意：多上游切换是在 `xray-ai-domain-manager` 每轮执行时完成的；如果你希望切换更快，把 `AI_DOMAIN_INTERVAL_SECONDS` 调小即可。
 
-如果 AI 出站本身也是独立 Xray 节点，而不是只切换上游地址，可以额外配置：
+如果你把完整数据面独立部署到远端，而不是在本机 compose 里直接重启本地容器，可以额外配置：
 
-- `AI_NODE_SSH_TARGET`
-- `AI_NODE_SSH_OPTIONS`
-- `AI_NODE_CONTAINER_NAME`
-- `AI_NODE_RESTART_COMMAND`
-- `AI_NODE_CONFIG_PATH`
+- `DATAPLANE_SSH_TARGET`
+- `DATAPLANE_SSH_OPTIONS`
+- `DATAPLANE_CONTAINER_NAME`
+- `DATAPLANE_RESTART_COMMAND`
+- `DATAPLANE_CONFIG_PATH`
 
-这样当动态路由重渲染后，管理器会优先尝试重启这个独立 AI 节点。
+这样当动态路由重渲染后，管理器会只对唯一数据面执行重启。
 
 ## 常用命令
 

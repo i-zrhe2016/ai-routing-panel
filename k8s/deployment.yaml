@@ -64,9 +64,9 @@ spec:
               value: 127.0.0.1:10085
             - name: XRAY_CLIENT_CONFIG_PATH
               value: /app/xray/runtime/client-test.json
-            - name: XRAY_LOCAL_BIN
+            - name: DATAPLANE_LOCAL_BIN
               value: /usr/local/bin/xray
-            - name: XRAY_CONTAINER_NAME
+            - name: DATAPLANE_CONTAINER_NAME
               value: ""
             - name: PANEL_HOST
               value: 0.0.0.0
@@ -137,9 +137,9 @@ spec:
               value: 127.0.0.1:10085
             - name: XRAY_CLIENT_CONFIG_PATH
               value: /app/xray/runtime/client-test.json
-            - name: XRAY_LOCAL_BIN
+            - name: DATAPLANE_LOCAL_BIN
               value: /usr/local/bin/xray
-            - name: XRAY_CONTAINER_NAME
+            - name: DATAPLANE_CONTAINER_NAME
               value: ""
             - name: PANEL_HOST
               value: 0.0.0.0
