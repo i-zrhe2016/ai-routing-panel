@@ -40,6 +40,32 @@
 - `PROBE_TEST_LISTEN_PORT`
 - `PANEL_HEALTH_REQUIRES_XRAY`
 
+## 数据库备份上传变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `DB_BACKUP_UPLOADER_ENABLED` | 是否在每日本地备份成功后自动上传 |
+| `DB_BACKUP_UPLOADER_PASSWORD` | 备份加密密码；必须覆盖上游占位值 |
+| `DB_BACKUP_UPLOADER_SCOPE` | npm 包 scope，例如 `@example` |
+| `DB_BACKUP_UPLOADER_DRY_RUN` | 设为 `1` 时只做加密切片和记录写入，不真实 publish |
+| `DB_BACKUP_UPLOADER_NPMRC_PATH` | npm 认证配置文件路径，默认 `/db-backup-uploader-data/.npmrc` |
+| `DB_BACKUP_UPLOADER_ARTIFACT_NAME` | 逻辑 artifact 名；不设时默认为 `<DB_BACKUP_PREFIX>-db-backup` |
+| `DB_BACKUP_UPLOADER_PACKAGE_VERSION` | 强制覆盖自动生成的包版本；留空时按备份时间戳生成 |
+| `DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES` | 单分片大小，默认 `5242880` |
+| `DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY` | 并发发布数，默认 `2` |
+| `DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS` | 单个 `npm publish` 超时时间 |
+
+目录约定：
+
+- 本地 `.db` 备份：`./backups`
+- 上传工作目录：`./data/db-backup-uploader`
+- 默认认证文件：`./data/db-backup-uploader/.npmrc`
+
+当前上传器默认采用 latest-only 模式：
+
+- 上传成功后会尝试删除上一份备份对应的 npm 包版本
+- `upload-records.json` 只保留当前 `latest`
+
 ## `app/xray/.env` 必填 REALITY 参数
 
 以下参数是渲染 `config.json` 的基础输入：

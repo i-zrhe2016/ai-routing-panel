@@ -7,13 +7,17 @@ RUN apt-get update \
         cron \
         ca-certificates \
         docker.io \
+        nodejs \
+        npm \
         python3 \
         python3-flask \
         openssh-client \
+        tar \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /data /app/xray/runtime /app/xray/logs
 
 COPY app /app
+COPY components /app/components
 COPY scripts /app/scripts
 COPY --from=xray-core /usr/local/bin/xray /usr/local/bin/xray
 

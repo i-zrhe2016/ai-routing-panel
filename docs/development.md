@@ -102,6 +102,24 @@ docker compose --profile xray logs -f xray-reality
 docker compose --profile xray run --rm xray-ai-domain-manager python -m app.xray.ai_domain_manager --once
 ```
 
+手动跑一轮数据库备份和上传链路：
+
+```bash
+docker compose run --rm xray-routing-panel-db-backup \
+  python3 /app/scripts/run_db_backup_cycle.py
+```
+
+只验证备份上传逻辑，不真实 publish：
+
+```bash
+docker compose run --rm \
+  -e DB_BACKUP_UPLOADER_ENABLED=1 \
+  -e DB_BACKUP_UPLOADER_DRY_RUN=1 \
+  -e DB_BACKUP_UPLOADER_PASSWORD=test-password \
+  xray-routing-panel-db-backup \
+  python3 /app/scripts/run_db_backup_cycle.py
+```
+
 仅直接启动面板进程：
 
 ```bash

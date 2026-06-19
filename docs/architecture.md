@@ -8,6 +8,7 @@
 - 数据面：本地容器、本地二进制，或远端 SSH 目标上的 Xray
 - AI 路由子系统：`xray-ai-domain-manager`
 - 备份子系统：`xray-routing-panel-db-backup`
+- 备份归档上传组件：`db-backup-uploader`
 
 首页只展示数据面状态和 AI 路由状态，不再展示“独立 AI 节点”。
 
@@ -33,6 +34,12 @@
 - 从 `access.log` 统计小时域名窗口
 - 结合内建规则、Codex 或 OpenAI 兼容接口做域名分类
 - 输出动态路由片段、小时报表、数据库聚合快照
+
+### 备份上传组件
+
+- 入口代码：`scripts/run_db_backup_cycle.py`、`components/db-backup-uploader/`
+- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份
+- 再按配置调用 `db-backup-uploader` 做加密、切片、上传和记录写入
 
 ## 数据面模式判定
 
@@ -65,11 +72,15 @@ AI 域名同步模式在 UI 中会显示为：
 4. `render_config.py` 合并 `app/xray/.env`、`panel-ports.json` 和可选 `dynamic-routing.json`，生成 `config.json`、`client-test.json`、分享链接。
 5. 数据面加载 `config.json` 并通过 Xray API 提供 `statsquery`。
 6. `xray-ai-domain-manager` 从 `access.log` 读取域名，输出 AI 路由产物。
-7. 首页读取 `data_plane_status`、`ai_routing_status` 和 AI 域名聚合结果。
+7. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，并在启用时调用 `db-backup-uploader` 上传最新备份。
+8. 首页读取 `data_plane_status`、`ai_routing_status` 和 AI 域名聚合结果。
 
 ## 关键运行产物
 
 - `data/panel.db`：端口、租户、流量和 AI 域名聚合
+- `backups/*.db`：最近几天的本地数据库备份
+- `data/db-backup-uploader/upload-records.json`：最新上传记录和历史快照
+- `data/db-backup-uploader/shards/`：最新一次备份的本地分片产物
 - `app/xray/runtime/panel-ports.json`：当前有效监听端口列表
 - `app/xray/runtime/config.json`：Xray 服务端配置
 - `app/xray/runtime/client-test.json`：本地客户端测试配置

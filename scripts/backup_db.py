@@ -24,6 +24,11 @@ def parse_args():
     parser.add_argument("--backup-dir", default=os.environ.get("DB_BACKUP_DIR", "/backups"))
     parser.add_argument("--keep-days", type=non_negative_int, default=non_negative_int(keep_days))
     parser.add_argument("--prefix", default=os.environ.get("DB_BACKUP_PREFIX", "xray-routing-panel"))
+    parser.add_argument(
+        "--latest-path-file",
+        default=os.environ.get("DB_BACKUP_LATEST_PATH_FILE", ""),
+        help="Optional file to write the absolute path of the latest backup to.",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +53,14 @@ def prune_backups(backup_dir, prefix, keep_days):
     return removed
 
 
+def write_latest_path(path_file, backup_path):
+    if not path_file:
+        return
+    target = Path(path_file)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"{backup_path}\n", encoding="utf-8")
+
+
 def main():
     args = parse_args()
     source = Path(args.db_path)
@@ -70,6 +83,7 @@ def main():
                 src_conn.backup(dst_conn)
 
         os.replace(temp_path, final_path)
+        write_latest_path(args.latest_path_file, final_path.resolve())
         removed = prune_backups(backup_dir, args.prefix, args.keep_days)
         print(f"[backup] wrote {final_path}")
         if removed:

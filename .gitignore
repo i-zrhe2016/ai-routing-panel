@@ -17,3 +17,4 @@ app/xray/runtime/**
 !app/xray/reports/
 app/xray/reports/**
 !app/xray/reports/.gitkeep
+components/db-backup-uploader/node_modules/

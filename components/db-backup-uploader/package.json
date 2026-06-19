@@ -1,0 +1,11 @@
+{
+  "name": "db-backup-uploader",
+  "private": true,
+  "type": "module",
+  "description": "Encrypted shard upload and restore workflow for xray-routing-panel database backups.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "upload": "node shard-upload.js",
+    "restore": "node shard-restore.js"
+  }
+}

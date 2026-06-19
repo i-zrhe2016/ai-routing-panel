@@ -32,6 +32,25 @@
 - 达到流量上限的端口会自动停用
 - “重置流量并启用”会清零累计流量与当日流量，但不会清零连接数
 
+## 数据库备份与上传
+
+- `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`
+- 本地备份文件落在 `./backups`
+- 当 `DB_BACKUP_UPLOADER_ENABLED=1` 时，备份成功后会继续调用 `db-backup-uploader`
+- 上传成功后会尝试删除上一份备份的 npm 包版本，只保留最新一份上传记录
+
+上传链路依赖：
+
+- `DB_BACKUP_UPLOADER_PASSWORD`
+- 有效的 npm 认证配置，默认读取 `./data/db-backup-uploader/.npmrc`
+- 如需先验证流程，可设置 `DB_BACKUP_UPLOADER_DRY_RUN=1`
+
+排查建议：
+
+- 查看日志：`docker compose logs -f xray-routing-panel-db-backup`
+- 确认最新本地备份已生成到 `./backups`
+- 确认 `./data/db-backup-uploader/upload-records.json` 是否已更新
+
 ## TCP 探针
 
 当 `PROBE_ENABLED=1` 时，面板会周期性对 `DATAPLANE_PROBE_HOST:<listen_port>` 做 TCP 连通性探测。

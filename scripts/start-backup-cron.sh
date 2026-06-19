@@ -6,20 +6,75 @@ set -eu
 : "${DB_BACKUP_KEEP_DAYS:=7}"
 : "${DB_BACKUP_PREFIX:=xray-routing-panel}"
 : "${DB_BACKUP_CRON_SCHEDULE:=0 3 * * *}"
+: "${DB_BACKUP_UPLOADER_ENABLED:=0}"
+: "${DB_BACKUP_UPLOADER_DATA_DIR:=/db-backup-uploader-data}"
+: "${DB_BACKUP_UPLOADER_FILES_DIR:=/db-backup-uploader-data/files}"
+: "${DB_BACKUP_UPLOADER_SHARDS_DIR:=/db-backup-uploader-data/shards}"
+: "${DB_BACKUP_UPLOADER_RESTORED_DIR:=/db-backup-uploader-data/restored}"
+: "${DB_BACKUP_UPLOADER_RECORD_PATH:=/db-backup-uploader-data/upload-records.json}"
+: "${DB_BACKUP_UPLOADER_RECORD_HISTORY_LIMIT:=20}"
+: "${DB_BACKUP_UPLOADER_ARTIFACT_NAME:=}"
+: "${DB_BACKUP_UPLOADER_PASSWORD:=}"
+: "${DB_BACKUP_UPLOADER_SCOPE:=}"
+: "${DB_BACKUP_UPLOADER_ACCESS:=public}"
+: "${DB_BACKUP_UPLOADER_REGISTRY:=https://registry.npmjs.org}"
+: "${DB_BACKUP_UPLOADER_NPM_WEB_BASE:=https://www.npmjs.com/package}"
+: "${DB_BACKUP_UPLOADER_TAG:=latest}"
+: "${DB_BACKUP_UPLOADER_PACKAGE_VERSION:=}"
+: "${DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES:=5242880}"
+: "${DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY:=2}"
+: "${DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS:=600000}"
+: "${DB_BACKUP_UPLOADER_OTP:=}"
+: "${DB_BACKUP_UPLOADER_DRY_RUN:=0}"
+: "${DB_BACKUP_UPLOADER_NPMRC_PATH:=/db-backup-uploader-data/.npmrc}"
 
-mkdir -p /etc/cron.d "$DB_BACKUP_DIR" /var/log
+ENV_FILE=/etc/xray-routing-panel-db-backup.env
+CRON_FILE=/etc/cron.d/xray-routing-panel-db-backup
 
-cat >/etc/cron.d/xray-routing-panel-db-backup <<EOF
+write_env() {
+  key=$1
+  value=$2
+  escaped=$(printf "%s" "$value" | sed "s/'/'\"'\"'/g")
+  printf "export %s='%s'\n" "$key" "$escaped" >> "$ENV_FILE"
+}
+
+mkdir -p /etc/cron.d "$DB_BACKUP_DIR" /var/log "$DB_BACKUP_UPLOADER_DATA_DIR"
+
+: >"$ENV_FILE"
+write_env DB_PATH "$DB_PATH"
+write_env DB_BACKUP_DIR "$DB_BACKUP_DIR"
+write_env DB_BACKUP_KEEP_DAYS "$DB_BACKUP_KEEP_DAYS"
+write_env DB_BACKUP_PREFIX "$DB_BACKUP_PREFIX"
+write_env DB_BACKUP_UPLOADER_ENABLED "$DB_BACKUP_UPLOADER_ENABLED"
+write_env DB_BACKUP_UPLOADER_DATA_DIR "$DB_BACKUP_UPLOADER_DATA_DIR"
+write_env DB_BACKUP_UPLOADER_FILES_DIR "$DB_BACKUP_UPLOADER_FILES_DIR"
+write_env DB_BACKUP_UPLOADER_SHARDS_DIR "$DB_BACKUP_UPLOADER_SHARDS_DIR"
+write_env DB_BACKUP_UPLOADER_RESTORED_DIR "$DB_BACKUP_UPLOADER_RESTORED_DIR"
+write_env DB_BACKUP_UPLOADER_RECORD_PATH "$DB_BACKUP_UPLOADER_RECORD_PATH"
+write_env DB_BACKUP_UPLOADER_RECORD_HISTORY_LIMIT "$DB_BACKUP_UPLOADER_RECORD_HISTORY_LIMIT"
+write_env DB_BACKUP_UPLOADER_ARTIFACT_NAME "$DB_BACKUP_UPLOADER_ARTIFACT_NAME"
+write_env DB_BACKUP_UPLOADER_PASSWORD "$DB_BACKUP_UPLOADER_PASSWORD"
+write_env DB_BACKUP_UPLOADER_SCOPE "$DB_BACKUP_UPLOADER_SCOPE"
+write_env DB_BACKUP_UPLOADER_ACCESS "$DB_BACKUP_UPLOADER_ACCESS"
+write_env DB_BACKUP_UPLOADER_REGISTRY "$DB_BACKUP_UPLOADER_REGISTRY"
+write_env DB_BACKUP_UPLOADER_NPM_WEB_BASE "$DB_BACKUP_UPLOADER_NPM_WEB_BASE"
+write_env DB_BACKUP_UPLOADER_TAG "$DB_BACKUP_UPLOADER_TAG"
+write_env DB_BACKUP_UPLOADER_PACKAGE_VERSION "$DB_BACKUP_UPLOADER_PACKAGE_VERSION"
+write_env DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES "$DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES"
+write_env DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY "$DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY"
+write_env DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS "$DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS"
+write_env DB_BACKUP_UPLOADER_OTP "$DB_BACKUP_UPLOADER_OTP"
+write_env DB_BACKUP_UPLOADER_DRY_RUN "$DB_BACKUP_UPLOADER_DRY_RUN"
+write_env DB_BACKUP_UPLOADER_NPMRC_PATH "$DB_BACKUP_UPLOADER_NPMRC_PATH"
+
+cat >"$CRON_FILE" <<EOF
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-DB_PATH=$DB_PATH
-DB_BACKUP_DIR=$DB_BACKUP_DIR
-DB_BACKUP_KEEP_DAYS=$DB_BACKUP_KEEP_DAYS
-DB_BACKUP_PREFIX=$DB_BACKUP_PREFIX
-$DB_BACKUP_CRON_SCHEDULE root python3 /app/scripts/backup_db.py --db-path "$DB_PATH" --backup-dir "$DB_BACKUP_DIR" --keep-days "$DB_BACKUP_KEEP_DAYS" --prefix "$DB_BACKUP_PREFIX" >> /var/log/xray-routing-panel-db-backup.log 2>&1
+$DB_BACKUP_CRON_SCHEDULE root . $ENV_FILE && python3 /app/scripts/run_db_backup_cycle.py >> /var/log/xray-routing-panel-db-backup.log 2>&1
 EOF
 
-chmod 0644 /etc/cron.d/xray-routing-panel-db-backup
+chmod 0600 "$ENV_FILE"
+chmod 0644 "$CRON_FILE"
 touch /var/log/xray-routing-panel-db-backup.log
 
 exec cron -f
