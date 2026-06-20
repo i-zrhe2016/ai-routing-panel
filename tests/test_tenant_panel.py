@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
-def load_panel_module(temp_root, panel_username="", panel_password=""):
+def load_panel_module(temp_root, panel_username="", panel_password="", probe_enabled=False, probe_test_listen_port=""):
     data_dir = temp_root / "data"
     xray_dir = temp_root / "xray"
     runtime_dir = xray_dir / "runtime"
@@ -90,6 +90,8 @@ def load_panel_module(temp_root, panel_username="", panel_password=""):
     os.environ["PANEL_USERNAME"] = panel_username
     os.environ["PANEL_PASSWORD"] = panel_password
     os.environ["PANEL_SECRET_KEY"] = "test-secret-key"
+    os.environ["PROBE_ENABLED"] = "1" if probe_enabled else "0"
+    os.environ["PROBE_TEST_LISTEN_PORT"] = str(probe_test_listen_port or "")
 
     sys.modules.pop("app.panel", None)
     module = importlib.import_module("app.panel")
@@ -378,6 +380,52 @@ class UnifiedAdminLoginTest(unittest.TestCase):
         )
         self.assertEqual(logged_in.status_code, 200)
         self.assertIn("xray-routing-panel", logged_in.get_data(as_text=True))
+
+
+class ProbeDashboardRenderTest(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.panel = load_panel_module(self.root, probe_enabled=True, probe_test_listen_port="34001")
+        self.client = self.panel.app.test_client()
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def create_port(self, listen_port, note):
+        payload = self.panel.state.validate_port_payload(
+            {
+                "listen_port": listen_port,
+                "traffic_limit": "10G",
+                "note": note,
+            }
+        )
+        self.panel.state.create_port(payload)
+        return next(item for item in self.panel.state.query_ports() if item["listen_port"] == listen_port)
+
+    def test_probe_dashboard_renders_recent_status_grid(self):
+        port = self.create_port(34001, "Probe Tenant")
+        with self.panel.state.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO upstream_probe_history (listen_port, is_reachable, checked_at, failure_reason)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (port["listen_port"], 1, "2026-06-18T00:00:00+00:00", ""),
+                    (port["listen_port"], 0, "2026-06-18T01:00:00+00:00", "timeout"),
+                    (port["listen_port"], 1, "2026-06-18T02:00:00+00:00", ""),
+                ],
+            )
+            conn.commit()
+
+        response = self.client.get("/probe-dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("最近状态分布", body)
+        self.assertIn("当前窗口共", body)
+        self.assertIn("timeout", body)
 
 
 if __name__ == "__main__":

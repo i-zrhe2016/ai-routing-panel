@@ -241,6 +241,38 @@ class NodeControlTest(unittest.TestCase):
         self.assertEqual(dict(row), {"domain": "openai.com", "total_hits": 9, "source": "codex"})
         self.assertEqual(observations, 0)
 
+    def test_read_ai_domain_report_accepts_pending_domain_list(self):
+        state_module = load_state_module(self.root)
+        state = state_module.PanelState()
+        report_path = state.data_plane.config.source_ai_report_path
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "generated_at": "2026-06-19T06:00:00+00:00",
+                    "window_start": "2026-06-19T05:00:00+00:00",
+                    "window_end": "2026-06-19T06:00:00+00:00",
+                    "unique_domains": 1,
+                    "domains": [],
+                    "protocols": [],
+                    "route_status": {
+                        "status": "pending",
+                        "reason": "classifier_disabled",
+                        "pending_domains_without_classifier": [
+                            "api.example.com",
+                            "cdn.example.com",
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = state.read_ai_domain_report()
+
+        self.assertEqual(report["route_status"], "pending")
+        self.assertEqual(report["pending_domains_without_classifier"], 2)
+
     def test_render_xray_config_pulls_remote_dynamic_routing_first(self):
         os.environ["DATAPLANE_SSH_TARGET"] = "root@default-node"
         os.environ["DATAPLANE_CONFIG_PATH"] = "/etc/xray/config.json"

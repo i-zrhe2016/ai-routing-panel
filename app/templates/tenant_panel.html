@@ -6,179 +6,231 @@
     <title>{{ dashboard.port.note or ('租户端口 ' ~ dashboard.port.listen_port) }} - xray-routing-panel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   </head>
-  <body>
-    <main class="shell shell-dashboard tenant-shell">
-      <section class="page-header">
-        <div class="header-copy">
-          <div class="header-kicker-row">
-            <p class="eyebrow">TENANT PORTAL</p>
-            <span class="badge {{ dashboard.port.status }}">{{ dashboard.port.status_label }}</span>
-          </div>
-          <h1 class="page-title">{{ dashboard.port.note or ('租户端口 ' ~ dashboard.port.listen_port) }}</h1>
-          <p class="page-subtitle">
-            这是当前端口的独立租户面板。这里只展示本租户的连接信息、流量状态和专属订阅地址。
-          </p>
+  <body class="dashboard-page">
+    <main class="app-shell tenant-app-shell">
+      <aside class="side-nav">
+        <div class="nav-brand">
+          <p class="eyebrow">TENANT PORTAL</p>
+          <h2>{{ dashboard.port.note or ('端口 ' ~ dashboard.port.listen_port) }}</h2>
+          <p>当前页面只展示本租户端口的数据和专属订阅地址。</p>
         </div>
 
-        <div class="header-aside">
-          <div class="quick-info-grid">
-            <div class="info-tile">
-              <span>监听端口</span>
-              <strong>{{ dashboard.port.listen_port }}</strong>
-            </div>
-            <div class="info-tile">
-              <span>接入方式</span>
-              <strong>Xray Direct</strong>
-            </div>
-            <div class="info-tile">
-              <span>到期时间</span>
-              <strong>{{ dashboard.port.expires_at_display }}</strong>
-            </div>
-            <div class="info-tile">
-              <span>最近访问</span>
-              <strong>{{ dashboard.port.last_seen_display }}</strong>
-            </div>
-          </div>
-          <div class="header-actions">
-            <form method="post" action="{{ dashboard.meta.tenant_logout_url }}" class="inline-form">
-              <button class="secondary" type="submit">退出登录</button>
-            </form>
-          </div>
-        </div>
-      </section>
+        <nav class="nav-links" aria-label="租户导航">
+          <a class="nav-link active" href="#overview">总览</a>
+          <a class="nav-link" href="#runtime">运行信息</a>
+          <a class="nav-link" href="#subscriptions">订阅输出</a>
+        </nav>
 
-      {% if dashboard.flash.message %}
-      <section class="banner {{ dashboard.flash.level or 'info' }}">
-        <div class="banner-row">
-          <span>{{ dashboard.flash.message }}</span>
-        </div>
-      </section>
-      {% endif %}
-
-      <section class="stats-grid">
-        <article class="stat-card stat-card-emphasis">
+        <section class="nav-card">
           <span>当前状态</span>
           <strong>{{ dashboard.port.status_label }}</strong>
-          <small>只对应当前租户端口</small>
-        </article>
-        <article class="stat-card">
-          <span>累计流量</span>
-          <strong>{{ dashboard.port.traffic_used_display }}</strong>
-          <small>入站 + 出站总和</small>
-        </article>
-        <article class="stat-card">
-          <span>今日流量</span>
-          <strong>{{ (dashboard.port.today_bytes_received + dashboard.port.today_bytes_sent) | human_bytes }}</strong>
-          <small>按天统计窗口</small>
-        </article>
-        <article class="stat-card">
-          <span>累计连接</span>
-          <strong>{{ dashboard.port.total_connections }}</strong>
-          <small>该端口的历史连接次数</small>
-        </article>
-      </section>
+          <p>监听端口 {{ dashboard.port.listen_port }}</p>
+        </section>
 
-      <section class="detail-grid tenant-detail-grid">
-        <section class="inner-panel">
-          <div class="inner-panel-head">
-            <h4>运行信息</h4>
-            <p>查看当前租户端口的流量、时间和连通性状态。</p>
+        <section class="nav-card">
+          <span>到期时间</span>
+          <strong>{{ dashboard.port.expires_at_display }}</strong>
+          <p>最近访问 {{ dashboard.port.last_seen_display }}</p>
+        </section>
+
+        <form method="post" action="{{ dashboard.meta.tenant_logout_url }}" class="inline-form nav-form">
+          <button class="secondary" type="submit">退出登录</button>
+        </form>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <p class="eyebrow">TENANT WORKSPACE</p>
+            <h1 class="page-title">租户面板</h1>
+            <p class="page-subtitle">查看当前端口的状态、流量与专属订阅输出，不包含其他租户信息。</p>
           </div>
-          <div class="traffic-grid">
-            <div>
-              <span>累计入站</span>
-              <strong>{{ dashboard.port.total_bytes_received | human_bytes }}</strong>
+
+          <div class="topbar-actions">
+            <span class="topbar-badge">端口 {{ dashboard.port.listen_port }}</span>
+            <span class="topbar-badge">{{ dashboard.meta.timezone_label }}</span>
+          </div>
+        </header>
+
+        {% if dashboard.flash.message %}
+        <section class="banner {{ dashboard.flash.level or 'info' }}">
+          <div class="banner-row">
+            <span>{{ dashboard.flash.message }}</span>
+          </div>
+        </section>
+        {% endif %}
+
+        <section id="overview" class="page-header">
+          <div class="header-copy">
+            <p class="section-eyebrow">OVERVIEW</p>
+            <h2>{{ dashboard.port.note or ('租户端口 ' ~ dashboard.port.listen_port) }}</h2>
+            <p class="page-subtitle">这是当前端口的独立租户面板。这里只展示本租户的连接信息、流量状态和可直接导入客户端的订阅地址。</p>
+          </div>
+
+          <div class="header-aside">
+            <div class="quick-info-grid">
+              <div class="info-tile">
+                <span>监听端口</span>
+                <strong>{{ dashboard.port.listen_port }}</strong>
+                <small>当前租户专属接入入口</small>
+              </div>
+              <div class="info-tile">
+                <span>接入方式</span>
+                <strong>Xray Direct</strong>
+                <small>与控制台配置保持一致</small>
+              </div>
+              <div class="info-tile">
+                <span>到期时间</span>
+                <strong>{{ dashboard.port.expires_at_display }}</strong>
+                <small>到期后端口会自动停用</small>
+              </div>
+              <div class="info-tile">
+                <span>最近访问</span>
+                <strong>{{ dashboard.port.last_seen_display }}</strong>
+                <small>最近一次连接被面板记录的时间</small>
+              </div>
             </div>
-            <div>
-              <span>累计出站</span>
-              <strong>{{ dashboard.port.total_bytes_sent | human_bytes }}</strong>
+          </div>
+        </section>
+
+        <section class="stats-grid">
+          <article class="stat-card stat-card-emphasis">
+            <span>当前状态</span>
+            <strong>{{ dashboard.port.status_label }}</strong>
+            <small>只对应当前租户端口</small>
+          </article>
+          <article class="stat-card">
+            <span>累计流量</span>
+            <strong>{{ dashboard.port.traffic_used_display }}</strong>
+            <small>入站 + 出站总和</small>
+          </article>
+          <article class="stat-card">
+            <span>今日流量</span>
+            <strong>{{ (dashboard.port.today_bytes_received + dashboard.port.today_bytes_sent) | human_bytes }}</strong>
+            <small>按天统计窗口</small>
+          </article>
+          <article class="stat-card">
+            <span>累计连接</span>
+            <strong>{{ dashboard.port.total_connections }}</strong>
+            <small>该端口的历史连接次数</small>
+          </article>
+        </section>
+
+        <section class="tenant-content">
+          <section id="runtime" class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-eyebrow">RUNTIME</p>
+                <h2>运行信息</h2>
+                <p>查看当前租户端口的流量、时间和连通性状态。</p>
+              </div>
             </div>
-            <div>
-              <span>今日入站</span>
-              <strong>{{ dashboard.port.today_bytes_received | human_bytes }}</strong>
+            <div class="traffic-grid">
+              <div>
+                <span>累计入站</span>
+                <strong>{{ dashboard.port.total_bytes_received | human_bytes }}</strong>
+              </div>
+              <div>
+                <span>累计出站</span>
+                <strong>{{ dashboard.port.total_bytes_sent | human_bytes }}</strong>
+              </div>
+              <div>
+                <span>今日入站</span>
+                <strong>{{ dashboard.port.today_bytes_received | human_bytes }}</strong>
+              </div>
+              <div>
+                <span>今日出站</span>
+                <strong>{{ dashboard.port.today_bytes_sent | human_bytes }}</strong>
+              </div>
+              <div>
+                <span>流量上限</span>
+                <strong>{{ dashboard.port.traffic_limit_display }}</strong>
+              </div>
+              <div>
+                <span>剩余流量</span>
+                <strong>{{ dashboard.port.traffic_remaining_display }}</strong>
+              </div>
+              {% if dashboard.meta.probe_enabled %}
+              <div>
+                <span>最近检测</span>
+                <strong>{{ dashboard.port.probe_checked_at_display }}</strong>
+              </div>
+              <div>
+                <span>端口状态</span>
+                <strong class="probe-text {{ dashboard.port.probe_status }}">{{ dashboard.port.probe_status_label }}</strong>
+              </div>
+              {% endif %}
             </div>
-            <div>
-              <span>今日出站</span>
-              <strong>{{ dashboard.port.today_bytes_sent | human_bytes }}</strong>
+          </section>
+
+          <section id="subscriptions" class="panel subscription-shell">
+            <div class="subscription-shell-head">
+              <div>
+                <p class="section-eyebrow">SUBSCRIPTIONS</p>
+                <h2>订阅输出</h2>
+                <p>这些地址只对应当前租户端口，可直接导入客户端。</p>
+              </div>
             </div>
-            <div>
-              <span>流量上限</span>
-              <strong>{{ dashboard.port.traffic_limit_display }}</strong>
+
+            {% if dashboard.meta.subscription_available %}
+            <div class="subscription-grid">
+              <label class="full">
+                <span>Clash 订阅</span>
+                <div class="copy-block">
+                  <div class="copy-value">{{ dashboard.access.tenant_subscription_clash_url }}</div>
+                  <button class="secondary copy-button" type="button" data-copy-value="{{ dashboard.access.tenant_subscription_clash_url }}">复制</button>
+                </div>
+              </label>
+              <label class="full">
+                <span>V2Ray 订阅</span>
+                <div class="copy-block">
+                  <div class="copy-value">{{ dashboard.access.tenant_subscription_v2ray_url }}</div>
+                  <button class="secondary copy-button" type="button" data-copy-value="{{ dashboard.access.tenant_subscription_v2ray_url }}">复制</button>
+                </div>
+              </label>
+              <label class="full">
+                <span>VLESS 直连分享</span>
+                <div class="copy-block">
+                  <div class="copy-value">{{ dashboard.access.share_link }}</div>
+                  <button class="secondary copy-button" type="button" data-copy-value="{{ dashboard.access.share_link }}">复制</button>
+                </div>
+              </label>
             </div>
-            <div>
-              <span>剩余流量</span>
-              <strong>{{ dashboard.port.traffic_remaining_display }}</strong>
-            </div>
-            {% if dashboard.meta.probe_enabled %}
-            <div>
-              <span>最近检测</span>
-              <strong>{{ dashboard.port.probe_checked_at_display }}</strong>
-            </div>
-            <div>
-              <span>端口状态</span>
-              <strong class="probe-text {{ dashboard.port.probe_status }}">{{ dashboard.port.probe_status_label }}</strong>
+            {% else %}
+            <div class="subscription-alert">
+              <strong>订阅功能未就绪</strong>
+              <p>{{ dashboard.meta.subscription_error }}</p>
+              <p>当前读取路径：<span>{{ dashboard.meta.client_config_path }}</span></p>
             </div>
             {% endif %}
-          </div>
+          </section>
         </section>
-
-        <section class="inner-panel subscription-shell">
-          <div class="subscription-shell-head">
-            <div>
-              <h4>订阅输出</h4>
-              <p>这些地址只对应当前租户端口，可直接导入客户端。</p>
-            </div>
-          </div>
-
-          {% if dashboard.meta.subscription_available %}
-          <div class="subscription-grid">
-            <label class="full">
-              <span>Clash 订阅</span>
-              <div class="copy-row">
-                <input id="tenant-clash-url" type="text" readonly value="{{ dashboard.access.tenant_subscription_clash_url }}" onclick="this.select()">
-                <button class="secondary copy-button" type="button" data-copy-target="tenant-clash-url">复制</button>
-              </div>
-            </label>
-            <label class="full">
-              <span>V2Ray 订阅</span>
-              <div class="copy-row">
-                <input id="tenant-v2ray-url" type="text" readonly value="{{ dashboard.access.tenant_subscription_v2ray_url }}" onclick="this.select()">
-                <button class="secondary copy-button" type="button" data-copy-target="tenant-v2ray-url">复制</button>
-              </div>
-            </label>
-            <label class="full">
-              <span>VLESS 直连分享</span>
-              <div class="copy-row">
-                <input id="tenant-share-link" type="text" readonly value="{{ dashboard.access.share_link }}" onclick="this.select()">
-                <button class="secondary copy-button" type="button" data-copy-target="tenant-share-link">复制</button>
-              </div>
-            </label>
-          </div>
-          {% else %}
-          <div class="subscription-alert">
-            <strong>订阅功能未就绪</strong>
-            <p>{{ dashboard.meta.subscription_error }}</p>
-            <p>当前读取路径：<span>{{ dashboard.meta.client_config_path }}</span></p>
-          </div>
-          {% endif %}
-        </section>
-      </section>
+      </div>
     </main>
 
     <script>
-      async function copyTextFromTarget(targetId, button) {
-        const input = document.getElementById(targetId);
-        if (!input) {
+      function fallbackCopyText(value) {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "readonly");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return copied;
+      }
+
+      async function copyTextValue(value, button) {
+        if (!value) {
           return;
         }
-        const value = input.value || "";
         try {
           if (navigator.clipboard && window.isSecureContext) {
             await navigator.clipboard.writeText(value);
-          } else {
-            input.focus();
-            input.select();
-            document.execCommand("copy");
+          } else if (!fallbackCopyText(value)) {
+            return;
           }
           const originalText = button.textContent;
           button.textContent = "已复制";
@@ -186,14 +238,13 @@
             button.textContent = originalText;
           }, 1200);
         } catch (_error) {
-          input.focus();
-          input.select();
+          fallbackCopyText(value);
         }
       }
 
-      document.querySelectorAll("[data-copy-target]").forEach((button) => {
+      document.querySelectorAll("[data-copy-value]").forEach((button) => {
         button.addEventListener("click", () => {
-          copyTextFromTarget(button.getAttribute("data-copy-target"), button);
+          copyTextValue(button.getAttribute("data-copy-value") || "", button);
         });
       });
     </script>
