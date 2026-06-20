@@ -150,6 +150,7 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
     subscription = build_subscription_snapshot(ports)
     data_plane_status = state.data_plane_status()
     ai_routing_status = state.ai_routing_status(sync_error=ai_sync_error)
+    dns_failover_status = state.dns_failover_status()
     return {
         "flash": {
             "message": message,
@@ -167,6 +168,7 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
             "tenant_panel_prefix": "/tenant/",
             "data_plane_status": data_plane_status,
             "ai_routing_status": ai_routing_status,
+            "dns_failover_status": dns_failover_status,
             "ai_domain_stats": state.query_ai_domain_overview(sync_error=ai_sync_error),
         },
         "summary": summary,
@@ -409,6 +411,30 @@ def healthz():
 @app.route("/api/dashboard", methods=["GET"])
 def api_dashboard():
     return jsonify({"ok": True, "dashboard": build_dashboard_state()})
+
+
+@app.route("/api/dns-failover", methods=["GET"])
+def api_dns_failover_status():
+    return jsonify({"ok": True, "status": state.dns_failover_status()})
+
+
+@app.route("/api/dns-failover/check", methods=["POST"])
+def api_dns_failover_check():
+    try:
+        state.run_dns_failover_check(force=True)
+        return json_success_response("DNS 故障切换已执行一次即时检测。")
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
+
+
+@app.route("/api/dns-failover/switch", methods=["POST"])
+def api_dns_failover_switch():
+    try:
+        payload = request_payload()
+        state.switch_dns_target(payload.get("target"))
+        return json_success_response("DNS 记录已更新。")
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)
 
 
 @app.route("/api/subscriptions/rotate", methods=["POST"])

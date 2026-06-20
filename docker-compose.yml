@@ -34,6 +34,24 @@ services:
       DATAPLANE_RESTART_COMMAND: "${DATAPLANE_RESTART_COMMAND:-}"
       DATAPLANE_CONTAINER_NAME: "${DATAPLANE_CONTAINER_NAME:-xray-reality-local}"
       DATAPLANE_PROBE_HOST: "${DATAPLANE_PROBE_HOST:-127.0.0.1}"
+      DNS_FAILOVER_ENABLED: "${DNS_FAILOVER_ENABLED:-0}"
+      DNS_FAILOVER_INTERVAL: "${DNS_FAILOVER_INTERVAL:-15}"
+      DNS_FAILOVER_TIMEOUT: "${DNS_FAILOVER_TIMEOUT:-3}"
+      DNS_FAILOVER_FAILURE_THRESHOLD: "${DNS_FAILOVER_FAILURE_THRESHOLD:-3}"
+      DNS_FAILOVER_RECOVERY_THRESHOLD: "${DNS_FAILOVER_RECOVERY_THRESHOLD:-2}"
+      DNS_FAILOVER_PROBE_HOST: "${DNS_FAILOVER_PROBE_HOST:-}"
+      DNS_FAILOVER_PROBE_PORT: "${DNS_FAILOVER_PROBE_PORT:-}"
+      CF_API_TOKEN: "${CF_API_TOKEN:-}"
+      CF_ZONE_ID: "${CF_ZONE_ID:-}"
+      CF_DNS_RECORD_ID: "${CF_DNS_RECORD_ID:-}"
+      CF_DNS_RECORD_TYPE: "${CF_DNS_RECORD_TYPE:-A}"
+      CF_DNS_RECORD_NAME: "${CF_DNS_RECORD_NAME:-}"
+      CF_DNS_RECORD_PROXIED: "${CF_DNS_RECORD_PROXIED:-0}"
+      CF_DNS_RECORD_TTL: "${CF_DNS_RECORD_TTL:-60}"
+      DNS_FAILOVER_PRIMARY_CONTENT: "${DNS_FAILOVER_PRIMARY_CONTENT:-}"
+      CONTROL_PLANE_BACKUP_XRAY_ENABLED: "${CONTROL_PLANE_BACKUP_XRAY_ENABLED:-0}"
+      DNS_FAILOVER_BACKUP_CONTENT: "${DNS_FAILOVER_BACKUP_CONTENT:-}"
+      DNS_FAILOVER_BACKUP_LABEL: "${DNS_FAILOVER_BACKUP_LABEL:-控制面备用Xray}"
       PANEL_USERNAME: "${PANEL_USERNAME:-}"
       PANEL_PASSWORD: "${PANEL_PASSWORD:-}"
       PANEL_SECRET_KEY: "${PANEL_SECRET_KEY:-}"
@@ -90,6 +108,26 @@ services:
     profiles: ["xray"]
     image: ghcr.io/xtls/xray-core:26.5.3
     container_name: xray-reality-local
+    user: "0:0"
+    restart: unless-stopped
+    network_mode: host
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    command: ["run", "-c", "/etc/xray/config.json"]
+    volumes:
+      - ./app/xray/runtime/config.json:/etc/xray/config.json:ro
+      - ./app/xray/logs:/var/log/xray
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/xray", "run", "-test", "-config", "/etc/xray/config.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  xray-reality-backup:
+    profiles: ["backup-xray"]
+    image: ghcr.io/xtls/xray-core:26.5.3
+    container_name: xray-reality-backup
     user: "0:0"
     restart: unless-stopped
     network_mode: host

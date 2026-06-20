@@ -30,6 +30,7 @@ function createPanelApp(initialState) {
         ports: [],
         dataPlaneStatus: {},
         aiRoutingStatus: {},
+        dnsFailoverStatus: {},
         flash: { message: "", level: "info" },
         createForm: createEmptyPortForm(),
         filters: {
@@ -72,6 +73,18 @@ function createPanelApp(initialState) {
       selectedPort() {
         return this.filteredPorts.find((port) => port.id === this.selectedPortId) || null;
       },
+
+      attentionPortCount() {
+        return (
+          Number(this.summary.expired_ports || 0) +
+          Number(this.summary.quota_ports || 0) +
+          Number(this.summary.disabled_ports || 0)
+        );
+      },
+
+      totalTrafficBytes() {
+        return Number(this.summary.total_bytes_received || 0) + Number(this.summary.total_bytes_sent || 0);
+      },
     },
 
     watch: {
@@ -90,6 +103,7 @@ function createPanelApp(initialState) {
         this.subscription = dashboard.subscription || {};
         this.dataPlaneStatus = dashboard.meta?.data_plane_status || {};
         this.aiRoutingStatus = dashboard.meta?.ai_routing_status || {};
+        this.dnsFailoverStatus = dashboard.meta?.dns_failover_status || {};
         this.flash = dashboard.flash || { message: "", level: "info" };
         this.ports = (dashboard.ports || []).map((port) => this.preparePort(port));
       },
@@ -143,7 +157,7 @@ function createPanelApp(initialState) {
 
       selectPort(portId) {
         this.selectedPortId = portId;
-        if (window.matchMedia("(max-width: 1180px)").matches) {
+        if (window.matchMedia("(max-width: 1240px)").matches) {
           window.requestAnimationFrame(() => {
             const detailPanel = document.getElementById("port-detail-panel");
             if (detailPanel) {
@@ -346,6 +360,32 @@ function createPanelApp(initialState) {
         return status.status_label || "未知";
       },
 
+      dnsFailoverTone(status) {
+        if (!status || !status.enabled) {
+          return "warn";
+        }
+        if (!status.configured) {
+          return "bad";
+        }
+        if (status.current_target === "backup") {
+          return "warn";
+        }
+        if (status.last_probe_status === "unhealthy") {
+          return "bad";
+        }
+        return "ok";
+      },
+
+      dnsFailoverSummary(status) {
+        if (!status || !status.enabled) {
+          return "未启用";
+        }
+        if (!status.configured) {
+          return "配置不完整";
+        }
+        return status.current_target_label || "未知";
+      },
+
       async restartDataPlane() {
         if (!this.dataPlaneStatus || !this.dataPlaneStatus.configured) {
           return;
@@ -356,6 +396,29 @@ function createPanelApp(initialState) {
         await this.runAction("restart-data-plane", async () => {
           const data = await this.requestJson("/api/data-plane/restart", {
             method: "POST",
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async runDnsFailoverCheck() {
+        await this.runAction("dns-failover-check", async () => {
+          const data = await this.requestJson("/api/dns-failover/check", {
+            method: "POST",
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async switchDnsTarget(target) {
+        const label = target === "primary" ? "主数据面" : (this.dnsFailoverStatus.backup_label || "备用节点");
+        if (!window.confirm(`确认把 DNS 切到${label}吗？`)) {
+          return;
+        }
+        await this.runAction(`dns-failover-switch:${target}`, async () => {
+          const data = await this.requestJson("/api/dns-failover/switch", {
+            method: "POST",
+            body: JSON.stringify({ target }),
           });
           this.applyResponse(data);
         });

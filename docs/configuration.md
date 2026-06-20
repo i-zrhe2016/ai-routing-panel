@@ -40,6 +40,38 @@
 - `PROBE_TEST_LISTEN_PORT`
 - `PANEL_HEALTH_REQUIRES_XRAY`
 
+## DNS 故障切换变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `DNS_FAILOVER_ENABLED` | 是否启用 Cloudflare DNS 故障切换 |
+| `DNS_FAILOVER_INTERVAL` | 后台检测周期，默认 `15` 秒 |
+| `DNS_FAILOVER_TIMEOUT` | 单次 TCP 探测超时 |
+| `DNS_FAILOVER_FAILURE_THRESHOLD` | 连续失败多少次切到备用 |
+| `DNS_FAILOVER_RECOVERY_THRESHOLD` | 连续成功多少次回切主数据面 |
+| `DNS_FAILOVER_PROBE_HOST` / `DNS_FAILOVER_PROBE_PORT` | 只用于自动切换判定的数据面公网 TCP 探测目标 |
+| `CF_API_TOKEN` | Cloudflare API Token，至少需要目标 Zone 的 DNS 编辑权限 |
+| `CF_ZONE_ID` | Cloudflare Zone ID |
+| `CF_DNS_RECORD_ID` | 要切换的单条 DNS Record ID |
+| `CF_DNS_RECORD_TYPE` | 当前支持 `A` / `AAAA` / `CNAME` |
+| `CF_DNS_RECORD_NAME` | 记录名，例如 `edge.example.com` |
+| `CF_DNS_RECORD_PROXIED` | 是否保持 Cloudflare 代理 |
+| `CF_DNS_RECORD_TTL` | 记录 TTL；非代理记录建议 `60` 以尽快生效 |
+| `DNS_FAILOVER_PRIMARY_CONTENT` | 主数据面入口 IP 或 CNAME；留空时自动获取数据面公网 IP |
+| `CONTROL_PLANE_BACKUP_XRAY_ENABLED` | 是否启用“控制面本机公网 IP + 备用 Xray”自动备用模式 |
+| `DNS_FAILOVER_BACKUP_CONTENT` | 控制面备用节点 IP 或 CNAME；留空时自动获取控制面本机公网 IP |
+| `DNS_FAILOVER_BACKUP_LABEL` | 首页展示用备用节点名称 |
+
+说明：
+
+- 当前只支持通过 `CF_DNS_RECORD_ID` 更新单条记录
+- 自动切换只看 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
+- AI 节点状态只展示，不参与任何 DNS 切换决策
+- 如果 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP
+- 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 且 `DNS_FAILOVER_BACKUP_CONTENT` 留空，控制面会自动获取本机公网 IP，适合作为控制面备用 Xray 的 DNS 指向
+- 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，则必须显式填写 `DNS_FAILOVER_BACKUP_CONTENT`
+- 对 REALITY 这类直连流量，想让 IP 更快生效，优先把 `CF_DNS_RECORD_TTL` 设为 `60`
+
 ## 数据库备份上传变量
 
 | 变量 | 说明 |

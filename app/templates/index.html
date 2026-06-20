@@ -11,180 +11,326 @@
     <script defer src="https://cdn.jsdelivr.net/npm/vue@3.5.16/dist/vue.global.prod.js"></script>
     <script defer src="{{ url_for('static', filename='panel.js') }}"></script>
   </head>
-  <body>
-    <main id="app" class="shell shell-dashboard" v-cloak>
-      <section class="page-header">
-        <div class="header-copy">
-          <div class="header-kicker-row">
-            <p class="eyebrow">ROUTING CONTROL</p>
-            <span class="status-pill" :class="meta.data_plane_running ? 'good' : 'bad'">
-              <span class="status-pill-dot"></span>
-              <span v-text="meta.data_plane_running ? '数据面运行中' : '数据面未运行'"></span>
-            </span>
-          </div>
-          <h1 class="page-title">xray-routing-panel</h1>
-          <p class="page-subtitle">
-            以 Material 3 风格重排控制台：首屏先看运行状态，再用表格筛选端口，在同页完成编辑、订阅和风险操作。
-          </p>
+  <body class="dashboard-page">
+    <main id="app" class="app-shell" v-cloak>
+      <aside class="side-nav">
+        <div class="nav-brand">
+          <p class="eyebrow">XRAY ROUTING PANEL</p>
+          <h2>控制台</h2>
+          <p>简洁的端口、租户与数据面统一后台。</p>
         </div>
 
-        <div class="header-aside">
-          <div class="quick-info-grid">
-            <div class="info-tile">
-              <span>面板地址</span>
-              <strong v-text="meta.panel_address"></strong>
-            </div>
-            <div class="info-tile">
-              <span>时区</span>
-              <strong v-text="meta.timezone_label"></strong>
-            </div>
-            <div class="info-tile">
-              <span>接入方式</span>
-              <strong>Xray Direct</strong>
-            </div>
-            <div class="info-tile">
-              <span>总端口数</span>
-              <strong v-text="summary.total_ports"></strong>
-            </div>
+        <nav class="nav-links" aria-label="主导航">
+          <a class="nav-link active" href="{{ url_for('index') }}">总览</a>
+          <a class="nav-link" href="#ports-management">端口管理</a>
+          <a class="nav-link" href="#port-create">新增端口</a>
+          <a class="nav-link" href="#tenant-access">租户访问</a>
+          <a class="nav-link" href="#data-plane">数据面</a>
+          <a class="nav-link" href="#dns-failover">DNS 切换</a>
+          <a class="nav-link" :href="meta.ai_domain_dashboard_url || '#'" :class="{ disabled: !meta.ai_domain_dashboard_url }">AI 域名</a>
+          <a
+            v-if="meta.probe_enabled"
+            class="nav-link"
+            :href="meta.probe_dashboard_url || '#'"
+            :class="{ disabled: !meta.probe_dashboard_url }"
+          >
+            探针监控
+          </a>
+        </nav>
+
+        <section class="nav-card">
+          <span>数据面状态</span>
+          <strong v-text="dataPlaneRunningLabel(dataPlaneStatus)"></strong>
+          <p v-text="dataPlaneStatus.management_target || '当前未配置数据面'"></p>
+        </section>
+
+        <section class="nav-card">
+          <span>面板地址</span>
+          <strong v-text="meta.panel_address"></strong>
+          <p v-text="(meta.timezone_label || '') + ' · Xray Direct'"></p>
+        </section>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <p class="eyebrow">ADMIN WORKSPACE</p>
+            <h1 class="page-title">控制台总览</h1>
+            <p class="page-subtitle">统一查看端口、订阅、AI 路由与数据面状态，主要管理流程仍在同一后台完成。</p>
           </div>
 
-          <div class="header-actions">
-            <a v-if="meta.probe_enabled" class="text-button" :href="meta.probe_dashboard_url">查看探针监控</a>
-            <a class="text-button" :href="meta.ai_domain_dashboard_url">查看 AI 域名统计</a>
+          <div class="topbar-actions">
+            <span class="topbar-badge" v-text="'时区 · ' + meta.timezone_label"></span>
+            <span class="topbar-badge" v-text="'端口 · ' + summary.total_ports"></span>
             {% if auth_enabled %}
             <form method="post" action="{{ url_for('logout') }}" class="inline-form">
               <button class="secondary" type="submit">退出登录</button>
             </form>
             {% endif %}
           </div>
-        </div>
-      </section>
+        </header>
 
-      <section
-        v-show="flash.message"
-        class="banner"
-        :class="flash.level || 'info'"
-      >
-        <div class="banner-row">
-          <span v-text="flash.message"></span>
-          <button class="ghost-button" type="button" @click="clearFlash">关闭</button>
-        </div>
-      </section>
-
-      <section class="stats-grid">
-        <article class="stat-card stat-card-emphasis">
-          <span>数据面状态</span>
-          <strong
-            :class="dataPlaneStatus.xray_running ? 'ok' : 'bad'"
-            v-text="dataPlaneRunningLabel(dataPlaneStatus)"
-          ></strong>
-          <small>唯一受管数据面的当前运行状态</small>
-        </article>
-        <article class="stat-card" v-if="aiRoutingStatus">
-          <span>AI 路由状态</span>
-          <strong
-            :class="aiRoutingStatus.status_tone || 'warn'"
-            v-text="aiRoutingLabel(aiRoutingStatus)"
-          ></strong>
-          <small v-text="aiRoutingStatus.sync_error || ('最近报告：' + (aiRoutingStatus.report_generated_at_display || '暂无'))"></small>
-        </article>
-        <article class="stat-card" v-if="meta.ai_domain_stats">
-          <span>AI 域名窗口</span>
-          <strong
-            :class="meta.ai_domain_stats.available ? meta.ai_domain_stats.route_status_tone : 'bad'"
-            v-text="meta.ai_domain_stats.current_ai_domains"
-          ></strong>
-          <small
-            v-text="meta.ai_domain_stats.available
-              ? ('聚合 ' + meta.ai_domain_stats.total_ai_domains + ' 个，' + meta.ai_domain_stats.route_status_label)
-              : (meta.ai_domain_stats.sync_error || '等待数据面回传 AI 域名报告')"
-          ></small>
-        </article>
-        <article class="stat-card">
-          <span>运行中端口</span>
-          <strong v-text="summary.active_ports"></strong>
-          <small>当前可被客户端访问</small>
-        </article>
-        <article class="stat-card">
-          <span>已过期端口</span>
-          <strong v-text="summary.expired_ports"></strong>
-          <small>到期后自动停用</small>
-        </article>
-        <article class="stat-card">
-          <span>已达上限端口</span>
-          <strong v-text="summary.quota_ports"></strong>
-          <small>达到流量阈值后停用</small>
-        </article>
-        <article class="stat-card">
-          <span>累计连接</span>
-          <strong v-text="summary.total_connections"></strong>
-          <small>全量端口历史连接次数</small>
-        </article>
-        <article class="stat-card">
-          <span>累计入站流量</span>
-          <strong v-text="humanBytes(summary.total_bytes_received)"></strong>
-          <small>客户端 -> Xray</small>
-        </article>
-        <article class="stat-card">
-          <span>累计出站流量</span>
-          <strong v-text="humanBytes(summary.total_bytes_sent)"></strong>
-          <small>Xray -> 客户端</small>
-        </article>
-      </section>
-
-      <section class="workspace-grid">
-        <section class="panel workspace-card">
-          <div class="panel-head">
-            <div>
-              <p class="section-eyebrow">CREATE</p>
-              <h2>新增端口</h2>
-              <p>快速生成新的 Xray Reality 监听入口，共享当前节点参数。</p>
-            </div>
+        <section
+          v-show="flash.message"
+          class="banner"
+          :class="flash.level || 'info'"
+        >
+          <div class="banner-row">
+            <span v-text="flash.message"></span>
+            <button class="ghost-button" type="button" @click="clearFlash">关闭</button>
           </div>
-
-          <form class="editor-grid editor-grid-dense" @submit.prevent="createPort">
-            <label>
-              <span>监听端口</span>
-              <input v-model="createForm.listen_port" type="number" min="1" max="65535" required>
-            </label>
-            <div class="fixed-target">
-              <span>接入方式</span>
-              <strong>Xray Direct</strong>
-            </div>
-            <label>
-              <span>到期时间（<span v-text="meta.timezone_label"></span>）</span>
-              <input v-model="createForm.expires_at" type="datetime-local">
-            </label>
-            <label>
-              <span>流量上限</span>
-              <input v-model="createForm.traffic_limit" type="text" placeholder="例如 10G / 500MB / 1048576">
-            </label>
-            <label class="full">
-              <span>租户备注</span>
-              <input v-model="createForm.note" type="text" maxlength="200" placeholder="例如：客户A / 北京节点 / 测试口">
-            </label>
-            <div class="actions">
-              <button class="primary" type="submit" :disabled="isBusy('create-port')">
-                <span v-text="isBusy('create-port') ? '创建中...' : '创建端口'"></span>
-              </button>
-            </div>
-          </form>
         </section>
 
-        <section class="panel workspace-card">
-          <div class="panel-head subscription-panel-head">
-            <div>
-              <p class="section-eyebrow">NODES</p>
-              <h2>数据面控制</h2>
-              <p>控制面只管理一个数据面；AI 路由作为该数据面的子系统展示，不再单独建模成节点。</p>
+        <section class="page-header">
+          <div class="header-copy">
+            <p class="section-eyebrow">OVERVIEW</p>
+            <h2>把常用运维信息放在第一屏</h2>
+            <p class="page-subtitle">
+              先确认数据面和租户交付是否稳定，再进入端口列表处理编辑、配额、到期和订阅相关操作。
+            </p>
+
+            <div class="header-actions">
+              <a class="link-pill secondary" href="#port-create">新增端口</a>
+              <a class="text-button" href="#ports-management">查看端口列表</a>
+              <a v-if="meta.probe_enabled" class="text-button" :href="meta.probe_dashboard_url">探针监控</a>
+              <a class="text-button" :href="meta.ai_domain_dashboard_url">AI 域名统计</a>
             </div>
           </div>
 
-          <div class="subscription-overview">
-            <div class="info-tile">
-              <span v-text="dataPlaneStatus.label || '数据面'"></span>
-              <strong v-text="dataPlaneRunningLabel(dataPlaneStatus)"></strong>
-              <small v-text="dataPlaneStatus.management_target || '数据面未配置'"></small>
+          <div class="header-aside">
+            <div class="quick-info-grid">
+              <div class="info-tile">
+                <span>活跃端口</span>
+                <strong v-text="summary.active_ports"></strong>
+                <small>当前可被客户端访问</small>
+              </div>
+              <div class="info-tile">
+                <span>待处理项</span>
+                <strong v-text="attentionPortCount"></strong>
+                <small>过期、停用或达到上限的端口</small>
+              </div>
+              <div class="info-tile">
+                <span>租户数量</span>
+                <strong v-text="subscription.tenant_count"></strong>
+                <small>每个端口单独对应一个租户入口</small>
+              </div>
+              <div class="info-tile">
+                <span>累计总流量</span>
+                <strong v-text="humanBytes(totalTrafficBytes)"></strong>
+                <small>入站和出站合计</small>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="stats-grid">
+          <article class="stat-card stat-card-emphasis">
+            <span>数据面状态</span>
+            <strong
+              :class="dataPlaneStatus.xray_running ? 'ok' : 'bad'"
+              v-text="dataPlaneRunningLabel(dataPlaneStatus)"
+            ></strong>
+            <small>唯一受管数据面的当前运行状态</small>
+          </article>
+          <article class="stat-card" v-if="aiRoutingStatus">
+            <span>AI 路由状态</span>
+            <strong
+              :class="aiRoutingStatus.status_tone || 'warn'"
+              v-text="aiRoutingLabel(aiRoutingStatus)"
+            ></strong>
+            <small v-text="aiRoutingStatus.sync_error || ('最近报告：' + (aiRoutingStatus.report_generated_at_display || '暂无'))"></small>
+          </article>
+          <article class="stat-card" v-if="dnsFailoverStatus">
+            <span>DNS 切换</span>
+            <strong
+              :class="dnsFailoverTone(dnsFailoverStatus)"
+              v-text="dnsFailoverSummary(dnsFailoverStatus)"
+            ></strong>
+            <small v-text="dnsFailoverStatus.record_content || dnsFailoverStatus.config_error || '等待首次同步'"></small>
+          </article>
+          <article class="stat-card">
+            <span>已停用端口</span>
+            <strong v-text="summary.disabled_ports"></strong>
+            <small>手动停用或因状态变更退出服务</small>
+          </article>
+          <article class="stat-card">
+            <span>已过期端口</span>
+            <strong v-text="summary.expired_ports"></strong>
+            <small>到期后自动停用</small>
+          </article>
+          <article class="stat-card">
+            <span>已达上限端口</span>
+            <strong v-text="summary.quota_ports"></strong>
+            <small>达到流量阈值后停用</small>
+          </article>
+          <article class="stat-card">
+            <span>累计连接</span>
+            <strong v-text="summary.total_connections"></strong>
+            <small>全量端口历史连接次数</small>
+          </article>
+        </section>
+
+        <section class="workspace-grid">
+          <section id="port-create" class="panel workspace-card">
+            <div class="panel-head">
+              <div>
+                <p class="section-eyebrow">CREATE</p>
+                <h2>新增端口</h2>
+                <p>快速生成新的 Xray Reality 监听入口，默认沿用当前节点参数。</p>
+              </div>
+            </div>
+
+            <form class="editor-grid" @submit.prevent="createPort">
+              <label>
+                <span>监听端口</span>
+                <input v-model="createForm.listen_port" type="number" min="1" max="65535" required>
+              </label>
+              <div class="fixed-target">
+                <span>接入方式</span>
+                <strong>Xray Direct</strong>
+              </div>
+              <label>
+                <span>到期时间（<span v-text="meta.timezone_label"></span>）</span>
+                <input v-model="createForm.expires_at" type="datetime-local">
+              </label>
+              <label>
+                <span>流量上限</span>
+                <input v-model="createForm.traffic_limit" type="text" placeholder="例如 10G / 500MB / 1048576">
+              </label>
+              <label class="full">
+                <span>租户备注</span>
+                <input v-model="createForm.note" type="text" maxlength="200" placeholder="例如：客户A / 北京节点 / 测试口">
+              </label>
+              <div class="actions">
+                <button class="primary" type="submit" :disabled="isBusy('create-port')">
+                  <span v-text="isBusy('create-port') ? '创建中...' : '创建端口'"></span>
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section id="dns-failover" class="panel workspace-card">
+            <div class="panel-head">
+              <div>
+                <p class="section-eyebrow">DNS FAILOVER</p>
+                <h2>DNS 故障切换</h2>
+                <p>仅数据面公网 TCP 探测参与自动切换，AI 节点状态不参与任何 DNS 切换决策。</p>
+              </div>
+            </div>
+
+            <div class="subscription-overview">
+              <div class="info-tile">
+                <span>功能状态</span>
+                <strong :class="dnsFailoverTone(dnsFailoverStatus)" v-text="dnsFailoverSummary(dnsFailoverStatus)"></strong>
+                <small v-text="dnsFailoverStatus.enabled ? (dnsFailoverStatus.config_error || dnsFailoverStatus.fast_propagation_note) : '未启用自动切换'"></small>
+              </div>
+              <div class="info-tile">
+                <span>当前 DNS 指向</span>
+                <strong v-text="dnsFailoverStatus.current_target_label || '未知'"></strong>
+                <small v-text="dnsFailoverStatus.record_name ? ((dnsFailoverStatus.record_type || '') + ' ' + dnsFailoverStatus.record_name) : '未配置记录'"></small>
+              </div>
+              <div class="info-tile">
+                <span>记录值</span>
+                <strong v-text="dnsFailoverStatus.record_content || '暂无'"></strong>
+                <small v-text="'TTL ' + (dnsFailoverStatus.record_ttl || '-') + ' 秒 · ' + (dnsFailoverStatus.record_proxied ? 'Cloudflare 代理' : '仅 DNS')"></small>
+              </div>
+              <div class="info-tile">
+                <span>最近探测</span>
+                <strong :class="dnsFailoverTone(dnsFailoverStatus)" v-text="dnsFailoverStatus.last_probe_status_label || '未检测'"></strong>
+                <small v-text="dnsFailoverStatus.last_probe_checked_at_display || '暂无'"></small>
+              </div>
+            </div>
+
+            <div class="editor-grid">
+              <div class="fixed-target">
+                <span>探测目标</span>
+                <strong v-text="(dnsFailoverStatus.probe_host || '-') + ':' + (dnsFailoverStatus.probe_port || '-')"></strong>
+              </div>
+              <div class="fixed-target">
+                <span>控制面备用 Xray</span>
+                <strong v-text="dnsFailoverStatus.control_plane_backup_xray_enabled ? '已启用' : '未启用'"></strong>
+              </div>
+              <div class="fixed-target">
+                <span>连续失败 / 成功</span>
+                <strong v-text="(dnsFailoverStatus.consecutive_failures || 0) + ' / ' + (dnsFailoverStatus.consecutive_successes || 0)"></strong>
+              </div>
+              <div class="fixed-target">
+                <span>切换阈值</span>
+                <strong v-text="(dnsFailoverStatus.failure_threshold || '-') + ' 次失败切备 / ' + (dnsFailoverStatus.recovery_threshold || '-') + ' 次成功回主'"></strong>
+              </div>
+              <div class="fixed-target">
+                <span>最近切换</span>
+                <strong v-text="dnsFailoverStatus.last_switch_at_display || '暂无'"></strong>
+              </div>
+              <div class="fixed-target full">
+                <span>最近错误</span>
+                <strong v-text="dnsFailoverStatus.last_error || dnsFailoverStatus.last_probe_error || '暂无'"></strong>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button
+                class="secondary"
+                type="button"
+                :disabled="isBusy('dns-failover-check') || !dnsFailoverStatus.enabled || !dnsFailoverStatus.configured"
+                @click="runDnsFailoverCheck"
+              >
+                <span v-text="isBusy('dns-failover-check') ? '检测中...' : '立即检测'"></span>
+              </button>
+              <button
+                class="secondary"
+                type="button"
+                :disabled="isBusy('dns-failover-switch:primary') || !dnsFailoverStatus.enabled || !dnsFailoverStatus.configured"
+                @click="switchDnsTarget('primary')"
+              >
+                <span v-text="isBusy('dns-failover-switch:primary') ? '切换中...' : '切到主'"></span>
+              </button>
+              <button
+                class="secondary"
+                type="button"
+                :disabled="isBusy('dns-failover-switch:backup') || !dnsFailoverStatus.enabled || !dnsFailoverStatus.configured"
+                @click="switchDnsTarget('backup')"
+              >
+                <span v-text="isBusy('dns-failover-switch:backup') ? '切换中...' : '切到备'"></span>
+              </button>
+            </div>
+          </section>
+
+          <section id="data-plane" class="panel workspace-card">
+            <div class="panel-head">
+              <div>
+                <p class="section-eyebrow">DATA PLANE</p>
+                <h2>数据面与 AI 路由</h2>
+                <p>控制面只管理一个数据面，AI 路由作为该数据面的附属能力统一呈现。</p>
+              </div>
+            </div>
+
+            <div class="subscription-overview">
+              <div class="info-tile">
+                <span v-text="dataPlaneStatus.label || '数据面'"></span>
+                <strong v-text="dataPlaneRunningLabel(dataPlaneStatus)"></strong>
+                <small v-text="dataPlaneStatus.management_target || '数据面未配置'"></small>
+              </div>
+              <div class="info-tile" v-if="aiRoutingStatus">
+                <span>AI 路由</span>
+                <strong :class="aiRoutingStatus.status_tone || 'warn'" v-text="aiRoutingLabel(aiRoutingStatus)"></strong>
+                <small v-text="aiRoutingStatus.sync_error || ('最近报告：' + (aiRoutingStatus.report_generated_at_display || '暂无'))"></small>
+              </div>
+              <div class="info-tile" v-if="meta.ai_domain_stats">
+                <span>AI 域名窗口</span>
+                <strong
+                  :class="meta.ai_domain_stats.available ? meta.ai_domain_stats.route_status_tone : 'bad'"
+                  v-text="meta.ai_domain_stats.current_ai_domains"
+                ></strong>
+                <small
+                  v-text="meta.ai_domain_stats.available
+                    ? ('聚合 ' + meta.ai_domain_stats.total_ai_domains + ' 个，' + meta.ai_domain_stats.route_status_label)
+                    : (meta.ai_domain_stats.sync_error || '等待数据面回传 AI 域名报告')"
+                ></small>
+              </div>
+            </div>
+
+            <div class="button-row">
               <button
                 class="secondary"
                 type="button"
@@ -194,161 +340,175 @@
               >
                 <span v-text="isBusy('restart-data-plane') ? '重启中...' : '重启数据面'"></span>
               </button>
+              <a class="text-button" :href="meta.ai_domain_dashboard_url">打开 AI 域名页</a>
+              <a v-if="meta.probe_enabled" class="text-button" :href="meta.probe_dashboard_url">打开探针页</a>
             </div>
-          </div>
+          </section>
+
+          <section id="tenant-access" class="panel workspace-card">
+            <div class="panel-head">
+              <div>
+                <p class="section-eyebrow">TENANT ACCESS</p>
+                <h2>租户面板与订阅</h2>
+                <p>每个有效端口独立生成登录地址、随机凭据和订阅地址；过期端口会自动清理。</p>
+              </div>
+            </div>
+
+            <div v-if="subscription.available" class="subscription-overview">
+              <div class="info-tile">
+                <span>租户数量</span>
+                <strong v-text="subscription.tenant_count"></strong>
+                <small>每个端口各自拥有独立入口</small>
+              </div>
+              <div class="info-tile">
+                <span>客户端目标</span>
+                <strong v-text="subscription.server"></strong>
+                <small>当前读取的客户端配置目标</small>
+              </div>
+              <div class="info-tile">
+                <span>登录路径示例</span>
+                <strong v-text="subscription.tenant_panel_path_example"></strong>
+                <small>通过统一登录入口进入对应租户页</small>
+              </div>
+              <div class="info-tile">
+                <span>订阅路径示例</span>
+                <strong v-text="subscription.tenant_subscription_path_example"></strong>
+                <small>按端口生成独立的订阅链接</small>
+              </div>
+            </div>
+
+            <div v-else class="subscription-alert">
+              <strong>订阅功能未就绪</strong>
+              <p v-text="subscription.error"></p>
+              <p>当前读取路径：<span v-text="subscription.client_config_path"></span></p>
+            </div>
+          </section>
         </section>
 
-        <section class="panel workspace-card">
-          <div class="panel-head subscription-panel-head">
-            <div>
-              <p class="section-eyebrow">TENANT ACCESS</p>
-              <h2>租户面板与订阅</h2>
-              <p>每个有效端口独立生成登录地址、随机用户名密码和订阅地址；过期端口会自动清理。</p>
-            </div>
-          </div>
+        <section class="ports-layout">
+          <section id="ports-management" class="panel ports-panel">
+            <div class="section-head">
+              <div>
+                <p class="section-eyebrow">PORTS</p>
+                <h2>端口管理</h2>
+                <p>
+                  当前显示 <span v-text="filteredPorts.length"></span> / <span v-text="summary.total_ports"></span> 个端口。
+                  先筛选列表，再在详情区完成查看、编辑和风险操作。
+                </p>
+              </div>
 
-          <div v-if="subscription.available" class="subscription-overview">
-            <div class="info-tile">
-              <span>租户数量</span>
-              <strong v-text="subscription.tenant_count"></strong>
+              <div class="section-toolbar">
+                <label class="search-shell">
+                  <span>搜索端口 / 备注 / 状态</span>
+                  <input v-model.trim="filters.query" type="search" placeholder="例如 31098 / 客户A / 测试">
+                </label>
+                <div class="status-filters">
+                  <button
+                    v-for="option in statusOptions"
+                    :key="option.value"
+                    class="filter-pill"
+                    type="button"
+                    :class="{ active: filters.status === option.value }"
+                    @click="filters.status = option.value"
+                    v-text="option.label"
+                  ></button>
+                </div>
+              </div>
             </div>
-            <div class="info-tile">
-              <span>客户端目标</span>
-              <strong v-text="subscription.server"></strong>
-            </div>
-            <div class="info-tile">
-              <span>登录路径示例</span>
-              <strong v-text="subscription.tenant_panel_path_example"></strong>
-            </div>
-            <div class="info-tile">
-              <span>订阅路径示例</span>
-              <strong v-text="subscription.tenant_subscription_path_example"></strong>
-            </div>
-          </div>
 
-          <div v-else class="subscription-alert">
-            <strong>订阅功能未就绪</strong>
-            <p v-text="subscription.error"></p>
-            <p>当前读取路径：<span v-text="subscription.client_config_path"></span></p>
-          </div>
-        </section>
-      </section>
-
-      <section class="panel ports-panel">
-        <div class="section-head">
-          <div>
-            <p class="section-eyebrow">PORTS</p>
-            <h2>端口管理</h2>
-            <p>
-              当前显示 <span v-text="filteredPorts.length"></span> / <span v-text="summary.total_ports"></span> 个端口。
-              通过表格快速筛选，点击任意行在下方打开详情与编辑区。
-            </p>
-          </div>
-
-          <div class="section-toolbar">
-            <label class="search-shell">
-              <span>搜索端口 / 备注 / 状态</span>
-              <input v-model.trim="filters.query" type="search" placeholder="例如 31098 / 客户A / 测试">
-            </label>
-            <div class="status-filters">
-              <button
-                v-for="option in statusOptions"
-                :key="option.value"
-                class="filter-pill"
-                type="button"
-                :class="{ active: filters.status === option.value }"
-                @click="filters.status = option.value"
-                v-text="option.label"
-              ></button>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="ports.length" class="table-card">
-          <div v-if="filteredPorts.length" class="table-scroll">
-            <table class="ports-table">
-              <thead>
-                <tr>
-                  <th>端口 / 备注</th>
-                  <th>状态</th>
-                  <th>接入方式</th>
-                  <th>累计流量</th>
-                  <th>今日流量</th>
-                  <th>连接数</th>
-                  <th>到期时间</th>
-                  <th v-if="meta.probe_enabled">探针</th>
-                  <th v-else>最后访问</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
+            <div v-if="ports.length" class="table-card">
+              <div v-if="filteredPorts.length" class="port-list">
+                <article
                   v-for="port in filteredPorts"
                   :key="port.id"
+                  class="port-card"
                   :class="{ selected: selectedPort && selectedPort.id === port.id }"
-                  @click="selectPort(port.id)"
                 >
-                  <td>
-                    <div class="table-primary">
-                      <strong v-text="port.listen_port"></strong>
-                      <span v-text="port.note || '未填写备注'"></span>
+                  <button class="port-card-toggle" type="button" @click="selectPort(port.id)">
+                    <div class="port-card-head">
+                      <div class="port-card-title">
+                        <div class="port-card-title-row">
+                          <strong v-text="'端口 ' + port.listen_port"></strong>
+                          <span class="badge" :class="port.status" v-text="port.status_label"></span>
+                        </div>
+                        <p class="port-card-summary" v-text="port.note || '未填写备注'"></p>
+                      </div>
+                      <span class="text-button" v-text="selectedPort && selectedPort.id === port.id ? '已展开详情' : '查看详情'"></span>
                     </div>
-                  </td>
-                  <td>
-                    <span class="badge" :class="port.status" v-text="port.status_label"></span>
-                  </td>
-                  <td class="table-muted">Xray 直连</td>
-                  <td v-text="port.traffic_used_display"></td>
-                  <td v-text="humanBytes(trafficToday(port))"></td>
-                  <td v-text="port.total_connections"></td>
-                  <td v-text="port.expires_at_display"></td>
-                  <td v-if="meta.probe_enabled">
-                    <span class="probe-pill" :class="port.probe_status" v-text="port.probe_status_label"></span>
-                  </td>
-                  <td v-else class="table-muted" v-text="port.last_seen_display"></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
 
-          <div v-else class="table-empty">
-            当前筛选条件下没有匹配的端口。
-          </div>
-        </div>
-
-        <section
-          v-if="selectedPort"
-          id="port-detail-panel"
-          class="detail-panel"
-        >
-          <div class="detail-head">
-            <div>
-              <p class="section-eyebrow">DETAIL</p>
-              <h3 v-text="'端口 ' + selectedPort.listen_port"></h3>
-              <p class="detail-copy">
-                <template v-if="selectedPort.note">
-                  <span v-text="selectedPort.note + ' · '"></span>
-                </template>
-                <span>租户直接接入当前 Xray Reality 入站</span>
-              </p>
-            </div>
-
-            <div class="detail-chip-group">
-              <div class="detail-chip">
-                <span>状态</span>
-                <strong v-text="selectedPort.status_label"></strong>
+                    <div class="port-card-grid">
+                      <div class="port-card-stat">
+                        <span>累计流量</span>
+                        <strong v-text="port.traffic_used_display"></strong>
+                      </div>
+                      <div class="port-card-stat">
+                        <span>今日流量</span>
+                        <strong v-text="humanBytes(trafficToday(port))"></strong>
+                      </div>
+                      <div class="port-card-stat">
+                        <span>连接数</span>
+                        <strong v-text="port.total_connections"></strong>
+                      </div>
+                      <div class="port-card-stat">
+                        <span>到期时间</span>
+                        <strong v-text="port.expires_at_display"></strong>
+                      </div>
+                      <div class="port-card-stat" v-if="meta.probe_enabled">
+                        <span>探针状态</span>
+                        <strong :class="'probe-text ' + port.probe_status" v-text="port.probe_status_label"></strong>
+                      </div>
+                      <div class="port-card-stat" v-else>
+                        <span>最近访问</span>
+                        <strong v-text="port.last_seen_display"></strong>
+                      </div>
+                    </div>
+                  </button>
+                </article>
               </div>
-              <div class="detail-chip">
-                <span>最近访问</span>
-                <strong v-text="selectedPort.last_seen_display"></strong>
+
+              <div v-else class="table-empty">
+                当前筛选条件下没有匹配的端口。
               </div>
             </div>
-          </div>
 
-          <div class="detail-grid">
+            <div v-else class="empty-state">
+              当前还没有端口配置，先创建第一个监听端口。
+            </div>
+          </section>
+
+          <section
+            v-if="selectedPort"
+            id="port-detail-panel"
+            class="detail-panel"
+          >
+            <div class="detail-head">
+              <div>
+                <p class="section-eyebrow">DETAIL</p>
+                <h3 v-text="'端口 ' + selectedPort.listen_port"></h3>
+                <p class="detail-copy">
+                  <template v-if="selectedPort.note">
+                    <span v-text="selectedPort.note + ' · '"></span>
+                  </template>
+                  <span>租户直接接入当前 Xray Reality 入站</span>
+                </p>
+              </div>
+
+              <div class="detail-chip-group">
+                <div class="detail-chip">
+                  <span>状态</span>
+                  <strong v-text="selectedPort.status_label"></strong>
+                </div>
+                <div class="detail-chip">
+                  <span>最近访问</span>
+                  <strong v-text="selectedPort.last_seen_display"></strong>
+                </div>
+              </div>
+            </div>
+
             <section class="inner-panel">
               <div class="inner-panel-head">
                 <h4>运行指标</h4>
-                <p>流量、连接和探针信息集中在同一块查看。</p>
+                <p>流量、连接和探针信息集中查看。</p>
               </div>
               <div class="traffic-grid">
                 <div>
@@ -391,7 +551,7 @@
                 <h4>编辑配置</h4>
                 <p>字段修改后直接通过 JSON API 保存。</p>
               </div>
-              <form class="editor-grid editor-grid-dense compact" @submit.prevent="updatePort(selectedPort)">
+              <form class="editor-grid compact" @submit.prevent="updatePort(selectedPort)">
                 <label>
                   <span>监听端口</span>
                   <input v-model="selectedPort.form.listen_port" type="number" min="1" max="65535" required>
@@ -419,179 +579,178 @@
                 </div>
               </form>
             </section>
-          </div>
 
-          <section v-if="selectedPort.access" class="inner-panel subscription-shell">
-            <div class="subscription-shell-head">
-              <div>
-                <h4>租户面板与订阅输出</h4>
-                <p>每个端口就是一个独立租户，下面的登录地址、账号密码和订阅地址只对应当前端口。</p>
+            <section v-if="selectedPort.access" class="inner-panel subscription-shell">
+              <div class="subscription-shell-head">
+                <div>
+                  <h4>租户面板与订阅输出</h4>
+                  <p>当前端口的登录地址、账号密码和订阅地址都独立生成。</p>
+                </div>
+                <div class="button-row compact-row">
+                  <button
+                    class="secondary"
+                    type="button"
+                    :disabled="isBusy('rotate-tenant:' + selectedPort.id)"
+                    @click="rotateTenantToken(selectedPort)"
+                  >
+                    <span v-text="isBusy('rotate-tenant:' + selectedPort.id) ? '处理中...' : '重置面板地址'"></span>
+                  </button>
+                  <button
+                    class="secondary"
+                    type="button"
+                    :disabled="isBusy('rotate-credentials:' + selectedPort.id)"
+                    @click="rotateTenantCredentials(selectedPort)"
+                  >
+                    <span v-text="isBusy('rotate-credentials:' + selectedPort.id) ? '处理中...' : '重置账号密码'"></span>
+                  </button>
+                  <button
+                    class="secondary"
+                    type="button"
+                    :disabled="isBusy('rotate-subscription:' + selectedPort.id)"
+                    @click="rotatePortSubscription(selectedPort)"
+                  >
+                    <span v-text="isBusy('rotate-subscription:' + selectedPort.id) ? '处理中...' : '重置订阅地址'"></span>
+                  </button>
+                </div>
               </div>
-              <div class="button-row compact-row">
+
+              <div class="subscription-grid">
+                <label class="full">
+                  <span>租户登录地址</span>
+                  <div class="copy-block">
+                    <div class="copy-value" v-text="selectedPort.access.tenant_login_url"></div>
+                    <button
+                      class="secondary copy-button"
+                      type="button"
+                      @click="copy(selectedPort.access.tenant_login_url, 'tenant-panel-' + selectedPort.id)"
+                      v-text="copyLabel('tenant-panel-' + selectedPort.id)"
+                    ></button>
+                  </div>
+                </label>
+                <label>
+                  <span>租户用户名</span>
+                  <div class="copy-block compact-copy-block">
+                    <div class="copy-value" v-text="selectedPort.access.tenant_username"></div>
+                    <button
+                      class="secondary copy-button"
+                      type="button"
+                      @click="copy(selectedPort.access.tenant_username, 'tenant-user-' + selectedPort.id)"
+                      v-text="copyLabel('tenant-user-' + selectedPort.id)"
+                    ></button>
+                  </div>
+                </label>
+                <label>
+                  <span>租户密码</span>
+                  <div class="copy-block compact-copy-block">
+                    <div class="copy-value" v-text="selectedPort.access.tenant_password"></div>
+                    <button
+                      class="secondary copy-button"
+                      type="button"
+                      @click="copy(selectedPort.access.tenant_password, 'tenant-pass-' + selectedPort.id)"
+                      v-text="copyLabel('tenant-pass-' + selectedPort.id)"
+                    ></button>
+                  </div>
+                </label>
+                <label class="full">
+                  <span>Clash 订阅</span>
+                  <div class="copy-block">
+                    <div class="copy-value" v-text="selectedPort.access.tenant_subscription_clash_url"></div>
+                    <button
+                      class="secondary copy-button"
+                      type="button"
+                      @click="copy(selectedPort.access.tenant_subscription_clash_url, 'clash-' + selectedPort.id)"
+                      v-text="copyLabel('clash-' + selectedPort.id)"
+                    ></button>
+                  </div>
+                </label>
+                <label class="full">
+                  <span>V2Ray 订阅</span>
+                  <div class="copy-block">
+                    <div class="copy-value" v-text="selectedPort.access.tenant_subscription_v2ray_url"></div>
+                    <button
+                      class="secondary copy-button"
+                      type="button"
+                      @click="copy(selectedPort.access.tenant_subscription_v2ray_url, 'v2ray-' + selectedPort.id)"
+                      v-text="copyLabel('v2ray-' + selectedPort.id)"
+                    ></button>
+                  </div>
+                </label>
+                <label class="full">
+                  <span>VLESS 直连分享</span>
+                  <div class="copy-block">
+                    <div class="copy-value" v-text="selectedPort.access.share_link"></div>
+                    <button
+                      class="secondary copy-button"
+                      type="button"
+                      @click="copy(selectedPort.access.share_link, 'share-' + selectedPort.id)"
+                      v-text="copyLabel('share-' + selectedPort.id)"
+                    ></button>
+                  </div>
+                </label>
+              </div>
+            </section>
+
+            <div class="detail-footer">
+              <div class="meta-strip">
+                <div class="meta-row">
+                  <span>流量状态</span>
+                  <strong v-text="selectedPort.traffic_limit_display"></strong>
+                  <small v-if="selectedPort.traffic_limit_bytes !== null" v-text="'已用 ' + selectedPort.traffic_used_display + '，剩余 ' + selectedPort.traffic_remaining_display"></small>
+                </div>
+                <div class="meta-row">
+                  <span>最后访问</span>
+                  <strong v-text="selectedPort.last_seen_display"></strong>
+                  <small>累计连接与流量会在后台同步刷新</small>
+                </div>
+                <div v-if="meta.probe_enabled" class="meta-row">
+                  <span>后端连通性</span>
+                  <strong :class="'probe-text ' + selectedPort.probe_status" v-text="selectedPort.probe_status_label"></strong>
+                  <small v-text="selectedPort.probe_failure_reason ? selectedPort.probe_failure_reason : '最后检测：' + selectedPort.probe_checked_at_display"></small>
+                </div>
+              </div>
+
+              <div class="button-row action-row">
                 <button
+                  v-if="selectedPort.status === 'quota'"
                   class="secondary"
                   type="button"
-                  :disabled="isBusy('rotate-tenant:' + selectedPort.id)"
-                  @click="rotateTenantToken(selectedPort)"
+                  :disabled="isBusy('reset:' + selectedPort.id)"
+                  @click="resetTraffic(selectedPort)"
                 >
-                  <span v-text="isBusy('rotate-tenant:' + selectedPort.id) ? '处理中...' : '重置面板地址'"></span>
+                  <span v-text="isBusy('reset:' + selectedPort.id) ? '处理中...' : '重置流量并启用'"></span>
                 </button>
                 <button
+                  v-if="canTogglePort(selectedPort)"
                   class="secondary"
                   type="button"
-                  :disabled="isBusy('rotate-credentials:' + selectedPort.id)"
-                  @click="rotateTenantCredentials(selectedPort)"
+                  :disabled="isBusy('toggle:' + selectedPort.id)"
+                  @click="togglePort(selectedPort)"
                 >
-                  <span v-text="isBusy('rotate-credentials:' + selectedPort.id) ? '处理中...' : '重置账号密码'"></span>
+                  <span v-text="isBusy('toggle:' + selectedPort.id) ? '处理中...' : toggleLabel(selectedPort)"></span>
                 </button>
                 <button
+                  v-else-if="selectedPort.status !== 'quota'"
                   class="secondary"
                   type="button"
-                  :disabled="isBusy('rotate-subscription:' + selectedPort.id)"
-                  @click="rotatePortSubscription(selectedPort)"
-                >
-                  <span v-text="isBusy('rotate-subscription:' + selectedPort.id) ? '处理中...' : '重置订阅地址'"></span>
+                  disabled
+                  v-text="selectedPort.status_label"
+                ></button>
+                <button class="danger" type="button" :disabled="isBusy('delete:' + selectedPort.id)" @click="deletePort(selectedPort)">
+                  <span v-text="isBusy('delete:' + selectedPort.id) ? '删除中...' : '删除端口'"></span>
                 </button>
               </div>
-            </div>
-            <div class="subscription-grid">
-              <label class="full">
-                <span>租户登录地址</span>
-                <div class="copy-row">
-                  <input :value="selectedPort.access.tenant_login_url" type="text" readonly @focus="$event.target.select()">
-                  <button
-                    class="secondary copy-button"
-                    type="button"
-                    @click="copy(selectedPort.access.tenant_login_url, 'tenant-panel-' + selectedPort.id)"
-                    v-text="copyLabel('tenant-panel-' + selectedPort.id)"
-                  ></button>
-                </div>
-              </label>
-              <label>
-                <span>租户用户名</span>
-                <div class="copy-row">
-                  <input :value="selectedPort.access.tenant_username" type="text" readonly @focus="$event.target.select()">
-                  <button
-                    class="secondary copy-button"
-                    type="button"
-                    @click="copy(selectedPort.access.tenant_username, 'tenant-user-' + selectedPort.id)"
-                    v-text="copyLabel('tenant-user-' + selectedPort.id)"
-                  ></button>
-                </div>
-              </label>
-              <label>
-                <span>租户密码</span>
-                <div class="copy-row">
-                  <input :value="selectedPort.access.tenant_password" type="text" readonly @focus="$event.target.select()">
-                  <button
-                    class="secondary copy-button"
-                    type="button"
-                    @click="copy(selectedPort.access.tenant_password, 'tenant-pass-' + selectedPort.id)"
-                    v-text="copyLabel('tenant-pass-' + selectedPort.id)"
-                  ></button>
-                </div>
-              </label>
-              <label class="full">
-                <span>Clash 订阅</span>
-                <div class="copy-row">
-                  <input :value="selectedPort.access.tenant_subscription_clash_url" type="text" readonly @focus="$event.target.select()">
-                  <button
-                    class="secondary copy-button"
-                    type="button"
-                    @click="copy(selectedPort.access.tenant_subscription_clash_url, 'clash-' + selectedPort.id)"
-                    v-text="copyLabel('clash-' + selectedPort.id)"
-                  ></button>
-                </div>
-              </label>
-              <label class="full">
-                <span>V2Ray 订阅</span>
-                <div class="copy-row">
-                  <input :value="selectedPort.access.tenant_subscription_v2ray_url" type="text" readonly @focus="$event.target.select()">
-                  <button
-                    class="secondary copy-button"
-                    type="button"
-                    @click="copy(selectedPort.access.tenant_subscription_v2ray_url, 'v2ray-' + selectedPort.id)"
-                    v-text="copyLabel('v2ray-' + selectedPort.id)"
-                  ></button>
-                </div>
-              </label>
-              <label class="full">
-                <span>VLESS 直连分享</span>
-                <div class="copy-row">
-                  <input :value="selectedPort.access.share_link" type="text" readonly @focus="$event.target.select()">
-                  <button
-                    class="secondary copy-button"
-                    type="button"
-                    @click="copy(selectedPort.access.share_link, 'share-' + selectedPort.id)"
-                    v-text="copyLabel('share-' + selectedPort.id)"
-                  ></button>
-                </div>
-              </label>
             </div>
           </section>
 
-          <div class="detail-footer">
-            <div class="meta-strip">
-              <div class="meta-row">
-                <span>流量状态</span>
-                <strong v-text="selectedPort.traffic_limit_display"></strong>
-                <template v-if="selectedPort.traffic_limit_bytes !== null">
-                  <span v-text="'已用 ' + selectedPort.traffic_used_display + '，剩余 ' + selectedPort.traffic_remaining_display"></span>
-                </template>
-              </div>
-              <div class="meta-row">
-                <span>最后访问</span>
-                <strong v-text="selectedPort.last_seen_display"></strong>
-                <span>累计连接与流量已在上方同步更新</span>
-              </div>
-              <div v-if="meta.probe_enabled" class="meta-row">
-                <span>后端连通性</span>
-                <strong :class="'probe-text ' + selectedPort.probe_status" v-text="selectedPort.probe_status_label"></strong>
-                <span v-text="selectedPort.probe_failure_reason ? selectedPort.probe_failure_reason : '最后检测：' + selectedPort.probe_checked_at_display"></span>
-              </div>
-            </div>
+          <section v-else-if="filteredPorts.length" class="detail-placeholder">
+            选择一条端口后，这里会展开详细指标、编辑表单和订阅链接。
+          </section>
 
-            <div class="button-row action-row">
-              <button
-                v-if="selectedPort.status === 'quota'"
-                class="secondary"
-                type="button"
-                :disabled="isBusy('reset:' + selectedPort.id)"
-                @click="resetTraffic(selectedPort)"
-              >
-                <span v-text="isBusy('reset:' + selectedPort.id) ? '处理中...' : '重置流量并启用'"></span>
-              </button>
-              <button
-                v-if="canTogglePort(selectedPort)"
-                class="secondary"
-                type="button"
-                :disabled="isBusy('toggle:' + selectedPort.id)"
-                @click="togglePort(selectedPort)"
-              >
-                <span v-text="isBusy('toggle:' + selectedPort.id) ? '处理中...' : toggleLabel(selectedPort)"></span>
-              </button>
-              <button
-                v-else-if="selectedPort.status !== 'quota'"
-                class="secondary"
-                type="button"
-                disabled
-                v-text="selectedPort.status_label"
-              ></button>
-              <button class="danger" type="button" :disabled="isBusy('delete:' + selectedPort.id)" @click="deletePort(selectedPort)">
-                <span v-text="isBusy('delete:' + selectedPort.id) ? '删除中...' : '删除端口'"></span>
-              </button>
-            </div>
-          </div>
+          <section v-else class="detail-placeholder">
+            当前没有可展示的端口详情。
+          </section>
         </section>
-
-        <section v-else-if="filteredPorts.length" class="detail-placeholder">
-          选择一条端口后，这里会展开详细指标、编辑表单和订阅链接。
-        </section>
-
-        <section v-else-if="!ports.length" class="empty-state">
-          当前还没有端口配置，先在上方创建第一个监听端口。
-        </section>
-      </section>
+      </div>
     </main>
   </body>
 </html>

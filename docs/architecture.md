@@ -11,6 +11,7 @@
 - 备份归档上传组件：`db-backup-uploader`
 
 首页只展示数据面状态和 AI 路由状态，不再展示“独立 AI 节点”。
+如果启用了 DNS 故障切换，首页还会额外展示当前 DNS 指向、最近探测结果和最近一次切换状态。
 
 ## 组件职责
 
@@ -18,15 +19,17 @@
 
 - 入口代码：`app/web.py`、`app/state.py`
 - 保存端口、租户、流量和 AI 聚合数据到 `data/panel.db`
+- 保存 DNS 故障切换状态和事件历史到 `data/panel.db`
 - 根据数据库内容生成 `app/xray/runtime/panel-ports.json`
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`
-- 对数据面做配置校验、同步、重启、统计采集和探针采样
+- 对数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
 
 ### 数据面
 
 - 实际承载 `VLESS + REALITY` 流量
 - 通过 Xray API 暴露 `statsquery`
 - 通过 `access.log` 提供连接和域名观测输入
+- 可选在控制面本机启动一个备用 `xray-reality-backup` 组件，复用同一份 REALITY 配置作为 DNS 切换后的接管节点
 
 ### AI 路由子系统
 
@@ -72,12 +75,14 @@ AI 域名同步模式在 UI 中会显示为：
 4. `render_config.py` 合并 `app/xray/.env`、`panel-ports.json` 和可选 `dynamic-routing.json`，生成 `config.json`、`client-test.json`、分享链接。
 5. 数据面加载 `config.json` 并通过 Xray API 提供 `statsquery`。
 6. `xray-ai-domain-manager` 从 `access.log` 读取域名，输出 AI 路由产物。
-7. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，并在启用时调用 `db-backup-uploader` 上传最新备份。
-8. 首页读取 `data_plane_status`、`ai_routing_status` 和 AI 域名聚合结果。
+7. DNS 故障切换后台任务对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录。
+8. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，并在启用时调用 `db-backup-uploader` 上传最新备份。
+9. 首页读取 `data_plane_status`、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
 ## 关键运行产物
 
 - `data/panel.db`：端口、租户、流量和 AI 域名聚合
+- `data/panel.db` 内 `dns_failover_state` / `dns_failover_history`：DNS 切换当前态和最近事件
 - `backups/*.db`：最近几天的本地数据库备份
 - `data/db-backup-uploader/upload-records.json`：最新上传记录和历史快照
 - `data/db-backup-uploader/shards/`：最新一次备份的本地分片产物

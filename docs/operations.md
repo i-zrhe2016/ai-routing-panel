@@ -66,6 +66,42 @@
 - 探针目标不能继续是 `127.0.0.1`
 - 把 `DATAPLANE_PROBE_HOST` 设置成远端入口 IP 或域名
 
+## DNS 故障切换
+
+当 `DNS_FAILOVER_ENABLED=1` 且配置完整时，面板会后台周期性执行以下规则：
+
+- 只探测 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
+- 连续失败达到 `DNS_FAILOVER_FAILURE_THRESHOLD` 时，把单条 Cloudflare DNS 记录切到备用目标
+- 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD` 时，自动回切到主数据面
+- AI 路由或 AI 节点状态不会触发任何 DNS 切换
+
+手动入口：
+
+- 首页 “DNS 故障切换” 卡片
+- `POST /api/dns-failover/check`
+- `POST /api/dns-failover/switch`
+
+生效速度建议：
+
+- 非代理记录把 `CF_DNS_RECORD_TTL` 设为 `60`
+- `DNS_FAILOVER_INTERVAL` 设小一些可以更快触发切换，但会增加探测频率和 Cloudflare API 调用概率
+- 当前不支持 Cloudflare Load Balancer / Pool，也不做多记录原子切换
+
+控制面备用 Xray：
+
+- 已新增 `docker compose` 服务 `xray-reality-backup`
+- 它复用同一份 `app/xray/runtime/config.json`，也就是除了 IP 以外，REALITY 参数与主线路保持一致
+- 先把 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 写入根 `.env`
+- 控制面作为备用时，启动方式为：`docker compose --profile backup-xray up -d xray-reality-backup`
+- 如果控制面本机要接管流量，可把 `DNS_FAILOVER_BACKUP_CONTENT` 留空，让面板自动获取控制面本机公网 IP
+- 如果不想启用这套本机备用模式，保持 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，并手动填写 `DNS_FAILOVER_BACKUP_CONTENT`
+
+排查建议：
+
+- 首页先确认“最近探测”与“当前 DNS 指向”是否一致
+- `CF_API_TOKEN` 至少需要目标 Zone 的 DNS 编辑权限
+- 如果自动切换没有发生，检查探测目标是否确实是数据面公网入口，而不是控制面地址
+
 ## 数据面重启与同步能力
 
 ### `docker`

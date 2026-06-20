@@ -28,6 +28,23 @@ def parse_nonnegative_env_int(value, field_name):
     return number
 
 
+def parse_positive_env_int(value, field_name):
+    number = parse_nonnegative_env_int(value, field_name)
+    if number <= 0:
+        raise ValueError(f"{field_name} 必须大于 0。")
+    return number
+
+
+def parse_positive_env_float(value, field_name):
+    try:
+        number = float(str(value).strip())
+    except ValueError as exc:
+        raise ValueError(f"{field_name} 必须是正数。") from exc
+    if number <= 0:
+        raise ValueError(f"{field_name} 必须是正数。")
+    return number
+
+
 def parse_bool_env(value, default=False):
     raw = str(value if value is not None else ("1" if default else "0")).strip().lower()
     return raw not in {"0", "false", "no", "off", ""}
@@ -102,6 +119,45 @@ PROBE_TIMEOUT = float(os.environ.get("PROBE_TIMEOUT", "3"))
 PROBE_TEST_LISTEN_PORT = parse_optional_env_port(
     os.environ.get("PROBE_TEST_LISTEN_PORT", ""),
     "PROBE_TEST_LISTEN_PORT",
+)
+DNS_FAILOVER_ENABLED = parse_bool_env(os.environ.get("DNS_FAILOVER_ENABLED"), default=False)
+DNS_FAILOVER_INTERVAL = parse_positive_env_int(
+    os.environ.get("DNS_FAILOVER_INTERVAL", "15"),
+    "DNS_FAILOVER_INTERVAL",
+)
+DNS_FAILOVER_TIMEOUT = parse_positive_env_float(
+    os.environ.get("DNS_FAILOVER_TIMEOUT", "3"),
+    "DNS_FAILOVER_TIMEOUT",
+)
+DNS_FAILOVER_FAILURE_THRESHOLD = parse_positive_env_int(
+    os.environ.get("DNS_FAILOVER_FAILURE_THRESHOLD", "3"),
+    "DNS_FAILOVER_FAILURE_THRESHOLD",
+)
+DNS_FAILOVER_RECOVERY_THRESHOLD = parse_positive_env_int(
+    os.environ.get("DNS_FAILOVER_RECOVERY_THRESHOLD", "2"),
+    "DNS_FAILOVER_RECOVERY_THRESHOLD",
+)
+DNS_FAILOVER_PROBE_HOST = os.environ.get("DNS_FAILOVER_PROBE_HOST", "").strip()
+DNS_FAILOVER_PROBE_PORT = parse_optional_env_port(
+    os.environ.get("DNS_FAILOVER_PROBE_PORT", ""),
+    "DNS_FAILOVER_PROBE_PORT",
+)
+CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "").strip()
+CF_ZONE_ID = os.environ.get("CF_ZONE_ID", "").strip()
+CF_DNS_RECORD_ID = os.environ.get("CF_DNS_RECORD_ID", "").strip()
+CF_DNS_RECORD_TYPE = (os.environ.get("CF_DNS_RECORD_TYPE", "A").strip() or "A").upper()
+CF_DNS_RECORD_NAME = os.environ.get("CF_DNS_RECORD_NAME", "").strip()
+CF_DNS_RECORD_PROXIED = parse_bool_env(os.environ.get("CF_DNS_RECORD_PROXIED"), default=False)
+CF_DNS_RECORD_TTL = parse_positive_env_int(
+    os.environ.get("CF_DNS_RECORD_TTL", "60"),
+    "CF_DNS_RECORD_TTL",
+)
+DNS_FAILOVER_PRIMARY_CONTENT = os.environ.get("DNS_FAILOVER_PRIMARY_CONTENT", "").strip()
+DNS_FAILOVER_BACKUP_CONTENT = os.environ.get("DNS_FAILOVER_BACKUP_CONTENT", "").strip()
+DNS_FAILOVER_BACKUP_LABEL = os.environ.get("DNS_FAILOVER_BACKUP_LABEL", "控制面备用节点").strip() or "控制面备用节点"
+CONTROL_PLANE_BACKUP_XRAY_ENABLED = parse_bool_env(
+    os.environ.get("CONTROL_PLANE_BACKUP_XRAY_ENABLED"),
+    default=False,
 )
 AI_ROUTING_ENABLED = parse_bool_env(os.environ.get("AI_ROUTING_ENABLED"), default=True)
 PANEL_HEALTH_REQUIRES_XRAY = parse_bool_env(os.environ.get("PANEL_HEALTH_REQUIRES_XRAY"), default=True)

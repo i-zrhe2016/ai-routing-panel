@@ -4,6 +4,7 @@ import shlex
 import shutil
 import socket
 import subprocess
+import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -151,6 +152,30 @@ try:
         raise SystemExit(0)
 except OSError:
     raise SystemExit(1)
+"""
+
+PUBLIC_IP_DISCOVERY_SCRIPT = """
+import ipaddress
+import sys
+import urllib.request
+
+urls = [
+    "https://ipv4.icanhazip.com",
+    "https://api.ipify.org",
+    "https://ifconfig.me/ip",
+    "https://ifconfig.co/ip",
+]
+timeout = float(sys.argv[1])
+for url in urls:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            value = response.read().decode("utf-8", errors="ignore").strip()
+        ipaddress.ip_address(value)
+        print(value)
+        raise SystemExit(0)
+    except Exception:
+        continue
+raise SystemExit(1)
 """
 
 
@@ -330,6 +355,19 @@ class DataPlaneController:
 
     def _run_remote_shell(self, shell_command, error_prefix, timeout=None):
         return self._run_remote(["sh", "-lc", shell_command], error_prefix, timeout=timeout)
+
+    def resolve_public_ip(self, timeout_seconds=5):
+        command = ["python3", "-c", PUBLIC_IP_DISCOVERY_SCRIPT, str(timeout_seconds)]
+        if self.mode == "ssh":
+            completed = self._run_remote(command, f"{self.config.label} 公网 IP 获取失败", timeout=timeout_seconds + 2)
+        else:
+            completed = self._run_subprocess(command, f"{self.config.label} 公网 IP 获取失败", timeout=timeout_seconds + 2)
+        value = (completed.stdout or "").strip()
+        try:
+            ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{self.config.label} 公网 IP 格式无效。") from exc
+        return value
 
     def _container_exists(self):
         if not self.config.container_name:
