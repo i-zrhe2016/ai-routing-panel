@@ -17,8 +17,9 @@
 
 ### 控制面
 
-- 入口代码：`app/web.py`、`app/state.py`
-- 保存端口、租户、流量和 AI 聚合数据到 `data/panel.db`
+- 入口代码：`app/panel.py`（进程入口）→ `app/web/`（`create_app` 工厂 + 按域视图模块）、`app/state/`（`PanelState` facade 组合 7 个域 service）
+- Flask 同时托管：管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、公共/认证页（`/plans`、`/customer/*`）、租户订阅直达（`/tenant/<token>`）和探针/AI 仪表盘；前端是独立的 Vite 工程（`frontend/`），构建出 `app/static/{admin,portal}`
+- 保存端口、租户、流量、AI 聚合，以及商业化数据（客户、套餐、订单、服务订阅、支付凭证）到 `data/panel.db`
 - 保存 DNS 故障切换状态和事件历史到 `data/panel.db`
 - 根据数据库内容生成 `app/xray/runtime/panel-ports.json`
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`

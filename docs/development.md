@@ -120,10 +120,30 @@ docker compose run --rm \
   python3 /app/scripts/run_db_backup_cycle.py
 ```
 
-仅直接启动面板进程：
+仅直接启动面板进程（非 Docker）：
 
 ```bash
+# 直接运行前需先构建前端 SPA 产物（Docker 镜像会在构建阶段自动做这步）
+cd frontend && npm ci && npm run build && cd ..
 python app/panel.py
 ```
 
-这会调用 `app/web.py:main()`，启动维护线程并监听 `PANEL_HOST:PANEL_PORT`。
+这会调用 `app.web.main()`（定义在 `app/web/core.py`），启动维护线程并监听 `PANEL_HOST:PANEL_PORT`。
+
+## 前端开发与测试
+
+前端是 `frontend/` 下的 Vite + Vue 3 + Naive UI 工程，构建出管理后台与订阅者门户两套 SPA：
+
+```bash
+cd frontend
+npm ci
+npm run build   # 生成 app/static/{admin,portal}（这些产物不入库，由构建产生）
+npm test        # Vitest 组件/单元测试
+```
+
+后端测试用 pytest 直接跑现有 unittest：
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests -q
+```

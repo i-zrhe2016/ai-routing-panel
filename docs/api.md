@@ -2,20 +2,23 @@
 
 ## 认证规则
 
-- 未设置 `PANEL_USERNAME` / `PANEL_PASSWORD` 时，首页和 `/api/*` 默认无需登录
-- 只要任一管理员凭据被设置，首页、探针页和 `/api/*` 都要求认证
-- Web 页面支持表单登录
-- API 支持 `Authorization: Basic ...`
+三套独立会话：**管理员**、**客户**、**租户**（每端口）。
+
+- 管理员：未设置 `PANEL_USERNAME` / `PANEL_PASSWORD` 时，后台和 `/api/*`（不含 `/api/customer`、`/api/tenant`）默认无需登录；设置任一凭据后要求认证。Web 表单登录，API 支持 `Authorization: Basic ...`
+- 客户：`/api/customer/*`（除 `plans`、`auth/*`）需客户会话，未登录返回 JSON 401（`{"ok":false,"code":"auth_required"}`）；变更请求需 `X-CSRF-Token`
+- 租户：`/api/tenant/<token>/*` 由管理员会话或该端口的租户会话放行
 - `GET /healthz` 永远不要求登录
 
 ## 页面与订阅路径
 
-- `/`：管理员首页
+- `/`：管理后台 SPA（Vue + Naive UI）
 - `/login`：管理员登录页
 - `/probe-dashboard`：TCP 探针监控页
 - `/ai-domain-dashboard`：AI 域名统计页
-- `/tenant/<tenant_token>/login`：租户登录页
-- `/tenant/<tenant_token>`：租户面板
+- `/portal`、`/portal/<path>`：订阅者门户 SPA（vue-router history）
+- `/plans`、`/checkout/<plan_slug>`：公共套餐页与结账页
+- `/customer/login`、`/customer/register`：客户认证页
+- `/tenant/<tenant_token>`：门户的单订阅只读模式壳（原“租户面板”，未认证时显示内联租户登录卡）
 - `/tenant-subscriptions/<subscription_token>`：默认订阅
 - `/tenant-subscriptions/<subscription_token>/clash`：Clash 订阅
 - `/tenant-subscriptions/<subscription_token>/v2ray`：V2Ray 订阅
@@ -36,11 +39,35 @@
 | `POST` | `/api/ports/<port_id>/toggle` | 启用或停用端口 |
 | `DELETE` | `/api/ports/<port_id>` | 删除端口 |
 | `POST` | `/api/ports/<port_id>/reset-traffic` | 重置端口流量并重新启用 |
-| `POST` | `/api/ports/<port_id>/rotate-tenant-token` | 重置租户面板地址 |
+| `POST` | `/api/ports/<port_id>/rotate-tenant-token` | 重置租户访问地址（`/tenant/<token>`）|
 | `POST` | `/api/ports/<port_id>/rotate-tenant-credentials` | 重置租户用户名和密码 |
 | `POST` | `/api/ports/<port_id>/rotate-subscription-token` | 重置租户订阅地址 |
 | `POST` | `/api/subscriptions/rotate` | 重置历史兼容的全局订阅 token |
+| `POST` | `/api/plans` / `PUT /api/plans/<id>` | 套餐增改 |
+| `GET` | `/api/orders` | 列出商业化订单 |
+| `POST` | `/api/orders/<id>/{fulfill,reject,cancel}` | 订单开通 / 驳回 / 取消 |
+| `GET`/`PUT` | `/api/commerce-settings` | 商业设置（收款说明、二维码、订单有效期）|
 | `POST` | `/api/data-plane/restart` | 重启唯一数据面 |
+
+### 订阅者门户 API（客户会话 + CSRF）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/customer/me` / `/api/customer/overview` | 当前客户与门户首页数据 |
+| `GET` | `/api/customer/subscriptions[/<id>]` | 订阅列表 / 详情（含 Clash/V2Ray/VLESS 链接、用量）|
+| `POST` | `/api/customer/subscriptions/<id>/renew` | 续费下单 |
+| `GET` | `/api/customer/orders[/<order_no>]` | 订单列表 / 详情 |
+| `POST` | `/api/customer/orders` | 新购下单（`{plan_slug}`）|
+| `POST` | `/api/customer/orders/<order_no>/payment-proof` | 上传支付凭证（multipart）|
+| `GET` | `/api/customer/plans` | 公开套餐列表（无需登录）|
+| `POST` | `/api/customer/auth/{login,register,logout}` | 客户认证 |
+
+### 租户直达 API（token / 每端口凭据）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/tenant/<tenant_token>/subscription` | 单订阅只读详情（管理员会话或该端口租户会话）|
+| `POST` | `/api/tenant/<tenant_token>/login` | 每端口租户登录 |
 
 ## 创建 / 更新端口字段
 
@@ -71,7 +98,7 @@ curl -u admin:secret \
 
 ## 常见返回体
 
-写操作成功后通常返回：
+管理后台写操作成功后通常返回（携带重建后的完整首页状态）：
 
 ```json
 {
@@ -82,6 +109,12 @@ curl -u admin:secret \
     "...": "最新首页状态"
   }
 }
+```
+
+订阅者门户 / 租户接口统一用 `data` 携带受影响资源，不返回管理员 `dashboard`：
+
+```json
+{ "ok": true, "message": "...", "level": "success", "data": { "...": "受影响资源" } }
 ```
 
 失败时通常返回：

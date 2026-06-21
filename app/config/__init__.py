@@ -1,68 +1,35 @@
+"""Application configuration.
+
+Values are read from the environment at import time and exposed as module-level
+constants. The test suite relies on this: it sets env vars, drops ``app.*`` from
+``sys.modules`` and re-imports, so the constants pick up the new environment.
+Keep every value import-time evaluated — do not defer behind a function or lazy
+object, or that reload-re-reads-env contract breaks.
+
+Pure parsing/validation helpers live in :mod:`app.config.parsers` and are
+re-exported here so existing ``from app.config import parse_bool_env`` style
+imports keep working.
+"""
+
 import hashlib
 import os
-import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .parsers import (
+    parse_bool_env,
+    parse_nonnegative_env_int,
+    parse_optional_env_port,
+    parse_positive_env_float,
+    parse_positive_env_int,
+    parse_shell_words_env,
+)
 
-def parse_optional_env_port(value, field_name):
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    try:
-        port = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{field_name} 必须是数字。") from exc
-    if port < 1 or port > 65535:
-        raise ValueError(f"{field_name} 必须在 1-65535 之间。")
-    return port
-
-
-def parse_nonnegative_env_int(value, field_name):
-    try:
-        number = int(str(value).strip())
-    except ValueError as exc:
-        raise ValueError(f"{field_name} 必须是非负整数。") from exc
-    if number < 0:
-        raise ValueError(f"{field_name} 必须是非负整数。")
-    return number
-
-
-def parse_positive_env_int(value, field_name):
-    number = parse_nonnegative_env_int(value, field_name)
-    if number <= 0:
-        raise ValueError(f"{field_name} 必须大于 0。")
-    return number
-
-
-def parse_positive_env_float(value, field_name):
-    try:
-        number = float(str(value).strip())
-    except ValueError as exc:
-        raise ValueError(f"{field_name} 必须是正数。") from exc
-    if number <= 0:
-        raise ValueError(f"{field_name} 必须是正数。")
-    return number
-
-
-def parse_bool_env(value, default=False):
-    raw = str(value if value is not None else ("1" if default else "0")).strip().lower()
-    return raw not in {"0", "false", "no", "off", ""}
-
-
-def parse_shell_words_env(value, field_name):
-    raw = str(value or "").strip()
-    if not raw:
-        return ()
-    try:
-        return tuple(shlex.split(raw))
-    except ValueError as exc:
-        raise ValueError(f"{field_name} 配置格式无效。") from exc
-
-
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = Path(os.environ.get("DB_PATH", DATA_DIR / "panel.db"))
+UPLOADS_DIR = DATA_DIR / "uploads"
+PAYMENT_PROOFS_DIR = UPLOADS_DIR / "payment-proofs"
 XRAY_ENV_FILE_PATH = Path(os.environ.get("XRAY_ENV_FILE_PATH", BASE_DIR / "xray" / ".env"))
 XRAY_CONFIG_PATH = Path(os.environ.get("XRAY_CONFIG_PATH", BASE_DIR / "xray" / "runtime" / "config.json"))
 XRAY_DYNAMIC_ROUTING_PATH = Path(
@@ -172,4 +139,27 @@ PROBE_DASHBOARD_RANGES = {
     "7d": {"hours": 24 * 7, "label": "7天"},
 }
 
+COMMERCE_AUTO_PORT_START = parse_optional_env_port(
+    os.environ.get("COMMERCE_AUTO_PORT_START", "31000"),
+    "COMMERCE_AUTO_PORT_START",
+)
+COMMERCE_AUTO_PORT_END = parse_optional_env_port(
+    os.environ.get("COMMERCE_AUTO_PORT_END", "39999"),
+    "COMMERCE_AUTO_PORT_END",
+)
+if COMMERCE_AUTO_PORT_START is not None and COMMERCE_AUTO_PORT_END is not None:
+    if COMMERCE_AUTO_PORT_START > COMMERCE_AUTO_PORT_END:
+        raise ValueError("COMMERCE_AUTO_PORT_START 不能大于 COMMERCE_AUTO_PORT_END。")
+COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT = parse_positive_env_int(
+    os.environ.get("COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT", "24"),
+    "COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT",
+)
+PAYMENT_PROOF_MAX_BYTES = parse_positive_env_int(
+    os.environ.get("PAYMENT_PROOF_MAX_BYTES", str(5 * 1024 * 1024)),
+    "PAYMENT_PROOF_MAX_BYTES",
+)
+
 LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
+CUSTOMER_SESSION_ID_KEY = "customer_session_id"
+CUSTOMER_SESSION_MARKER_KEY = "customer_session_marker"
+CSRF_SESSION_KEY = "csrf_token"

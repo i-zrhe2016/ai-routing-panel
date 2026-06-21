@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>确认下单 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='tokens.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='public.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <div class="page-top">
+        <div>
+          <p class="eyebrow">CHECKOUT</p>
+          <h1>确认套餐</h1>
+          <p class="subtitle">下单后生成待付款订单，上传支付截图后进入人工审核。</p>
+        </div>
+        <div class="account">
+          <span class="chip">{{ customer.email }}</span>
+          <a href="{{ url_for('plans_page') }}">返回套餐</a>
+          <a href="/portal">订阅中心</a>
+        </div>
+      </div>
+
+      {% if request.args.get('message') %}
+      <div class="banner {{ request.args.get('level', 'info') }}">{{ request.args.get('message') }}</div>
+      {% endif %}
+
+      <section class="two-col">
+        <div class="card">
+          <p class="eyebrow">PLAN</p>
+          <h2>{{ plan.name }}</h2>
+          <p class="muted">{{ plan.description or '默认交付专属端口、订阅详情和订阅地址。' }}</p>
+          <div class="info-grid">
+            <div class="info-tile"><span>价格</span><strong>{{ plan.price_display }}</strong></div>
+            <div class="info-tile"><span>时长</span><strong>{{ plan.duration_days }} 天</strong></div>
+            <div class="info-tile"><span>总流量</span><strong>{{ plan.traffic_limit_display }}</strong></div>
+          </div>
+          <form method="post" action="{{ url_for('create_order') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="kind" value="new_purchase">
+            <input type="hidden" name="plan_slug" value="{{ plan.slug }}">
+            <button class="btn btn-primary" type="submit">创建待付款订单</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <p class="eyebrow">PAYMENT</p>
+          <h2>付款说明</h2>
+          <p class="muted">{{ commerce_settings.payment_instructions or '下单后在订单详情上传截图与备注。' }}</p>
+          {% if commerce_settings.payment_qr_code_url %}
+          <div class="qr"><img src="{{ commerce_settings.payment_qr_code_url }}" alt="支付宝收款二维码"></div>
+          {% else %}
+          <p class="muted">管理员尚未设置公开二维码，请先联系管理员补充支付信息。</p>
+          {% endif %}
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

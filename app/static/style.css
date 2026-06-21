@@ -466,6 +466,17 @@ label span,
   grid-column: 1 / -1;
 }
 
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-row input {
+  width: auto;
+  min-height: auto;
+}
+
 label {
   display: block;
 }
@@ -511,7 +522,8 @@ input:focus {
 button,
 .filter-pill,
 .link-pill,
-.text-button {
+.text-button,
+.button-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -575,6 +587,10 @@ button:disabled {
   color: var(--primary);
 }
 
+.button-link {
+  text-decoration: none;
+}
+
 .status-pill,
 .probe-pill,
 .badge {
@@ -591,6 +607,7 @@ button:disabled {
 
 .status-pill.good,
 .badge.active,
+.badge.ok,
 .probe-pill.healthy {
   background: var(--success-soft);
   color: var(--success);
@@ -598,6 +615,7 @@ button:disabled {
 
 .status-pill.bad,
 .badge.disabled,
+.badge.bad,
 .probe-pill.unhealthy {
   background: var(--danger-soft);
   color: var(--danger);
@@ -605,9 +623,84 @@ button:disabled {
 
 .badge.expired,
 .badge.quota,
+.badge.warn,
 .probe-pill.unknown {
   background: var(--warning-soft);
   color: var(--warning);
+}
+
+.commerce-card {
+  display: grid;
+  gap: 12px;
+}
+
+.commerce-card-copy {
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.commerce-plan-list,
+.commerce-order-list {
+  display: grid;
+  gap: 16px;
+}
+
+.commerce-plan-item,
+.commerce-order-card,
+.commerce-order-item {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.commerce-plan-head,
+.commerce-order-head,
+.commerce-order-item,
+.commerce-order-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.commerce-plan-head p,
+.commerce-order-head p,
+.commerce-order-item p {
+  margin-top: 6px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.commerce-order-item {
+  color: inherit;
+}
+
+.commerce-order-meta {
+  align-items: center;
+}
+
+.payment-proof-preview {
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.payment-proof-preview img {
+  display: block;
+  max-width: min(100%, 320px);
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+
+.subscription-alert.success {
+  border-color: rgba(24, 128, 56, 0.16);
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .status-pill-dot {

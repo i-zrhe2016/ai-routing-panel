@@ -1,0 +1,63 @@
+/* Design-system CSS custom properties — kept in sync with tokens.js.
+ *
+ * Loaded by the SPA shells (admin/portal) and, from P5 onward, by the
+ * server-rendered public/login pages so every surface shares one palette.
+ * Until then it is scoped to the new SPA documents and does not affect the
+ * legacy pages still using app/static/style.css. */
+:root {
+  /* Brand + status vocabulary */
+  --c-primary: #1a73e8;
+  --c-primary-strong: #174ea6;
+  --c-primary-soft: #e8f0fe;
+  --c-success: #188038;
+  --c-success-soft: #e6f4ea;
+  --c-warning: #b06000;
+  --c-warning-soft: #fef7e0;
+  --c-danger: #d93025;
+  --c-danger-soft: #fce8e6;
+
+  /* Neutral ramp */
+  --c-gray-50: #f8fafc;
+  --c-gray-100: #f1f4f8;
+  --c-gray-200: #e6eaf0;
+  --c-gray-300: #d6dce5;
+  --c-gray-400: #aab4c2;
+  --c-gray-500: #7b8595;
+  --c-gray-600: #5b6573;
+  --c-gray-700: #3f4753;
+  --c-gray-800: #272d36;
+  --c-gray-900: #171b21;
+
+  /* Surfaces / text / lines */
+  --c-bg: #f7f8fa;
+  --c-surface: #ffffff;
+  --c-surface-muted: #f6f8fb;
+  --c-text: #1a1f26;
+  --c-text-muted: #5b6573;
+  --c-text-soft: #8a94a3;
+  --c-line: #e6e9ee;
+  --c-line-strong: #d4dae2;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+
+  /* Shadows */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-2: 0 6px 20px rgba(16, 24, 40, 0.08);
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* Type */
+  --font-sans: "Google Sans Text", "Roboto", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+}

@@ -26,6 +26,11 @@
               <strong>保留 Basic Auth</strong>
             </div>
           </div>
+
+          <div class="button-row compact-row">
+            <a class="text-button" href="{{ url_for('plans_page') }}">前往套餐页</a>
+            <a class="text-button" href="{{ url_for('customer_login', next=url_for('plans_page')) }}">客户登录</a>
+          </div>
         </div>
 
         <section class="auth-card">

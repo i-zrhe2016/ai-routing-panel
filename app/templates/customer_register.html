@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>客户注册 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='tokens.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='public.css') }}">
+  </head>
+  <body>
+    <main class="auth-wrap">
+      <section class="auth-card">
+        <div class="head">
+          <p class="eyebrow">CUSTOMER REGISTER</p>
+          <h1>创建订阅账号</h1>
+          <p class="subtitle">注册完成后即可下单、提交支付凭证并在订阅中心查看服务。</p>
+        </div>
+
+        {% if message %}
+        <div class="banner {{ message_level }}">{{ message }}</div>
+        {% endif %}
+        {% if error_message %}
+        <div class="banner error">{{ error_message }}</div>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('customer_register') }}">
+          <input type="hidden" name="next" value="{{ next_target }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="field">
+            <span>邮箱</span>
+            <input type="email" name="email" value="{{ form_email }}" autocomplete="email" autofocus>
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input type="password" name="password" autocomplete="new-password">
+          </label>
+          <label class="field">
+            <span>确认密码</span>
+            <input type="password" name="confirm_password" autocomplete="new-password">
+          </label>
+          <button class="btn btn-primary" type="submit">创建账号</button>
+        </form>
+
+        <div class="row-links">
+          <a href="{{ url_for('customer_login', next=next_target) }}">已有账号，去登录</a>
+          <a href="{{ url_for('plans_page') }}">返回套餐页</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
