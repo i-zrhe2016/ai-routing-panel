@@ -4,109 +4,57 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>确认下单 - xray-routing-panel</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='tokens.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='public.css') }}">
   </head>
-  <body class="dashboard-page">
-    <main class="app-shell tenant-app-shell">
-      <aside class="side-nav">
-        <div class="nav-brand">
+  <body>
+    <main class="page">
+      <div class="page-top">
+        <div>
           <p class="eyebrow">CHECKOUT</p>
+          <h1>确认套餐</h1>
+          <p class="subtitle">下单后生成待付款订单，上传支付截图后进入人工审核。</p>
+        </div>
+        <div class="account">
+          <span class="chip">{{ customer.email }}</span>
+          <a href="{{ url_for('plans_page') }}">返回套餐</a>
+          <a href="/portal">订阅中心</a>
+        </div>
+      </div>
+
+      {% if request.args.get('message') %}
+      <div class="banner {{ request.args.get('level', 'info') }}">{{ request.args.get('message') }}</div>
+      {% endif %}
+
+      <section class="two-col">
+        <div class="card">
+          <p class="eyebrow">PLAN</p>
           <h2>{{ plan.name }}</h2>
-          <p>下单后会生成待付款订单，上传支付截图后进入人工审核。</p>
+          <p class="muted">{{ plan.description or '默认交付专属端口、订阅详情和订阅地址。' }}</p>
+          <div class="info-grid">
+            <div class="info-tile"><span>价格</span><strong>{{ plan.price_display }}</strong></div>
+            <div class="info-tile"><span>时长</span><strong>{{ plan.duration_days }} 天</strong></div>
+            <div class="info-tile"><span>总流量</span><strong>{{ plan.traffic_limit_display }}</strong></div>
+          </div>
+          <form method="post" action="{{ url_for('create_order') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="kind" value="new_purchase">
+            <input type="hidden" name="plan_slug" value="{{ plan.slug }}">
+            <button class="btn btn-primary" type="submit">创建待付款订单</button>
+          </form>
         </div>
 
-        <section class="nav-card">
-          <span>客户账号</span>
-          <strong>{{ customer.email }}</strong>
-          <p>订单和服务会归属到当前账号。</p>
-        </section>
-
-        <section class="nav-card">
-          <span>订单有效期</span>
-          <strong>{{ commerce_settings.order_expiry_hours }} 小时</strong>
-          <p>请在有效期内提交付款凭证。</p>
-        </section>
-      </aside>
-
-      <div class="app-main">
-        <header class="topbar">
-          <div class="topbar-copy">
-            <p class="eyebrow">ORDER</p>
-            <h1 class="page-title">确认套餐</h1>
-            <p class="page-subtitle">当前 v1 采用支付宝二维码付款 + 人工审批开通。</p>
-          </div>
-
-          <div class="topbar-actions">
-            <a class="text-button" href="{{ url_for('plans_page') }}">返回套餐列表</a>
-            <a class="text-button" href="{{ url_for('customer_dashboard') }}">客户中心</a>
-          </div>
-        </header>
-
-        {% if request.args.get('message') %}
-        <section class="banner {{ request.args.get('level', 'info') }}">
-          <div class="banner-row">
-            <span>{{ request.args.get('message') }}</span>
-          </div>
-        </section>
-        {% endif %}
-
-        <section class="workspace-grid">
-          <section class="panel workspace-card">
-            <div class="panel-head">
-              <div>
-                <p class="section-eyebrow">PLAN</p>
-                <h2>{{ plan.name }}</h2>
-                <p>{{ plan.description or '默认交付专属端口、租户面板和订阅地址。' }}</p>
-              </div>
-            </div>
-
-            <div class="subscription-overview">
-              <div class="info-tile">
-                <span>价格</span>
-                <strong>{{ plan.price_display }}</strong>
-              </div>
-              <div class="info-tile">
-                <span>时长</span>
-                <strong>{{ plan.duration_days }} 天</strong>
-              </div>
-              <div class="info-tile">
-                <span>总流量</span>
-                <strong>{{ plan.traffic_limit_display }}</strong>
-              </div>
-            </div>
-
-            <form method="post" action="{{ url_for('create_order') }}" class="auth-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input type="hidden" name="kind" value="new_purchase">
-              <input type="hidden" name="plan_slug" value="{{ plan.slug }}">
-              <div class="actions">
-                <button class="primary" type="submit">创建待付款订单</button>
-              </div>
-            </form>
-          </section>
-
-          <section class="panel workspace-card">
-            <div class="panel-head">
-              <div>
-                <p class="section-eyebrow">PAYMENT</p>
-                <h2>付款说明</h2>
-                <p>{{ commerce_settings.payment_instructions or '下单后在订单详情上传截图与备注。' }}</p>
-              </div>
-            </div>
-
-            {% if commerce_settings.payment_qr_code_url %}
-            <div class="payment-proof-preview">
-              <img src="{{ commerce_settings.payment_qr_code_url }}" alt="支付宝收款二维码">
-            </div>
-            {% else %}
-            <div class="subscription-alert">
-              <strong>未配置付款二维码</strong>
-              <p>管理员尚未设置公开二维码，请先联系管理员补充支付信息。</p>
-            </div>
-            {% endif %}
-          </section>
-        </section>
-      </div>
+        <div class="card">
+          <p class="eyebrow">PAYMENT</p>
+          <h2>付款说明</h2>
+          <p class="muted">{{ commerce_settings.payment_instructions or '下单后在订单详情上传截图与备注。' }}</p>
+          {% if commerce_settings.payment_qr_code_url %}
+          <div class="qr"><img src="{{ commerce_settings.payment_qr_code_url }}" alt="支付宝收款二维码"></div>
+          {% else %}
+          <p class="muted">管理员尚未设置公开二维码，请先联系管理员补充支付信息。</p>
+          {% endif %}
+        </div>
+      </section>
     </main>
   </body>
 </html>

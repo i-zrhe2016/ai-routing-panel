@@ -4,63 +4,43 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>客户登录 - xray-routing-panel</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='tokens.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='public.css') }}">
   </head>
-  <body class="auth-page">
-    <main class="shell auth-shell">
-      <section class="auth-layout">
-        <div class="auth-copy">
+  <body>
+    <main class="auth-wrap">
+      <section class="auth-card">
+        <div class="head">
           <p class="eyebrow">CUSTOMER LOGIN</p>
-          <h1 class="page-title">客户中心登录</h1>
-          <p class="page-subtitle">登录后可下单、提交支付截图、查看续费状态和技术订阅信息。</p>
+          <h1>登录订阅中心</h1>
+          <p class="subtitle">登录后可下单、提交支付截图、查看续费状态与订阅信息。</p>
         </div>
 
-        <section class="auth-card">
-          <div class="panel-head">
-            <div>
-              <p class="section-eyebrow">LOGIN</p>
-              <h2>登录客户账号</h2>
-              <p>使用邮箱和密码登录客户中心。</p>
-            </div>
-          </div>
+        {% if message %}
+        <div class="banner {{ message_level }}">{{ message }}</div>
+        {% endif %}
+        {% if error_message %}
+        <div class="banner error">{{ error_message }}</div>
+        {% endif %}
 
-          {% if message %}
-          <section class="banner {{ message_level }}">
-            <div class="banner-row">
-              <span>{{ message }}</span>
-            </div>
-          </section>
-          {% endif %}
+        <form method="post" action="{{ url_for('customer_login') }}">
+          <input type="hidden" name="next" value="{{ next_target }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="field">
+            <span>邮箱</span>
+            <input type="email" name="email" value="{{ form_email }}" autocomplete="email" autofocus>
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input type="password" name="password" autocomplete="current-password">
+          </label>
+          <button class="btn btn-primary" type="submit">登录</button>
+        </form>
 
-          {% if error_message %}
-          <section class="banner error">
-            <div class="banner-row">
-              <span>{{ error_message }}</span>
-            </div>
-          </section>
-          {% endif %}
-
-          <form class="auth-form" method="post" action="{{ url_for('customer_login') }}">
-            <input type="hidden" name="next" value="{{ next_target }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <label>
-              <span>邮箱</span>
-              <input type="email" name="email" value="{{ form_email }}" autocomplete="email" autofocus>
-            </label>
-            <label>
-              <span>密码</span>
-              <input type="password" name="password" autocomplete="current-password">
-            </label>
-            <div class="actions">
-              <button class="primary" type="submit">登录</button>
-            </div>
-          </form>
-
-          <div class="button-row compact-row">
-            <a class="text-button" href="{{ url_for('customer_register', next=next_target) }}">没有账号，去注册</a>
-            <a class="text-button" href="{{ url_for('plans_page') }}">返回套餐页</a>
-          </div>
-        </section>
+        <div class="row-links">
+          <a href="{{ url_for('customer_register', next=next_target) }}">没有账号，去注册</a>
+          <a href="{{ url_for('plans_page') }}">返回套餐页</a>
+        </div>
       </section>
     </main>
   </body>
