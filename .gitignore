@@ -7,6 +7,12 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Frontend toolchain deps/cache. The BUILT app/static/panel.js IS committed
+# (runtime Docker has no build step), so do not ignore that.
+frontend/node_modules/
+frontend/.vite/
+node_modules/
+
 # Local-only compose override (host-specific IPs, SSH mounts) — not for the repo.
 docker-compose.override.yml
 
