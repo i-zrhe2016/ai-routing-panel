@@ -2,61 +2,26 @@ import json
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
 
 
 from ..config import (
-    CF_API_TOKEN,
-    CF_DNS_RECORD_ID,
-    CF_DNS_RECORD_NAME,
-    CF_DNS_RECORD_PROXIED,
-    CF_DNS_RECORD_TTL,
-    CF_DNS_RECORD_TYPE,
-    CF_ZONE_ID,
-    DATAPLANE_ACCESS_LOG_PATH,
-    DATAPLANE_API_SERVER,
-    DATAPLANE_AI_REPORT_PATH,
     DATAPLANE_CONFIG_PATH,
-    DATAPLANE_CONTAINER_NAME,
-    DATAPLANE_DOCKER_BIN,
-    DATAPLANE_DYNAMIC_ROUTING_PATH,
     DATAPLANE_LOCAL_BIN,
-    DATAPLANE_PANEL_DB_PATH,
-    DATAPLANE_PANEL_PORTS_PATH,
-    DATAPLANE_RESTART_COMMAND,
-    DATAPLANE_SSH_BIN,
-    DATAPLANE_SSH_OPTIONS,
     DATAPLANE_SSH_TARGET,
-    DATAPLANE_XRAY_BIN,
-    DATA_DIR,
     DB_PATH,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
-    DNS_FAILOVER_BACKUP_CONTENT,
-    DNS_FAILOVER_BACKUP_LABEL,
-    DNS_FAILOVER_ENABLED,
-    DNS_FAILOVER_FAILURE_THRESHOLD,
-    DNS_FAILOVER_INTERVAL,
-    DNS_FAILOVER_PRIMARY_CONTENT,
-    DNS_FAILOVER_PROBE_HOST,
-    DNS_FAILOVER_PROBE_PORT,
-    DNS_FAILOVER_RECOVERY_THRESHOLD,
-    DNS_FAILOVER_TIMEOUT,
     MAINTENANCE_INTERVAL,
-    PAYMENT_PROOFS_DIR,
     PROBE_ENABLED,
     PROBE_INTERVAL,
     SEED_LISTEN_PORT,
-    XRAY_ACCESS_LOG_PATH,
     XRAY_CLIENT_CONFIG_PATH,
     XRAY_CONFIG_PATH,
-    XRAY_DYNAMIC_ROUTING_PATH,
     XRAY_ENV_FILE_PATH,
     XRAY_PANEL_PORTS_PATH,
     XRAY_STATS_QUERY_TIMEOUT,
 )
-from ..dns_failover import DnsFailoverConfig, DnsFailoverManager
 from ..errors import ValidationError
 from ..helpers import (
     generate_access_token,
@@ -68,66 +33,12 @@ from ..helpers import (
     utc_iso_now,
     utc_now,
 )
-from ..xray.node_control import DataPlaneConfig, DataPlaneController
 
 
 
-class CoreMixin:
-    def __init__(self):
-        self.write_lock = threading.Lock()
-        self.stop_event = threading.Event()
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        PAYMENT_PROOFS_DIR.mkdir(parents=True, exist_ok=True)
-        XRAY_PANEL_PORTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        XRAY_ACCESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        self.data_plane = DataPlaneController(
-            DataPlaneConfig(
-                role="data_plane",
-                label="数据面",
-                api_server=DATAPLANE_API_SERVER,
-                xray_bin=DATAPLANE_XRAY_BIN,
-                local_bin=DATAPLANE_LOCAL_BIN,
-                docker_bin=DATAPLANE_DOCKER_BIN,
-                container_name=DATAPLANE_CONTAINER_NAME,
-                restart_command=DATAPLANE_RESTART_COMMAND,
-                ssh_target=DATAPLANE_SSH_TARGET,
-                ssh_bin=DATAPLANE_SSH_BIN,
-                ssh_options=DATAPLANE_SSH_OPTIONS,
-                config_path=self.data_plane_config_path(),
-                dynamic_routing_path=DATAPLANE_DYNAMIC_ROUTING_PATH.strip(),
-                ai_report_path=DATAPLANE_AI_REPORT_PATH.strip(),
-                panel_db_path=DATAPLANE_PANEL_DB_PATH.strip(),
-                access_log_path=DATAPLANE_ACCESS_LOG_PATH.strip() or str(XRAY_ACCESS_LOG_PATH),
-                panel_ports_path=DATAPLANE_PANEL_PORTS_PATH.strip(),
-                source_config_path=XRAY_CONFIG_PATH,
-                source_dynamic_routing_path=XRAY_DYNAMIC_ROUTING_PATH,
-                source_ai_report_path=self.data_plane_ai_report_source_path(),
-                source_panel_ports_path=XRAY_PANEL_PORTS_PATH,
-                upstream_host=DEFAULT_UPSTREAM_HOST,
-                upstream_port=DEFAULT_UPSTREAM_PORT,
-            )
-        )
-        self.dns_failover_manager = DnsFailoverManager(
-            DnsFailoverConfig(
-                enabled=DNS_FAILOVER_ENABLED,
-                interval=DNS_FAILOVER_INTERVAL,
-                timeout=DNS_FAILOVER_TIMEOUT,
-                failure_threshold=DNS_FAILOVER_FAILURE_THRESHOLD,
-                recovery_threshold=DNS_FAILOVER_RECOVERY_THRESHOLD,
-                probe_host=DNS_FAILOVER_PROBE_HOST,
-                probe_port=DNS_FAILOVER_PROBE_PORT,
-                api_token=CF_API_TOKEN,
-                zone_id=CF_ZONE_ID,
-                record_id=CF_DNS_RECORD_ID,
-                record_type=CF_DNS_RECORD_TYPE,
-                record_name=CF_DNS_RECORD_NAME,
-                record_proxied=CF_DNS_RECORD_PROXIED,
-                record_ttl=CF_DNS_RECORD_TTL,
-                primary_content=DNS_FAILOVER_PRIMARY_CONTENT,
-                backup_content=DNS_FAILOVER_BACKUP_CONTENT,
-                backup_label=DNS_FAILOVER_BACKUP_LABEL,
-            )
-        )
+class CoreService:
+    def __init__(self, panel):
+        self._panel = panel
     def data_plane_config_path(self):
         explicit = DATAPLANE_CONFIG_PATH.strip()
         if explicit:
@@ -140,7 +51,7 @@ class CoreMixin:
     def data_plane_ai_report_source_path(self):
         return XRAY_ENV_FILE_PATH.parent / "reports" / "hourly-domains" / "latest.json"
     def data_plane_status(self):
-        return self.data_plane.status_summary()
+        return self._panel.data_plane.status_summary()
     def connect(self):
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -148,7 +59,7 @@ class CoreMixin:
         conn.execute("PRAGMA busy_timeout = 5000")
         return conn
     def init_db(self):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS ports (
@@ -269,9 +180,9 @@ class CoreMixin:
                 );
                 """
             )
-            self.ensure_port_schema(conn)
-            self.ensure_dns_failover_schema(conn)
-            self.ensure_commerce_schema(conn)
+            self._panel.ensure_port_schema(conn)
+            self._panel.ensure_dns_failover_schema(conn)
+            self._panel.ensure_commerce_schema(conn)
     def ensure_port_schema(self, conn):
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(ports)").fetchall()}
         if "tenant_token" not in columns:
@@ -313,9 +224,9 @@ class CoreMixin:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ports_customer_id ON ports(customer_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ports_service_subscription_id ON ports(service_subscription_id)")
-        self.cleanup_expired_ports_in_tx(conn)
-        self.ensure_port_tokens_in_tx(conn)
-        self.ensure_port_credentials_in_tx(conn)
+        self._panel.cleanup_expired_ports_in_tx(conn)
+        self._panel.ensure_port_tokens_in_tx(conn)
+        self._panel.ensure_port_credentials_in_tx(conn)
     def ensure_dns_failover_schema(self, conn):
         conn.execute(
             """
@@ -356,9 +267,9 @@ class CoreMixin:
         for row in rows:
             updates = {}
             if not str(row["tenant_token"] or "").strip():
-                updates["tenant_token"] = self.generate_unique_port_token(conn, "tenant_token")
+                updates["tenant_token"] = self._panel.generate_unique_port_token(conn, "tenant_token")
             if not str(row["subscription_token"] or "").strip():
-                updates["subscription_token"] = self.generate_unique_port_token(conn, "subscription_token")
+                updates["subscription_token"] = self._panel.generate_unique_port_token(conn, "subscription_token")
             if not updates:
                 continue
             assignments = ", ".join(f"{column} = ?" for column in updates)
@@ -374,7 +285,7 @@ class CoreMixin:
         for row in rows:
             updates = {}
             if not str(row["tenant_username"] or "").strip():
-                updates["tenant_username"] = self.generate_unique_tenant_username(conn)
+                updates["tenant_username"] = self._panel.generate_unique_tenant_username(conn)
             if not str(row["tenant_password"] or "").strip():
                 updates["tenant_password"] = generate_tenant_password()
             if not updates:
@@ -383,14 +294,14 @@ class CoreMixin:
             values = list(updates.values()) + [row["id"]]
             conn.execute(f"UPDATE ports SET {assignments} WHERE id = ?", values)
     def ensure_subscription_token_in_tx(self, conn):
-        token = str(self.get_state(conn, "subscription_token", "") or "").strip()
+        token = str(self._panel.get_state(conn, "subscription_token", "") or "").strip()
         if token:
             return token
         token = generate_subscription_token()
-        self.set_state(conn, "subscription_token", token)
+        self._panel.set_state(conn, "subscription_token", token)
         return token
     def normalize_upstream_targets(self):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             conn.execute(
                 """
                 UPDATE ports
@@ -409,7 +320,7 @@ class CoreMixin:
         if not SEED_LISTEN_PORT:
             return
         listen_port = parse_port(SEED_LISTEN_PORT, "默认监听端口")
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             exists = conn.execute("SELECT COUNT(*) FROM ports").fetchone()[0]
             if exists:
                 return
@@ -426,9 +337,9 @@ class CoreMixin:
                     listen_port,
                     DEFAULT_UPSTREAM_HOST,
                     DEFAULT_UPSTREAM_PORT,
-                    self.generate_unique_port_token(conn, "tenant_token"),
-                    self.generate_unique_port_token(conn, "subscription_token"),
-                    self.generate_unique_tenant_username(conn),
+                    self._panel.generate_unique_port_token(conn, "tenant_token"),
+                    self._panel.generate_unique_port_token(conn, "subscription_token"),
+                    self._panel.generate_unique_tenant_username(conn),
                     generate_tenant_password(),
                     "默认初始化端口",
                     now,
@@ -436,21 +347,21 @@ class CoreMixin:
                 ),
             )
     def bootstrap(self):
-        self.init_db()
-        self.seed_defaults()
-        self.normalize_upstream_targets()
-        with self.connect() as conn:
+        self._panel.init_db()
+        self._panel.seed_defaults()
+        self._panel.normalize_upstream_targets()
+        with self._panel.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            self.cleanup_expired_ports_in_tx(conn)
-            self.ensure_subscription_token_in_tx(conn)
-            self.ensure_port_tokens_in_tx(conn)
-            self.ensure_port_credentials_in_tx(conn)
+            self._panel.cleanup_expired_ports_in_tx(conn)
+            self._panel.ensure_subscription_token_in_tx(conn)
+            self._panel.ensure_port_tokens_in_tx(conn)
+            self._panel.ensure_port_credentials_in_tx(conn)
             conn.commit()
-        self.sync_traffic_state()
-        self.disable_auto_stopped_ports(reload_xray=False)
-        self.write_current_config()
+        self._panel.sync_traffic_state()
+        self._panel.disable_auto_stopped_ports(reload_xray=False)
+        self._panel.write_current_config()
         try:
-            self.refresh_dns_failover_record_snapshot()
+            self._panel.refresh_dns_failover_record_snapshot()
         except Exception:
             pass
     def get_state(self, conn, key, default=None):
@@ -473,31 +384,31 @@ class CoreMixin:
             return default
         return localized.strftime("%Y-%m-%d %H:%M:%S")
     def disable_auto_stopped_ports(self, reload_xray=True):
-        with self.write_lock:
-            with self.connect() as conn:
+        with self._panel.write_lock:
+            with self._panel.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                changed = self.disable_auto_stopped_ports_in_tx(conn)
+                changed = self._panel.disable_auto_stopped_ports_in_tx(conn)
                 if changed:
-                    self.persist_and_reload(conn, reload_xray=reload_xray)
+                    self._panel.persist_and_reload(conn, reload_xray=reload_xray)
                 else:
                     conn.commit()
                 return changed
     def apply_mutation(self, operation):
-        with self.write_lock:
-            self.sync_traffic_state_locked()
-            with self.connect() as conn:
+        with self._panel.write_lock:
+            self._panel.sync_traffic_state_locked()
+            with self._panel.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     result = operation(conn)
-                    self.disable_auto_stopped_ports_in_tx(conn)
-                    self.persist_and_reload(conn, reload_xray=True)
+                    self._panel.disable_auto_stopped_ports_in_tx(conn)
+                    self._panel.persist_and_reload(conn, reload_xray=True)
                     return result
                 except Exception:
                     conn.rollback()
                     raise
     def apply_state_update(self, operation):
-        with self.write_lock:
-            with self.connect() as conn:
+        with self._panel.write_lock:
+            with self._panel.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     result = operation(conn)
@@ -509,7 +420,7 @@ class CoreMixin:
     def disable_auto_stopped_ports_in_tx(self, conn):
         now_dt = utc_now()
         now_text = now_dt.isoformat(timespec="seconds")
-        cleaned = self.cleanup_expired_ports_in_tx(conn)
+        cleaned = self._panel.cleanup_expired_ports_in_tx(conn)
         rows = conn.execute(
             """
             SELECT
@@ -538,13 +449,13 @@ class CoreMixin:
     def persist_and_reload(self, conn, reload_xray):
         previous_panel_ports = XRAY_PANEL_PORTS_PATH.read_text(encoding="utf-8") if XRAY_PANEL_PORTS_PATH.exists() else None
         previous_config = XRAY_CONFIG_PATH.read_text(encoding="utf-8") if XRAY_CONFIG_PATH.exists() else None
-        panel_ports_payload = self.render_panel_ports_payload(conn)
-        self.write_json_file(XRAY_PANEL_PORTS_PATH, panel_ports_payload)
+        panel_ports_payload = self._panel.render_panel_ports_payload(conn)
+        self._panel.write_json_file(XRAY_PANEL_PORTS_PATH, panel_ports_payload)
         try:
-            self.render_xray_config()
-            self.xray_config_test()
+            self._panel.render_xray_config()
+            self._panel.xray_config_test()
             if reload_xray:
-                self.restart_data_plane()
+                self._panel.restart_data_plane()
         except Exception:
             if previous_panel_ports is None:
                 XRAY_PANEL_PORTS_PATH.unlink(missing_ok=True)
@@ -554,9 +465,9 @@ class CoreMixin:
                 XRAY_CONFIG_PATH.unlink(missing_ok=True)
             else:
                 XRAY_CONFIG_PATH.write_text(previous_config, encoding="utf-8")
-            if self.data_plane.supports_sync():
+            if self._panel.data_plane.supports_sync():
                 try:
-                    self.data_plane.sync_generated_files(validate_config=True)
+                    self._panel.data_plane.sync_generated_files(validate_config=True)
                 except RuntimeError:
                     pass
             raise
@@ -583,17 +494,17 @@ class CoreMixin:
             "ports": [int(row["listen_port"]) for row in rows],
         }
     def write_current_config(self):
-        with self.connect() as conn:
-            self.write_json_file(XRAY_PANEL_PORTS_PATH, self.render_panel_ports_payload(conn))
-        self.render_xray_config()
-        self.xray_config_test()
+        with self._panel.connect() as conn:
+            self._panel.write_json_file(XRAY_PANEL_PORTS_PATH, self._panel.render_panel_ports_payload(conn))
+        self._panel.render_xray_config()
+        self._panel.xray_config_test()
     def write_json_file(self, path, payload):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     def render_xray_config(self):
-        self.sync_data_plane_dynamic_routing()
+        self._panel.sync_data_plane_dynamic_routing()
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
-        self.run_command(
+        self._panel.run_command(
             [
                 sys.executable,
                 "-m",
@@ -612,29 +523,29 @@ class CoreMixin:
             "Xray 配置渲染失败",
         )
     def sync_data_plane_dynamic_routing(self):
-        if not self.data_plane.supports_dynamic_routing_pull():
+        if not self._panel.data_plane.supports_dynamic_routing_pull():
             return False
-        return self.data_plane.sync_dynamic_routing_from_remote()
+        return self._panel.data_plane.sync_dynamic_routing_from_remote()
     def sync_data_plane_artifacts(self):
-        if not self.data_plane.supports_sync():
+        if not self._panel.data_plane.supports_sync():
             return []
-        return self.data_plane.sync_generated_files(validate_config=True)
+        return self._panel.data_plane.sync_generated_files(validate_config=True)
     def xray_config_test(self):
-        if self.data_plane.supports_sync():
-            self.sync_data_plane_artifacts()
+        if self._panel.data_plane.supports_sync():
+            self._panel.sync_data_plane_artifacts()
             return
-        self.data_plane.test_config()
+        self._panel.data_plane.test_config()
     def restart_data_plane(self):
-        return self.data_plane.restart()
+        return self._panel.data_plane.restart()
     def data_plane_configured(self):
-        return self.data_plane.is_configured()
+        return self._panel.data_plane.is_configured()
     def data_plane_running(self):
-        return self.data_plane.is_running()
+        return self._panel.data_plane.is_running()
     def read_xray_traffic_stats(self):
-        if not self.data_plane_running():
+        if not self._panel.data_plane_running():
             return {}
         try:
-            completed = self.data_plane.run_statsquery(
+            completed = self._panel.data_plane.run_statsquery(
                 XRAY_STATS_QUERY_TIMEOUT,
                 "inbound>>>panel-",
             )
@@ -673,14 +584,14 @@ class CoreMixin:
                 counter["bytes_sent"] += value
         return counters
     def restart_data_plane_or_raise(self):
-        if not self.data_plane.is_configured():
+        if not self._panel.data_plane.is_configured():
             raise ValidationError("数据面未配置。")
-        if not self.data_plane.supports_restart():
+        if not self._panel.data_plane.supports_restart():
             raise ValidationError("当前数据面未配置可用的重启方式。")
-        restarted = self.data_plane.restart()
+        restarted = self._panel.data_plane.restart()
         if not restarted:
             raise ValidationError("当前数据面不可重启。")
-        return self.data_plane.status_summary()
+        return self._panel.data_plane.status_summary()
     def run_command(self, command, error_prefix, timeout=None):
         completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)
         if completed.returncode == 0:
@@ -690,24 +601,24 @@ class CoreMixin:
     def maintenance_loop(self):
         last_probe_at = 0.0
         last_dns_failover_at = 0.0
-        while not self.stop_event.wait(MAINTENANCE_INTERVAL):
+        while not self._panel.stop_event.wait(MAINTENANCE_INTERVAL):
             try:
-                self.sync_traffic_state()
-                self.disable_auto_stopped_ports(reload_xray=True)
+                self._panel.sync_traffic_state()
+                self._panel.disable_auto_stopped_ports(reload_xray=True)
                 now_monotonic = time.monotonic()
                 if PROBE_ENABLED and now_monotonic - last_probe_at >= PROBE_INTERVAL:
-                    self.run_upstream_probes()
+                    self._panel.run_upstream_probes()
                     last_probe_at = now_monotonic
                 if (
-                    self.dns_failover_manager.config.enabled
-                    and now_monotonic - last_dns_failover_at >= self.dns_failover_manager.config.interval
+                    self._panel.dns_failover_manager.config.enabled
+                    and now_monotonic - last_dns_failover_at >= self._panel.dns_failover_manager.config.interval
                 ):
-                    self.run_dns_failover_check()
+                    self._panel.run_dns_failover_check()
                     last_dns_failover_at = now_monotonic
             except Exception:
                 continue
     def stop(self):
-        if self.stop_event.is_set():
+        if self._panel.stop_event.is_set():
             return
-        self.stop_event.set()
-        self.sync_traffic_state()
+        self._panel.stop_event.set()
+        self._panel.sync_traffic_state()

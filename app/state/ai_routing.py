@@ -11,18 +11,20 @@ from ..xray.ai_domain_manager import ensure_ai_domain_schema
 
 
 
-class AiRoutingMixin:
+class AiRoutingService:
+    def __init__(self, panel):
+        self._panel = panel
     def sync_data_plane_ai_state(self):
         result = {
             "report_synced": False,
             "snapshot_synced": False,
         }
-        if self.data_plane.supports_ai_report_pull():
-            result["report_synced"] = self.data_plane.sync_ai_report_from_remote()
-        if self.data_plane.supports_ai_domains_snapshot_pull():
-            snapshot = self.data_plane.read_ai_domains_snapshot_from_remote()
+        if self._panel.data_plane.supports_ai_report_pull():
+            result["report_synced"] = self._panel.data_plane.sync_ai_report_from_remote()
+        if self._panel.data_plane.supports_ai_domains_snapshot_pull():
+            snapshot = self._panel.data_plane.read_ai_domains_snapshot_from_remote()
             if snapshot.get("exists"):
-                self.replace_ai_domains_snapshot(snapshot.get("ai_domains", []))
+                self._panel.replace_ai_domains_snapshot(snapshot.get("ai_domains", []))
                 result["snapshot_synced"] = True
         return result
     def replace_ai_domains_snapshot(self, rows):
@@ -82,9 +84,9 @@ class AiRoutingMixin:
                 )
             return len(payloads)
 
-        return self.apply_state_update(operation)
+        return self._panel.apply_state_update(operation)
     def ai_domain_sync_mode_label(self):
-        mode = self.data_plane.mode
+        mode = self._panel.data_plane.mode
         if mode == "ssh":
             return "远端镜像"
         if mode in {"local", "docker"}:
@@ -127,7 +129,7 @@ class AiRoutingMixin:
             return []
         return [str(item).strip() for item in parsed if str(item).strip()]
     def serialize_ai_report_domain(self, item):
-        protocols = self.decode_json_text_list(item.get("protocols", []))
+        protocols = self._panel.decode_json_text_list(item.get("protocols", []))
         return {
             "domain": str(item.get("domain", "")).strip(),
             "hits": int(item.get("hits", 0) or 0),
@@ -137,30 +139,30 @@ class AiRoutingMixin:
             "protocols_display": ", ".join(protocols) if protocols else "暂无",
             "first_seen": str(item.get("first_seen") or "").strip() or None,
             "last_seen": str(item.get("last_seen") or "").strip() or None,
-            "first_seen_display": self.format_optional_display_time(item.get("first_seen")),
-            "last_seen_display": self.format_optional_display_time(item.get("last_seen")),
+            "first_seen_display": self._panel.format_optional_display_time(item.get("first_seen")),
+            "last_seen_display": self._panel.format_optional_display_time(item.get("last_seen")),
         }
     def serialize_ai_domain_snapshot_row(self, row):
         item = dict(row)
-        protocols = self.decode_json_text_list(item.get("last_protocols", "[]"))
+        protocols = self._panel.decode_json_text_list(item.get("last_protocols", "[]"))
         return {
             **item,
             "classification": str(item.get("classification", "ai") or "ai").strip() or "ai",
-            "source_display": self.ai_source_label(item.get("source")),
+            "source_display": self._panel.ai_source_label(item.get("source")),
             "protocols": protocols,
             "protocols_display": ", ".join(protocols) if protocols else "暂无",
-            "first_seen_display": self.format_optional_display_time(item.get("first_seen")),
-            "last_seen_display": self.format_optional_display_time(item.get("last_seen")),
-            "updated_at_display": self.format_optional_display_time(item.get("updated_at")),
-            "last_report_window_start_display": self.format_optional_display_time(
+            "first_seen_display": self._panel.format_optional_display_time(item.get("first_seen")),
+            "last_seen_display": self._panel.format_optional_display_time(item.get("last_seen")),
+            "updated_at_display": self._panel.format_optional_display_time(item.get("updated_at")),
+            "last_report_window_start_display": self._panel.format_optional_display_time(
                 item.get("last_report_window_start")
             ),
-            "last_report_window_end_display": self.format_optional_display_time(
+            "last_report_window_end_display": self._panel.format_optional_display_time(
                 item.get("last_report_window_end")
             ),
         }
     def read_ai_domain_report(self):
-        report_path = self.data_plane.config.source_ai_report_path or self.data_plane_ai_report_source_path()
+        report_path = self._panel.data_plane.config.source_ai_report_path or self._panel.data_plane_ai_report_source_path()
         if not report_path.is_file():
             return None
         try:
@@ -180,7 +182,7 @@ class AiRoutingMixin:
         for raw_item in payload.get("domains", []):
             if not isinstance(raw_item, dict):
                 continue
-            domain_item = self.serialize_ai_report_domain(raw_item)
+            domain_item = self._panel.serialize_ai_report_domain(raw_item)
             if domain_item["domain"]:
                 domains.append(domain_item)
         current_ai_domains = [item for item in domains if item["classification"] == "ai"]
@@ -194,11 +196,11 @@ class AiRoutingMixin:
 
         return {
             "generated_at": str(payload.get("generated_at") or "").strip() or None,
-            "generated_at_display": self.format_optional_display_time(payload.get("generated_at")),
+            "generated_at_display": self._panel.format_optional_display_time(payload.get("generated_at")),
             "window_start": str(payload.get("window_start") or "").strip() or None,
-            "window_start_display": self.format_optional_display_time(payload.get("window_start")),
+            "window_start_display": self._panel.format_optional_display_time(payload.get("window_start")),
             "window_end": str(payload.get("window_end") or "").strip() or None,
-            "window_end_display": self.format_optional_display_time(payload.get("window_end")),
+            "window_end_display": self._panel.format_optional_display_time(payload.get("window_end")),
             "unique_domains": int(payload.get("unique_domains", len(domains)) or 0),
             "ai_domain_count": len(current_ai_domains),
             "domains": domains,
@@ -206,10 +208,10 @@ class AiRoutingMixin:
             "protocols": [item for item in payload.get("protocols", []) if isinstance(item, dict)],
             "route_status": route_status_code,
             "route_status_reason": route_status_reason,
-            "route_status_label": self.ai_route_status_label(route_status_code, route_status_reason),
-            "route_status_tone": self.ai_route_status_tone(route_status_code),
+            "route_status_label": self._panel.ai_route_status_label(route_status_code, route_status_reason),
+            "route_status_tone": self._panel.ai_route_status_tone(route_status_code),
             "config_changed": bool(route_status.get("config_changed")),
-            "pending_domains_without_classifier": self.normalize_pending_domain_count(
+            "pending_domains_without_classifier": self._panel.normalize_pending_domain_count(
                 route_status.get("pending_domains_without_classifier", 0)
             ),
             "ai_target": ai_target,
@@ -223,7 +225,7 @@ class AiRoutingMixin:
         except (TypeError, ValueError):
             return 0
     def query_ai_domain_aggregate(self):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -237,10 +239,10 @@ class AiRoutingMixin:
             "total_ai_domains": int(row["total_ai_domains"] or 0),
             "total_hits": int(row["total_hits"] or 0),
             "updated_at": row["updated_at"],
-            "updated_at_display": self.format_optional_display_time(row["updated_at"]),
+            "updated_at_display": self._panel.format_optional_display_time(row["updated_at"]),
         }
     def query_top_ai_domains(self, limit=100):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -262,9 +264,9 @@ class AiRoutingMixin:
                 """,
                 (int(limit),),
             ).fetchall()
-        return [self.serialize_ai_domain_snapshot_row(row) for row in rows]
+        return [self._panel.serialize_ai_domain_snapshot_row(row) for row in rows]
     def query_ai_domain_source_breakdown(self):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -283,17 +285,17 @@ class AiRoutingMixin:
         return [
             {
                 "source": row["source"],
-                "source_display": self.ai_source_label(row["source"]),
+                "source_display": self._panel.ai_source_label(row["source"]),
                 "domain_count": int(row["domain_count"] or 0),
                 "total_hits": int(row["total_hits"] or 0),
                 "updated_at": row["updated_at"],
-                "updated_at_display": self.format_optional_display_time(row["updated_at"]),
+                "updated_at_display": self._panel.format_optional_display_time(row["updated_at"]),
             }
             for row in rows
         ]
     def ai_routing_status(self, sync_error=""):
-        report = self.read_ai_domain_report()
-        aggregate = self.query_ai_domain_aggregate()
+        report = self._panel.read_ai_domain_report()
+        aggregate = self._panel.query_ai_domain_aggregate()
         configured = AI_ROUTING_ENABLED
         if not configured:
             status_code = "disabled"
@@ -316,20 +318,20 @@ class AiRoutingMixin:
             "status": status_code,
             "status_label": status_label,
             "status_tone": tone,
-            "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "sync_mode_label": self._panel.ai_domain_sync_mode_label(),
             "report_generated_at_display": report["generated_at_display"] if report else "暂无",
             "current_ai_domains": report["ai_domain_count"] if report else 0,
             "total_ai_domains": aggregate["total_ai_domains"],
             "sync_error": str(sync_error or "").strip(),
         }
     def query_ai_domain_overview(self, sync_error=""):
-        report = self.read_ai_domain_report()
-        aggregate = self.query_ai_domain_aggregate()
+        report = self._panel.read_ai_domain_report()
+        aggregate = self._panel.query_ai_domain_aggregate()
         return {
             "available": AI_ROUTING_ENABLED and bool(report or aggregate["total_ai_domains"] > 0),
             "enabled": AI_ROUTING_ENABLED,
-            "sync_mode": self.data_plane.mode,
-            "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "sync_mode": self._panel.data_plane.mode,
+            "sync_mode_label": self._panel.ai_domain_sync_mode_label(),
             "sync_error": str(sync_error or "").strip(),
             "report_available": report is not None,
             "current_ai_domains": report["ai_domain_count"] if report else 0,
@@ -345,15 +347,15 @@ class AiRoutingMixin:
             "aggregate_updated_at_display": aggregate["updated_at_display"],
         }
     def get_ai_domain_dashboard(self, sync_error=""):
-        report = self.read_ai_domain_report()
-        aggregate = self.query_ai_domain_aggregate()
-        top_ai_domains = self.query_top_ai_domains()
-        source_breakdown = self.query_ai_domain_source_breakdown()
+        report = self._panel.read_ai_domain_report()
+        aggregate = self._panel.query_ai_domain_aggregate()
+        top_ai_domains = self._panel.query_top_ai_domains()
+        source_breakdown = self._panel.query_ai_domain_source_breakdown()
         return {
             "available": AI_ROUTING_ENABLED and bool(report or top_ai_domains),
             "enabled": AI_ROUTING_ENABLED,
-            "sync_mode": self.data_plane.mode,
-            "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "sync_mode": self._panel.data_plane.mode,
+            "sync_mode_label": self._panel.ai_domain_sync_mode_label(),
             "sync_error": str(sync_error or "").strip(),
             "report": (
                 report

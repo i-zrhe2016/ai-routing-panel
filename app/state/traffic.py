@@ -14,30 +14,32 @@ from ..helpers import (
 from ._constants import XRAY_ACCESS_LOG_LINE_RE
 
 
-class TrafficMixin:
+class TrafficService:
+    def __init__(self, panel):
+        self._panel = panel
     def sync_traffic_state(self):
-        with self.write_lock:
-            return self.sync_traffic_state_locked()
+        with self._panel.write_lock:
+            return self._panel.sync_traffic_state_locked()
     def sync_traffic_state_locked(self):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            log_updates = self.sync_xray_access_log_in_tx(conn)
-            byte_updates = self.sync_xray_traffic_stats_in_tx(conn)
+            log_updates = self._panel.sync_xray_access_log_in_tx(conn)
+            byte_updates = self._panel.sync_xray_traffic_stats_in_tx(conn)
             conn.commit()
             return {
                 "connection_updates": log_updates,
                 "byte_updates": byte_updates,
             }
     def sync_xray_access_log_in_tx(self, conn):
-        current_offset = int(self.get_state(conn, "xray_access_log_offset", "0"))
-        recorded_inode = self.get_state(conn, "xray_access_log_inode", "")
+        current_offset = int(self._panel.get_state(conn, "xray_access_log_offset", "0"))
+        recorded_inode = self._panel.get_state(conn, "xray_access_log_inode", "")
         current_inode = ""
         new_offset = 0
         lines = []
 
-        if self.data_plane.supports_logs():
+        if self._panel.data_plane.supports_logs():
             try:
-                payload = self.data_plane.read_access_log_delta(recorded_inode, current_offset)
+                payload = self._panel.data_plane.read_access_log_delta(recorded_inode, current_offset)
             except RuntimeError:
                 return 0
             if not payload["exists"]:
@@ -61,7 +63,7 @@ class TrafficMixin:
 
         aggregates = {}
         for line in lines:
-            parsed = self.parse_xray_access_log_line(line)
+            parsed = self._panel.parse_xray_access_log_line(line)
             if parsed is None:
                 continue
             listen_port, stat_date, seen_at = parsed
@@ -111,8 +113,8 @@ class TrafficMixin:
                 ),
             )
 
-        self.set_state(conn, "xray_access_log_inode", current_inode)
-        self.set_state(conn, "xray_access_log_offset", str(new_offset))
+        self._panel.set_state(conn, "xray_access_log_inode", current_inode)
+        self._panel.set_state(conn, "xray_access_log_offset", str(new_offset))
         return len(aggregates)
     def parse_xray_access_log_line(self, line):
         match = XRAY_ACCESS_LOG_LINE_RE.match(line.strip())
@@ -138,7 +140,7 @@ class TrafficMixin:
         stat_date = seen_at[:10]
         return listen_port, stat_date, seen_at
     def sync_xray_traffic_stats_in_tx(self, conn):
-        stats = self.read_xray_traffic_stats()
+        stats = self._panel.read_xray_traffic_stats()
         if not stats:
             return 0
 
@@ -259,4 +261,4 @@ class TrafficMixin:
             )
             return restored
 
-        return self.apply_mutation(operation)
+        return self._panel.apply_mutation(operation)

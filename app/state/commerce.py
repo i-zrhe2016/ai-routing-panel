@@ -29,7 +29,9 @@ from ..helpers import (
 from ._constants import PLAN_SLUG_RE
 
 
-class CommerceMixin:
+class CommerceService:
+    def __init__(self, panel):
+        self._panel = panel
     def ensure_commerce_schema(self, conn):
         conn.executescript(
             """
@@ -117,7 +119,7 @@ class CommerceMixin:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_order_payment_submissions_order_id ON order_payment_submissions(order_id)"
         )
-        self.ensure_commerce_settings_in_tx(conn)
+        self._panel.ensure_commerce_settings_in_tx(conn)
     def ensure_commerce_settings_in_tx(self, conn):
         defaults = {
             "commerce_payment_qr_code_url": "",
@@ -125,20 +127,20 @@ class CommerceMixin:
             "commerce_order_expiry_hours": str(COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT),
         }
         for key, value in defaults.items():
-            if self.get_state(conn, key, None) is None:
-                self.set_state(conn, key, value)
+            if self._panel.get_state(conn, key, None) is None:
+                self._panel.set_state(conn, key, value)
     def get_commerce_settings(self):
-        with self.connect() as conn:
-            self.ensure_commerce_settings_in_tx(conn)
-            return self.serialize_commerce_settings(conn)
+        with self._panel.connect() as conn:
+            self._panel.ensure_commerce_settings_in_tx(conn)
+            return self._panel.serialize_commerce_settings(conn)
     def serialize_commerce_settings(self, conn):
-        payment_qr_code_url = str(self.get_state(conn, "commerce_payment_qr_code_url", "") or "").strip()
+        payment_qr_code_url = str(self._panel.get_state(conn, "commerce_payment_qr_code_url", "") or "").strip()
         payment_instructions = str(
-            self.get_state(conn, "commerce_payment_instructions", "") or ""
+            self._panel.get_state(conn, "commerce_payment_instructions", "") or ""
         ).strip()
         try:
             order_expiry_hours = int(
-                str(self.get_state(conn, "commerce_order_expiry_hours", COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT) or COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT)
+                str(self._panel.get_state(conn, "commerce_order_expiry_hours", COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT) or COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT)
             )
         except ValueError:
             order_expiry_hours = COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT
@@ -166,12 +168,12 @@ class CommerceMixin:
             raise ValidationError("订单有效期必须是正整数小时。")
 
         def operation(conn):
-            self.set_state(conn, "commerce_payment_qr_code_url", payment_qr_code_url)
-            self.set_state(conn, "commerce_payment_instructions", instructions)
-            self.set_state(conn, "commerce_order_expiry_hours", str(order_expiry_hours))
-            return self.serialize_commerce_settings(conn)
+            self._panel.set_state(conn, "commerce_payment_qr_code_url", payment_qr_code_url)
+            self._panel.set_state(conn, "commerce_payment_instructions", instructions)
+            self._panel.set_state(conn, "commerce_order_expiry_hours", str(order_expiry_hours))
+            return self._panel.serialize_commerce_settings(conn)
 
-        return self.apply_state_update(operation)
+        return self._panel.apply_state_update(operation)
     def validate_customer_password(self, password, confirm_password=""):
         raw_password = str(password or "")
         if len(raw_password) < 8:
@@ -202,7 +204,7 @@ class CommerceMixin:
         if len(description) > 1000:
             raise ValidationError("套餐说明不能超过 1000 个字符。")
         slug_source = str(payload.get("slug", "") or "").strip() or name
-        slug = self.slugify_plan_value(slug_source)
+        slug = self._panel.slugify_plan_value(slug_source)
 
         try:
             price_fen = int(str(payload.get("price_fen", "") or "").strip())
@@ -235,7 +237,7 @@ class CommerceMixin:
             "currency": "CNY",
             "duration_days": duration_days,
             "traffic_limit_bytes": traffic_limit_bytes,
-            "enabled": 1 if self.parse_bool_like(payload.get("enabled", True)) else 0,
+            "enabled": 1 if self._panel.parse_bool_like(payload.get("enabled", True)) else 0,
             "sort_order": sort_order,
         }
     def serialize_plan_row(self, row):
@@ -246,7 +248,7 @@ class CommerceMixin:
         item["status_label"] = "上架中" if item["enabled"] else "已下架"
         return item
     def query_plans(self, public_only=False):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             sql = """
                 SELECT
                     id,
@@ -268,9 +270,9 @@ class CommerceMixin:
                 sql += " WHERE enabled = 1"
             sql += " ORDER BY enabled DESC, sort_order ASC, id ASC"
             rows = conn.execute(sql, params).fetchall()
-        return [self.serialize_plan_row(row) for row in rows]
+        return [self._panel.serialize_plan_row(row) for row in rows]
     def get_plan_by_slug(self, slug, public_only=False):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             sql = """
                 SELECT
                     id,
@@ -294,9 +296,9 @@ class CommerceMixin:
             row = conn.execute(sql, params).fetchone()
         if row is None:
             return None
-        return self.serialize_plan_row(row)
+        return self._panel.serialize_plan_row(row)
     def get_plan_by_id(self, plan_id):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -319,7 +321,7 @@ class CommerceMixin:
             ).fetchone()
         if row is None:
             return None
-        return self.serialize_plan_row(row)
+        return self._panel.serialize_plan_row(row)
     def create_plan(self, payload):
         def operation(conn):
             now = utc_iso_now()
@@ -345,7 +347,7 @@ class CommerceMixin:
                 ),
             )
 
-        self.apply_state_update(operation)
+        self._panel.apply_state_update(operation)
     def update_plan(self, plan_id, payload):
         def operation(conn):
             existing = conn.execute("SELECT id FROM plans WHERE id = ?", (plan_id,)).fetchone()
@@ -373,10 +375,10 @@ class CommerceMixin:
                 ),
             )
 
-        self.apply_state_update(operation)
+        self._panel.apply_state_update(operation)
     def create_customer(self, email, password):
         normalized_email = normalize_customer_email(email)
-        raw_password = self.validate_customer_password(password)
+        raw_password = self._panel.validate_customer_password(password)
 
         def operation(conn):
             now = utc_iso_now()
@@ -390,10 +392,10 @@ class CommerceMixin:
                 (normalized_email, password_hash, now, now),
             )
 
-        self.apply_state_update(operation)
+        self._panel.apply_state_update(operation)
     def get_customer_by_email(self, email):
         normalized_email = normalize_customer_email(email)
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT id, email, password_hash, status, created_at, updated_at, last_login_at
@@ -405,7 +407,7 @@ class CommerceMixin:
             ).fetchone()
         return dict(row) if row is not None else None
     def get_customer_by_id(self, customer_id):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT id, email, password_hash, status, created_at, updated_at, last_login_at
@@ -423,7 +425,7 @@ class CommerceMixin:
                 (utc_iso_now(), utc_iso_now(), customer_id),
             )
 
-        self.apply_state_update(operation)
+        self._panel.apply_state_update(operation)
     def order_status_label(self, status):
         mapping = {
             "pending_payment": "待付款",
@@ -453,7 +455,7 @@ class CommerceMixin:
                 return candidate
         raise RuntimeError("无法生成唯一订单号。")
     def compute_order_deadline_in_tx(self, conn, base_dt=None):
-        settings = self.serialize_commerce_settings(conn)
+        settings = self._panel.serialize_commerce_settings(conn)
         expires_dt = (base_dt or utc_now()) + timedelta(hours=int(settings["order_expiry_hours"]))
         return expires_dt.isoformat(timespec="seconds")
     def expire_pending_orders_in_tx(self, conn):
@@ -470,13 +472,13 @@ class CommerceMixin:
         )
     def expire_pending_orders(self):
         def operation(conn):
-            self.expire_pending_orders_in_tx(conn)
+            self._panel.expire_pending_orders_in_tx(conn)
 
-        self.apply_state_update(operation)
+        self._panel.apply_state_update(operation)
     def create_order(self, customer_id, plan_id, kind="new_purchase", service_subscription_id=None):
         def operation(conn):
             nonlocal service_subscription_id
-            self.expire_pending_orders_in_tx(conn)
+            self._panel.expire_pending_orders_in_tx(conn)
             customer = conn.execute(
                 "SELECT id, email, status FROM customers WHERE id = ? LIMIT 1",
                 (customer_id,),
@@ -505,7 +507,7 @@ class CommerceMixin:
             if kind_text == "renewal":
                 if service_subscription_id is None:
                     raise ValidationError("续费订单缺少服务实例。")
-                service_row = self.get_service_subscription_row_in_tx(conn, service_subscription_id, customer_id=customer_id)
+                service_row = self._panel.get_service_subscription_row_in_tx(conn, service_subscription_id, customer_id=customer_id)
                 if service_row is None:
                     raise ValidationError("服务实例不存在。")
                 if int(service_row["plan_id"]) != int(plan["id"]):
@@ -528,7 +530,7 @@ class CommerceMixin:
                 service_subscription_id = None
 
             now_text = utc_iso_now()
-            order_no = self.generate_unique_order_no(conn)
+            order_no = self._panel.generate_unique_order_no(conn)
             conn.execute(
                 """
                 INSERT INTO orders (
@@ -549,14 +551,14 @@ class CommerceMixin:
                     plan["currency"],
                     plan["duration_days"],
                     plan["traffic_limit_bytes"],
-                    self.compute_order_deadline_in_tx(conn),
+                    self._panel.compute_order_deadline_in_tx(conn),
                     now_text,
                     now_text,
                 ),
             )
             return order_no
 
-        return self.apply_state_update(operation)
+        return self._panel.apply_state_update(operation)
     def payment_proof_extension_from_bytes(self, payload):
         if payload.startswith(b"\x89PNG\r\n\x1a\n"):
             return "png"
@@ -571,7 +573,7 @@ class CommerceMixin:
             raise ValidationError("请上传支付截图。")
         if len(content) > PAYMENT_PROOF_MAX_BYTES:
             raise ValidationError(f"支付截图不能超过 {human_bytes(PAYMENT_PROOF_MAX_BYTES)}。")
-        extension = self.payment_proof_extension_from_bytes(content)
+        extension = self._panel.payment_proof_extension_from_bytes(content)
         if extension not in {"png", "jpg", "webp"}:
             raise ValidationError("支付截图只支持 PNG、JPG、WEBP。")
         target_dir = PAYMENT_PROOFS_DIR / str(order_no)
@@ -585,10 +587,10 @@ class CommerceMixin:
         note = str(payer_note or "").strip()
         if len(note) > 300:
             raise ValidationError("付款备注不能超过 300 个字符。")
-        relative_path = self.save_payment_proof_file(order_no, file_storage)
+        relative_path = self._panel.save_payment_proof_file(order_no, file_storage)
 
         def operation(conn):
-            self.expire_pending_orders_in_tx(conn)
+            self._panel.expire_pending_orders_in_tx(conn)
             order = conn.execute(
                 """
                 SELECT id, order_no, customer_id, status
@@ -621,15 +623,15 @@ class CommerceMixin:
             )
 
         try:
-            self.apply_state_update(operation)
+            self._panel.apply_state_update(operation)
         except Exception:
             (PAYMENT_PROOFS_DIR.parent / relative_path).unlink(missing_ok=True)
             raise
     def serialize_order_row(self, row):
         item = dict(row)
         latest_submission_id = item.get("latest_submission_id")
-        item["status_label"] = self.order_status_label(item.get("status"))
-        item["status_tone"] = self.order_status_tone(item.get("status"))
+        item["status_label"] = self._panel.order_status_label(item.get("status"))
+        item["status_tone"] = self._panel.order_status_tone(item.get("status"))
         item["price_display"] = f"¥{int(item.get('price_fen_snapshot') or 0) / 100:.2f}"
         item["traffic_limit_display"] = human_bytes(item.get("traffic_limit_bytes_snapshot") or 0)
         item["expires_at_display"] = format_display_time(item.get("expires_at")) if item.get("expires_at") else "暂无"
@@ -698,22 +700,22 @@ class CommerceMixin:
                 )
         """
     def query_customer_orders(self, customer_id):
-        self.expire_pending_orders()
-        with self.connect() as conn:
+        self._panel.expire_pending_orders()
+        with self._panel.connect() as conn:
             rows = conn.execute(
-                self.get_orders_base_query()
+                self._panel.get_orders_base_query()
                 + """
                 WHERE o.customer_id = ?
                 ORDER BY o.id DESC
                 """,
                 (customer_id,),
             ).fetchall()
-        return [self.serialize_order_row(row) for row in rows]
+        return [self._panel.serialize_order_row(row) for row in rows]
     def get_customer_order(self, customer_id, order_no):
-        self.expire_pending_orders()
-        with self.connect() as conn:
+        self._panel.expire_pending_orders()
+        with self._panel.connect() as conn:
             row = conn.execute(
-                self.get_orders_base_query()
+                self._panel.get_orders_base_query()
                 + """
                 WHERE o.customer_id = ? AND o.order_no = ?
                 LIMIT 1
@@ -722,23 +724,23 @@ class CommerceMixin:
             ).fetchone()
         if row is None:
             return None
-        return self.serialize_order_row(row)
+        return self._panel.serialize_order_row(row)
     def query_admin_orders(self, status_filter=""):
-        self.expire_pending_orders()
-        with self.connect() as conn:
-            sql = self.get_orders_base_query()
+        self._panel.expire_pending_orders()
+        with self._panel.connect() as conn:
+            sql = self._panel.get_orders_base_query()
             params = []
             if status_filter:
                 sql += " WHERE o.status = ?"
                 params.append(status_filter)
             sql += " ORDER BY o.id DESC LIMIT 100"
             rows = conn.execute(sql, params).fetchall()
-        return [self.serialize_order_row(row) for row in rows]
+        return [self._panel.serialize_order_row(row) for row in rows]
     def get_admin_order(self, order_id):
-        self.expire_pending_orders()
-        with self.connect() as conn:
+        self._panel.expire_pending_orders()
+        with self._panel.connect() as conn:
             row = conn.execute(
-                self.get_orders_base_query()
+                self._panel.get_orders_base_query()
                 + """
                 WHERE o.id = ?
                 LIMIT 1
@@ -747,9 +749,9 @@ class CommerceMixin:
             ).fetchone()
         if row is None:
             return None
-        return self.serialize_order_row(row)
+        return self._panel.serialize_order_row(row)
     def get_payment_submission_record(self, submission_id):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -766,8 +768,8 @@ class CommerceMixin:
             ).fetchone()
         return dict(row) if row is not None else None
     def query_commerce_overview(self):
-        self.expire_pending_orders()
-        with self.connect() as conn:
+        self._panel.expire_pending_orders()
+        with self._panel.connect() as conn:
             customer_count = int(conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0])
             enabled_plan_count = int(conn.execute("SELECT COUNT(*) FROM plans WHERE enabled = 1").fetchone()[0])
             service_count = int(conn.execute("SELECT COUNT(*) FROM service_subscriptions").fetchone()[0])
@@ -841,15 +843,15 @@ class CommerceMixin:
         item["last_seen_display"] = format_display_time(item.get("last_seen")) if item.get("last_seen") else "暂无"
         return item
     def query_customer_service_subscriptions(self, customer_id):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             rows = conn.execute(
                 "SELECT id FROM service_subscriptions WHERE customer_id = ? ORDER BY id DESC",
                 (customer_id,),
             ).fetchall()
-            return [self.get_service_subscription_row_in_tx(conn, row["id"], customer_id=customer_id) for row in rows]
+            return [self._panel.get_service_subscription_row_in_tx(conn, row["id"], customer_id=customer_id) for row in rows]
     def get_customer_service_subscription(self, customer_id, service_subscription_id):
-        with self.connect() as conn:
-            return self.get_service_subscription_row_in_tx(conn, service_subscription_id, customer_id=customer_id)
+        with self._panel.connect() as conn:
+            return self._panel.get_service_subscription_row_in_tx(conn, service_subscription_id, customer_id=customer_id)
     def allocate_auto_port_in_tx(self, conn):
         if COMMERCE_AUTO_PORT_START is None or COMMERCE_AUTO_PORT_END is None:
             raise ValidationError("商业化自动分配端口范围未配置。")
@@ -900,12 +902,12 @@ class CommerceMixin:
         if len(note_text) > 300:
             raise ValidationError("审核备注不能超过 300 个字符。")
 
-        with self.write_lock:
-            self.sync_traffic_state_locked()
-            with self.connect() as conn:
+        with self._panel.write_lock:
+            self._panel.sync_traffic_state_locked()
+            with self._panel.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
-                    self.expire_pending_orders_in_tx(conn)
+                    self._panel.expire_pending_orders_in_tx(conn)
                     order = conn.execute(
                         """
                         SELECT
@@ -924,11 +926,11 @@ class CommerceMixin:
                         raise ValidationError("当前订单状态不允许审核开通。")
 
                     now_text = utc_iso_now()
-                    service_expires_at = self.compute_service_expiry(order["duration_days_snapshot"])
+                    service_expires_at = self._panel.compute_service_expiry(order["duration_days_snapshot"])
                     service_subscription_id = order["service_subscription_id"]
 
                     if order["kind"] == "new_purchase":
-                        listen_port = self.allocate_auto_port_in_tx(conn)
+                        listen_port = self._panel.allocate_auto_port_in_tx(conn)
                         conn.execute(
                             """
                             INSERT INTO ports (
@@ -943,13 +945,13 @@ class CommerceMixin:
                                 listen_port,
                                 DEFAULT_UPSTREAM_HOST,
                                 DEFAULT_UPSTREAM_PORT,
-                                self.generate_unique_port_token(conn, "tenant_token"),
-                                self.generate_unique_port_token(conn, "subscription_token"),
-                                self.generate_unique_tenant_username(conn),
+                                self._panel.generate_unique_port_token(conn, "tenant_token"),
+                                self._panel.generate_unique_port_token(conn, "subscription_token"),
+                                self._panel.generate_unique_tenant_username(conn),
                                 generate_tenant_password(),
                                 service_expires_at,
                                 order["traffic_limit_bytes_snapshot"],
-                                self.build_service_note(order["customer_email"], order["plan_name_snapshot"]),
+                                self._panel.build_service_note(order["customer_email"], order["plan_name_snapshot"]),
                                 order["customer_id"],
                                 order["id"],
                                 now_text,
@@ -983,7 +985,7 @@ class CommerceMixin:
                             (service_subscription_id, port_id),
                         )
                     else:
-                        service_row = self.get_service_subscription_row_in_tx(
+                        service_row = self._panel.get_service_subscription_row_in_tx(
                             conn,
                             order["service_subscription_id"],
                             customer_id=order["customer_id"],
@@ -1004,7 +1006,7 @@ class CommerceMixin:
                                 port_id,
                             ),
                         )
-                        self.reset_port_usage_in_tx(conn, service_row["listen_port"])
+                        self._panel.reset_port_usage_in_tx(conn, service_row["listen_port"])
                         conn.execute(
                             """
                             UPDATE service_subscriptions
@@ -1020,7 +1022,7 @@ class CommerceMixin:
                         )
                         service_subscription_id = order["service_subscription_id"]
 
-                    self.mark_latest_payment_submission_reviewed_in_tx(conn, order["id"], "approved", note_text)
+                    self._panel.mark_latest_payment_submission_reviewed_in_tx(conn, order["id"], "approved", note_text)
                     conn.execute(
                         """
                         UPDATE orders
@@ -1033,8 +1035,8 @@ class CommerceMixin:
                         """,
                         (now_text, service_subscription_id, now_text, order["id"]),
                     )
-                    self.disable_auto_stopped_ports_in_tx(conn)
-                    self.persist_and_reload(conn, reload_xray=True)
+                    self._panel.disable_auto_stopped_ports_in_tx(conn)
+                    self._panel.persist_and_reload(conn, reload_xray=True)
                 except Exception:
                     conn.rollback()
                     raise
@@ -1046,7 +1048,7 @@ class CommerceMixin:
             raise ValidationError("驳回原因不能超过 300 个字符。")
 
         def operation(conn):
-            self.expire_pending_orders_in_tx(conn)
+            self._panel.expire_pending_orders_in_tx(conn)
             order = conn.execute(
                 "SELECT id, status FROM orders WHERE id = ? LIMIT 1",
                 (order_id,),
@@ -1055,7 +1057,7 @@ class CommerceMixin:
                 raise ValidationError("订单不存在。")
             if order["status"] != "payment_submitted":
                 raise ValidationError("当前订单状态不允许驳回。")
-            self.mark_latest_payment_submission_reviewed_in_tx(conn, order["id"], "rejected", note_text)
+            self._panel.mark_latest_payment_submission_reviewed_in_tx(conn, order["id"], "rejected", note_text)
             conn.execute(
                 """
                 UPDATE orders
@@ -1065,14 +1067,14 @@ class CommerceMixin:
                 (note_text, utc_iso_now(), order["id"]),
             )
 
-        self.apply_state_update(operation)
+        self._panel.apply_state_update(operation)
     def cancel_order(self, order_id, review_note=""):
         note_text = str(review_note or "").strip()
         if len(note_text) > 300:
             raise ValidationError("取消备注不能超过 300 个字符。")
 
         def operation(conn):
-            self.expire_pending_orders_in_tx(conn)
+            self._panel.expire_pending_orders_in_tx(conn)
             order = conn.execute(
                 "SELECT id, status FROM orders WHERE id = ? LIMIT 1",
                 (order_id,),
@@ -1090,4 +1092,4 @@ class CommerceMixin:
                 (utc_iso_now(), note_text, utc_iso_now(), order["id"]),
             )
 
-        self.apply_state_update(operation)
+        self._panel.apply_state_update(operation)

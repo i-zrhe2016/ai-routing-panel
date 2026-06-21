@@ -24,10 +24,12 @@ from ..helpers import (
 
 
 
-class PortsMixin:
+class PortsService:
+    def __init__(self, panel):
+        self._panel = panel
     def query_ports(self):
         today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -51,7 +53,7 @@ class PortsMixin:
                 (today,),
             ).fetchall()
 
-        return [self.serialize_port_row(row) for row in rows]
+        return [self._panel.serialize_port_row(row) for row in rows]
     def serialize_port_row(self, row):
         item = dict(row)
         item["expires_at_display"] = format_display_time(item["expires_at"])
@@ -94,22 +96,22 @@ class PortsMixin:
         item["status_label"] = status["label"]
         return item
     def get_subscription_token(self):
-        with self.write_lock:
-            with self.connect() as conn:
+        with self._panel.write_lock:
+            with self._panel.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                token = self.ensure_subscription_token_in_tx(conn)
+                token = self._panel.ensure_subscription_token_in_tx(conn)
                 conn.commit()
                 return token
     def rotate_subscription_token(self):
-        with self.write_lock:
-            with self.connect() as conn:
+        with self._panel.write_lock:
+            with self._panel.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 token = generate_subscription_token()
-                self.set_state(conn, "subscription_token", token)
+                self._panel.set_state(conn, "subscription_token", token)
                 conn.commit()
                 return token
     def get_port_subscription_record(self, listen_port):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -191,9 +193,9 @@ class PortsMixin:
                     payload["listen_port"],
                     payload["upstream_host"],
                     payload["upstream_port"],
-                    self.generate_unique_port_token(conn, "tenant_token"),
-                    self.generate_unique_port_token(conn, "subscription_token"),
-                    self.generate_unique_tenant_username(conn),
+                    self._panel.generate_unique_port_token(conn, "tenant_token"),
+                    self._panel.generate_unique_port_token(conn, "subscription_token"),
+                    self._panel.generate_unique_tenant_username(conn),
                     generate_tenant_password(),
                     payload["expires_at"],
                     payload["traffic_limit_bytes"],
@@ -203,7 +205,7 @@ class PortsMixin:
                 ),
             )
 
-        self.apply_mutation(operation)
+        self._panel.apply_mutation(operation)
     def update_port(self, port_id, payload):
         def operation(conn):
             now = utc_iso_now()
@@ -228,7 +230,7 @@ class PortsMixin:
                 ),
             )
 
-        self.apply_mutation(operation)
+        self._panel.apply_mutation(operation)
     def toggle_port(self, port_id):
         def operation(conn):
             row = conn.execute(
@@ -243,7 +245,7 @@ class PortsMixin:
                 if expires_at <= utc_now():
                     raise ValidationError("端口已过期，请先修改到期时间再启用。")
             if next_enabled and row["traffic_limit_bytes"] is not None:
-                usage_bytes = self.get_port_usage_bytes(conn, row["listen_port"])
+                usage_bytes = self._panel.get_port_usage_bytes(conn, row["listen_port"])
                 if usage_bytes >= int(row["traffic_limit_bytes"]):
                     raise ValidationError("端口已达到流量上限，请先提高上限再启用。")
             conn.execute(
@@ -251,7 +253,7 @@ class PortsMixin:
                 (next_enabled, utc_iso_now(), port_id),
             )
 
-        self.apply_mutation(operation)
+        self._panel.apply_mutation(operation)
     def delete_port(self, port_id):
         def operation(conn):
             row = conn.execute(
@@ -262,43 +264,43 @@ class PortsMixin:
                 raise ValidationError("端口记录不存在。")
             if row["customer_id"] is not None or row["service_subscription_id"] is not None:
                 raise ValidationError("商业化服务端口不能直接删除，请通过业务流程处理。")
-            self.delete_port_in_tx(conn, port_id, row["listen_port"])
+            self._panel.delete_port_in_tx(conn, port_id, row["listen_port"])
 
-        self.apply_mutation(operation)
+        self._panel.apply_mutation(operation)
     def disable_expired_ports(self, reload_xray=True):
-        return self.disable_auto_stopped_ports(reload_xray=reload_xray)
+        return self._panel.disable_auto_stopped_ports(reload_xray=reload_xray)
     def rotate_port_tenant_token(self, port_id):
         def operation(conn):
             row = conn.execute("SELECT id FROM ports WHERE id = ?", (port_id,)).fetchone()
             if row is None:
                 raise ValidationError("端口记录不存在。")
-            token = self.generate_unique_port_token(conn, "tenant_token")
+            token = self._panel.generate_unique_port_token(conn, "tenant_token")
             conn.execute(
                 "UPDATE ports SET tenant_token = ?, updated_at = ? WHERE id = ?",
                 (token, utc_iso_now(), port_id),
             )
             return token
 
-        return self.apply_state_update(operation)
+        return self._panel.apply_state_update(operation)
     def rotate_port_subscription_token(self, port_id):
         def operation(conn):
             row = conn.execute("SELECT id FROM ports WHERE id = ?", (port_id,)).fetchone()
             if row is None:
                 raise ValidationError("端口记录不存在。")
-            token = self.generate_unique_port_token(conn, "subscription_token")
+            token = self._panel.generate_unique_port_token(conn, "subscription_token")
             conn.execute(
                 "UPDATE ports SET subscription_token = ?, updated_at = ? WHERE id = ?",
                 (token, utc_iso_now(), port_id),
             )
             return token
 
-        return self.apply_state_update(operation)
+        return self._panel.apply_state_update(operation)
     def rotate_port_tenant_credentials(self, port_id):
         def operation(conn):
             row = conn.execute("SELECT id FROM ports WHERE id = ?", (port_id,)).fetchone()
             if row is None:
                 raise ValidationError("端口记录不存在。")
-            username = self.generate_unique_tenant_username(conn)
+            username = self._panel.generate_unique_tenant_username(conn)
             password = generate_tenant_password()
             conn.execute(
                 "UPDATE ports SET tenant_username = ?, tenant_password = ?, updated_at = ? WHERE id = ?",
@@ -306,7 +308,7 @@ class PortsMixin:
             )
             return {"tenant_username": username, "tenant_password": password}
 
-        return self.apply_state_update(operation)
+        return self._panel.apply_state_update(operation)
     def get_port_usage_bytes(self, conn, listen_port):
         row = conn.execute(
             """
@@ -339,11 +341,11 @@ class PortsMixin:
             (utc_iso_now(),),
         ).fetchall()
         for row in rows:
-            self.delete_port_in_tx(conn, row["id"], row["listen_port"])
+            self._panel.delete_port_in_tx(conn, row["id"], row["listen_port"])
         return len(rows)
     def get_port_by_tenant_token(self, tenant_token):
         today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -370,10 +372,10 @@ class PortsMixin:
 
         if row is None:
             return None
-        return self.serialize_port_row(row)
+        return self._panel.serialize_port_row(row)
     def get_port_by_tenant_username(self, tenant_username):
         today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -400,9 +402,9 @@ class PortsMixin:
 
         if row is None:
             return None
-        return self.serialize_port_row(row)
+        return self._panel.serialize_port_row(row)
     def get_port_subscription_record_by_token(self, subscription_token):
-        with self.connect() as conn:
+        with self._panel.connect() as conn:
             row = conn.execute(
                 """
                 SELECT
