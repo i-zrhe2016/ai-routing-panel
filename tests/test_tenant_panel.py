@@ -209,6 +209,14 @@ class TenantPanelTest(unittest.TestCase):
             follow_redirects=follow_redirects,
         )
 
+    def csrf_token(self):
+        with self.client.session_transaction() as session:
+            token = session.get("csrf_token")
+            if not token:
+                token = "test-csrf-token"
+                session["csrf_token"] = token
+            return token
+
     def test_tenant_panel_login_is_isolated_per_port(self):
         port_a = self.create_port(31001, "Tenant A")
         port_b = self.create_port(31002, "Tenant B")
@@ -221,9 +229,18 @@ class TenantPanelTest(unittest.TestCase):
         self.assertNotEqual(port_a["subscription_token"], port_b["subscription_token"])
         self.assertNotEqual(port_a["tenant_username"], port_b["tenant_username"])
 
-        response = self.client.get(f"/tenant/{port_a['tenant_token']}")
-        self.assertEqual(response.status_code, 303)
-        self.assert_login_redirect_target(response, f"/tenant/{port_a['tenant_token']}")
+        # The /tenant/<token> page is now a public portal shell (token mode); the
+        # SPA boots with the tenant_token and fetches the gated subscription API.
+        shell = self.client.get(f"/tenant/{port_a['tenant_token']}")
+        self.assertEqual(shell.status_code, 200)
+        shell_body = shell.get_data(as_text=True)
+        self.assertIn(port_a["tenant_token"], shell_body)
+        self.assertIn("/static/portal/portal.js", shell_body)
+
+        # Without a tenant session the subscription API returns a JSON 401.
+        unauth = self.client.get(f"/api/tenant/{port_a['tenant_token']}/subscription")
+        self.assertEqual(unauth.status_code, 401)
+        self.assertFalse(unauth.get_json()["ok"])
 
         legacy_login = self.client.get(f"/tenant/{port_a['tenant_token']}/login")
         self.assertEqual(legacy_login.status_code, 303)
@@ -233,25 +250,35 @@ class TenantPanelTest(unittest.TestCase):
         self.assertEqual(login_page.status_code, 200)
         self.assertIn("统一登录入口", login_page.get_data(as_text=True))
 
-        wrong_login = self.tenant_login(port_a["tenant_token"], port_a["tenant_username"], "wrong-password")
-        self.assertEqual(wrong_login.status_code, 401)
-
-        tenant_login = self.tenant_login(
-            port_a["tenant_token"],
-            port_a["tenant_username"],
-            port_a["tenant_password"],
-            follow_redirects=True,
+        # Wrong credentials via the per-port JSON login -> 401.
+        wrong = self.client.post(
+            f"/api/tenant/{port_a['tenant_token']}/login",
+            json={"username": port_a["tenant_username"], "password": "wrong-password"},
+            headers={"X-CSRF-Token": self.csrf_token()},
         )
-        self.assertEqual(tenant_login.status_code, 200)
-        body = tenant_login.get_data(as_text=True)
-        self.assertIn("Tenant A", body)
-        self.assertIn("31001", body)
-        self.assertNotIn("Tenant B", body)
-        self.assertNotIn("31002", body)
+        self.assertEqual(wrong.status_code, 401)
 
-        other_tenant = self.client.get(f"/tenant/{port_b['tenant_token']}")
-        self.assertEqual(other_tenant.status_code, 303)
-        self.assert_login_redirect_target(other_tenant, f"/tenant/{port_b['tenant_token']}")
+        # Correct credentials authenticate the per-port tenant session.
+        ok = self.client.post(
+            f"/api/tenant/{port_a['tenant_token']}/login",
+            json={"username": port_a["tenant_username"], "password": port_a["tenant_password"]},
+            headers={"X-CSRF-Token": self.csrf_token()},
+        )
+        self.assertEqual(ok.status_code, 200)
+
+        sub_a = self.client.get(f"/api/tenant/{port_a['tenant_token']}/subscription")
+        self.assertEqual(sub_a.status_code, 200)
+        data_a = sub_a.get_json()["data"]["subscription"]
+        self.assertEqual(data_a["listen_port"], 31001)
+        self.assertIn("Tenant A", data_a.get("note") or "")
+
+        # Isolation: the port_a tenant session cannot read port_b's subscription.
+        sub_b = self.client.get(f"/api/tenant/{port_b['tenant_token']}/subscription")
+        self.assertEqual(sub_b.status_code, 401)
+
+        # The other port's shell is still public, but its data stays gated (above).
+        other_shell = self.client.get(f"/tenant/{port_b['tenant_token']}")
+        self.assertEqual(other_shell.status_code, 200)
 
         missing = self.client.get("/tenant/not-a-real-token")
         self.assertEqual(missing.status_code, 404)
@@ -273,8 +300,9 @@ class TenantPanelTest(unittest.TestCase):
 
         old_tenant_response = self.client.get(f"/tenant/{old_tenant_token}")
         self.assertEqual(old_tenant_response.status_code, 404)
+        # The rotated token now serves the public portal shell (token mode).
         new_tenant_response = self.client.get(f"/tenant/{updated_port['tenant_token']}")
-        self.assertEqual(new_tenant_response.status_code, 303)
+        self.assertEqual(new_tenant_response.status_code, 200)
 
         old_subscription_response = self.client.get(
             f"/tenant-subscriptions/{old_subscription_token}/clash"

@@ -1,12 +1,12 @@
 from flask import abort, redirect, render_template, request
 
 from ..auth import (
+    ensure_csrf_token,
     mark_tenant_session_authenticated,
     render_tenant_login_page,
     tenant_credentials_match,
 )
 from .core import (
-    build_tenant_dashboard_state,
     clear_tenant_session,
     is_session_authenticated,
     is_tenant_session_authenticated,
@@ -54,13 +54,12 @@ def tenant_logout(tenant_token):
 
 @route("/tenant/<tenant_token>", methods=["GET"])
 def tenant_panel(tenant_token):
-    state.sync_traffic_state()
-    state.disable_auto_stopped_ports(reload_xray=True)
-    dashboard = build_tenant_dashboard_state(
-        tenant_token,
-        message=request.args.get("message", "").strip(),
-        level=request.args.get("level", "info").strip(),
-    )
-    if dashboard is None:
+    # The per-port tenant panel is now the subscriber portal in token mode: a public
+    # SPA shell that boots with the tenant_token and gates itself via
+    # /api/tenant/<token>/subscription (inline login card on 401). Unknown tokens
+    # still 404 so probing is bounded.
+    port = state.get_port_by_tenant_token(tenant_token)
+    if port is None:
         abort(404)
-    return render_template("tenant_panel.html", dashboard=dashboard)
+    boot = {"csrf_token": ensure_csrf_token(), "tenant_token": tenant_token, "me": None}
+    return render_template("portal.html", boot=boot)

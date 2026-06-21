@@ -15,8 +15,13 @@ from flask import request
 from ..auth import (
     clear_customer_session,
     customer_credentials_match,
+    is_session_authenticated,
+    is_tenant_session_authenticated,
     mark_customer_session_authenticated,
+    mark_tenant_session_authenticated,
+    tenant_credentials_match,
 )
+from ..config import AUTH_ENABLED
 from ..errors import ValidationError
 from ..subscriptions import parse_xray_client_profile
 from .core import (
@@ -26,6 +31,7 @@ from .core import (
     json_customer_auth_required,
     json_customer_success,
     json_error_response,
+    json_tenant_auth_required,
     json_validate_csrf,
     request_payload,
     route,
@@ -252,3 +258,51 @@ def api_customer_plans():
     return json_customer_success(
         {"plans": state.query_plans(public_only=True), "commerce_settings": state.get_commerce_settings()}
     )
+
+
+# --- tenant token deep-link (account-less single subscription) --------------
+
+
+def _tenant_authed(port):
+    # Same rule the old tenant page used: an admin session sees any port; otherwise
+    # a valid tenant session for THIS port is required.
+    if AUTH_ENABLED and is_session_authenticated():
+        return True
+    return is_tenant_session_authenticated(port)
+
+
+@route("/api/tenant/<tenant_token>/subscription", methods=["GET"])
+def api_tenant_subscription(tenant_token):
+    port = state.get_port_by_tenant_token(tenant_token)
+    if port is None:
+        return json_error_response("订阅不存在。", 404)
+    if not _tenant_authed(port):
+        return json_tenant_auth_required()
+    _refresh_service_state()
+    port = state.get_port_by_tenant_token(tenant_token) or port
+    profile, profile_error = parse_xray_client_profile()
+    sub = dict(port)
+    sub["access"] = build_customer_service_access({**port, "port_id": port.get("id")}, profile)
+    sub.setdefault("status_label", sub.get("status"))
+    sub["plan_name"] = sub.get("note") or ""
+    sub["renewal_allowed"] = False  # token mode is read-only (no account)
+    return json_customer_success(
+        {"subscription": sub, "subscription_available": profile is not None, "subscription_error": profile_error}
+    )
+
+
+@route("/api/tenant/<tenant_token>/login", methods=["POST"])
+def api_tenant_login(tenant_token):
+    port = state.get_port_by_tenant_token(tenant_token)
+    if port is None:
+        return json_error_response("订阅不存在。", 404)
+    csrf_error = json_validate_csrf()
+    if csrf_error is not None:
+        return csrf_error
+    payload = request_payload()
+    username = str(payload.get("username", "") or "")
+    password = str(payload.get("password", "") or "")
+    if tenant_credentials_match(port, username, password):
+        mark_tenant_session_authenticated(port)
+        return json_customer_success(message="登录成功。")
+    return json_error_response("用户名或密码错误。", 401)

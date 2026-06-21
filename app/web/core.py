@@ -162,6 +162,9 @@ def ensure_basic_auth():
         "api_customer_login",
         "api_customer_register",
         "api_customer_logout",
+        # Tokenized tenant deep-link: public shell + JSON API gated by tenant session.
+        "api_tenant_subscription",
+        "api_tenant_login",
     }:
         return None
     if session.get(AUTH_SESSION_KEY) and not is_session_authenticated():
@@ -178,34 +181,11 @@ def ensure_basic_auth():
 
 @before_request
 def ensure_tenant_panel_auth():
-    if request.endpoint != "tenant_panel":
-        return None
-
-    tenant_token = str((request.view_args or {}).get("tenant_token") or "").strip()
-    if not tenant_token:
-        return None
-
-    port = state.get_port_by_tenant_token(tenant_token)
-    if port is None:
-        return None
-
-    if session.get(TENANT_SESSION_TOKEN_KEY) and not is_tenant_session_authenticated(port):
-        clear_tenant_session()
-    if AUTH_ENABLED and is_session_authenticated():
-        return None
-    if is_tenant_session_authenticated(port):
-        return None
-
-    basic_credentials = extract_basic_credentials()
-    if basic_credentials:
-        if AUTH_ENABLED and credentials_match(*basic_credentials):
-            mark_session_authenticated()
-            return None
-        if tenant_credentials_match(port, *basic_credentials):
-            mark_tenant_session_authenticated(port)
-            return None
-
-    return redirect(tenant_login_target(tenant_token), code=303)
+    # The /tenant/<token> page is now a public SPA shell; tenant access is gated
+    # at the JSON API (/api/tenant/<token>/subscription via _tenant_authed), which
+    # preserves the same admin-session-bypass / per-port-credential semantics. This
+    # before_request hook is kept as a no-op to avoid disturbing hook ordering.
+    return None
 
 
 @before_request
@@ -425,6 +405,15 @@ def json_customer_auth_required():
                 "login_url": url_for("customer_login"),
             }
         ),
+        401,
+    )
+
+
+def json_tenant_auth_required():
+    # Token-mode subscriber view: the SPA shows an inline per-port login card on
+    # 401 rather than redirecting, so this stays JSON.
+    return (
+        jsonify({"ok": False, "code": "auth_required", "message": "请输入该端口的租户用户名和密码。"}),
         401,
     )
 
