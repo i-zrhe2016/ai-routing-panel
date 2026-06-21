@@ -4,7 +4,8 @@
 
 ## 核心能力
 
-- Web 面板和 JSON API 统一管理监听端口、备注、到期时间、流量上限、租户凭据和订阅链接。
+- 管理后台（Vue + Naive UI 单页应用）和 JSON API 统一管理监听端口、备注、到期时间、流量上限、租户凭据和订阅链接。
+- 面向终端用户的**订阅者门户**：客户注册/登录、浏览套餐、下单、上传支付凭证、人工审核开通、查看订阅与续费。每个端口租户即客户，原“租户面板”统一为门户中的订阅详情（Clash/V2Ray/VLESS 订阅链接、流量用量、凭据）。
 - 根据数据库状态生成 `app/xray/runtime/panel-ports.json` 和 `app/xray/runtime/config.json`。
 - 通过 Docker、本地二进制或 SSH 管理唯一 `data_plane`，并读取 Xray API / `access.log` 做统计。
 - 按小时分析访问域名，生成动态 AI 路由规则、报表和数据库聚合结果。
@@ -15,8 +16,9 @@
 ## 当前架构
 
 - `xray-routing-panel`
-  - Flask UI 和 JSON API
-  - 维护 `data/panel.db`
+  - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`、`/checkout`）以及探针/AI 仪表盘
+  - 前端为独立的 Vite 工程（`frontend/`），构建出 `app/static/admin/*` 与 `app/static/portal/*`
+  - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
   - 渲染、校验、同步并重启单一 `data_plane`
   - 维护 `dns_failover_state` / `dns_failover_history`
 - `xray-reality-local` 或外部数据面
@@ -108,9 +110,18 @@ docker compose --profile xray up -d --build
 docker compose --profile backup-xray up -d xray-reality-backup
 ```
 
+> 前端构建：`docker compose --build` 使用多阶段 Dockerfile，会在 `node:20` 构建阶段自动 `npm ci && npm run build` 生成 SPA 产物并拷入运行镜像；打包产物不再提交到仓库。**本地非 Docker 运行**需先手动构建一次：
+>
+> ```bash
+> cd frontend && npm ci && npm run build   # 生成 app/static/{admin,portal}
+> ```
+
 默认地址：
 
-- 面板首页：`http://服务器IP:18080`
+- 管理后台：`http://服务器IP:18080/`
+- 订阅者门户：`http://服务器IP:18080/portal`
+- 公共套餐页：`http://服务器IP:18080/plans`
+- 租户订阅直达：`http://服务器IP:18080/tenant/<tenant_token>`
 - 探针页：`http://服务器IP:18080/probe-dashboard`
 - AI 域名页：`http://服务器IP:18080/ai-domain-dashboard`
 - 健康检查：`http://服务器IP:18080/healthz`
@@ -224,14 +235,33 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 ## 常用接口摘要
 
-- `GET /`: 首页
+管理后台（需管理员会话 / Basic 认证）：
+
+- `GET /`: 管理后台 SPA 壳
 - `GET /api/dashboard`: 首页完整状态
 - `POST /api/ports`: 新建监听端口
 - `PUT /api/ports/<port_id>`: 更新端口配置
+- `POST /api/plans` / `PUT /api/plans/<id>`: 套餐增改
+- `GET /api/orders` / `POST /api/orders/<id>/{fulfill,reject,cancel}`: 订单审核与开通
 - `POST /api/data-plane/restart`: 重启唯一数据面
 - `GET /api/dns-failover`: 获取 DNS 故障切换状态
 - `POST /api/dns-failover/check`: 立即执行一次 DNS 检测
 - `POST /api/dns-failover/switch`: 手动切主备
+
+订阅者门户（客户会话）：
+
+- `GET /portal`、`GET /portal/<path>`: 门户 SPA 壳（vue-router history）
+- `GET /api/customer/{me,overview,subscriptions[/<id>],orders[/<no>],plans}`: 门户数据
+- `POST /api/customer/orders`、`.../payment-proof`、`.../<id>/renew`: 下单、传支付凭证、续费
+- `POST /api/customer/auth/{login,register,logout}`: 客户认证
+
+租户直达（token / 每端口凭据）：
+
+- `GET /tenant/<tenant_token>`: 门户单订阅只读模式壳
+- `GET /api/tenant/<tenant_token>/subscription`、`POST .../login`
+
+公共与其他：
+
 - `GET /healthz`: 返回 `{"ok": <bool>, "data_plane_running": <bool>}`
 - `GET /probe-dashboard`: TCP 探针监控页
 - `GET /ai-domain-dashboard`: AI 域名统计页
@@ -255,14 +285,35 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 ## 代码入口
 
-- [app/web.py](app/web.py): Web 路由、页面和 JSON API
-- [app/state.py](app/state.py): 控制逻辑、维护循环、统计同步、探针、DNS 故障切换
+后端（`app/` 已包化，`app/panel.py` 为入口，导出 `app`/`state`/`main`）：
+
+- [app/web/](app/web/): app factory（`create_app`）+ 按域分的视图模块（`admin_views`、`admin_api`、`customer_api`、`customer_views`、`portal_views`、`tenant_views`、`subscription_views`、`health`）与共享 `core.py`（presenter、auth 守卫、`@route` 收集器）
+- [app/state/](app/state/): `PanelState` facade，组合 7 个域 service（`CoreService`、`PortsService`、`TrafficService`、`ProbesService`、`DnsFailoverService`、`AiRoutingService`、`CommerceService`）——控制逻辑、维护循环、统计同步、探针、DNS 故障切换、商业化
+- [app/config/](app/config/) / [app/auth/](app/auth/): 配置常量/解析器、三套会话（管理员/租户/客户）与 CSRF
 - [app/dns_failover.py](app/dns_failover.py): Cloudflare API 客户端与切换策略
 - [app/xray/render_config.py](app/xray/render_config.py): 渲染 Xray 服务端和客户端产物
 - [app/xray/ai_domain_manager.py](app/xray/ai_domain_manager.py): AI 域名分类、动态路由、报表
+
+前端与运维：
+
+- [frontend/](frontend/): Vite + Vue 3 + Naive UI + Vitest 工程；`src/shared/`（设计令牌、apiClient、共享组件）、`src/admin/`（后台 SPA）、`src/portal/`（订阅者门户 SPA）。`npm run build` 出 `app/static/{admin,portal}`，`npm test` 跑 Vitest
 - [components/db-backup-uploader/README.md](components/db-backup-uploader/README.md): 数据库备份上传组件
+- [Dockerfile](Dockerfile): 多阶段构建（node 构建 SPA + pip 安装 Python 依赖）
 - [docker-compose.yml](docker-compose.yml): 本地 compose 栈
 - [k8s/](k8s/): K3s 清单
+
+## 开发与测试
+
+```bash
+# 后端测试（Python，需先装依赖；项目用 pytest 跑现有 unittest）
+python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests -q
+
+# 前端：构建产物 + 组件/单元测试
+cd frontend && npm ci
+npm run build     # 生成 app/static/{admin,portal}
+npm test          # Vitest
+```
 
 ## 文档导航
 
