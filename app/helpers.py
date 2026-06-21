@@ -35,6 +35,18 @@ def parse_note(value):
     return note
 
 
+def normalize_customer_email(value):
+    email = str(value or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValidationError("邮箱格式不正确。")
+    if len(email) > 200:
+        raise ValidationError("邮箱不能超过 200 个字符。")
+    local, _, domain = email.partition("@")
+    if not local or not domain or "." not in domain:
+        raise ValidationError("邮箱格式不正确。")
+    return email
+
+
 def parse_data_size(value, field_name):
     raw = str(value or "").strip()
     if not raw:

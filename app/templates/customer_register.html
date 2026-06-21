@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>客户注册 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body class="auth-page">
+    <main class="shell auth-shell">
+      <section class="auth-layout">
+        <div class="auth-copy">
+          <p class="eyebrow">CUSTOMER REGISTER</p>
+          <h1 class="page-title">创建客户账号</h1>
+          <p class="page-subtitle">注册完成后即可下单、提交支付凭证并在客户中心查看服务。</p>
+        </div>
+
+        <section class="auth-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-eyebrow">REGISTER</p>
+              <h2>注册客户账号</h2>
+              <p>邮箱仅作为登录名使用，v1 不做邮箱验证。</p>
+            </div>
+          </div>
+
+          {% if message %}
+          <section class="banner {{ message_level }}">
+            <div class="banner-row">
+              <span>{{ message }}</span>
+            </div>
+          </section>
+          {% endif %}
+
+          {% if error_message %}
+          <section class="banner error">
+            <div class="banner-row">
+              <span>{{ error_message }}</span>
+            </div>
+          </section>
+          {% endif %}
+
+          <form class="auth-form" method="post" action="{{ url_for('customer_register') }}">
+            <input type="hidden" name="next" value="{{ next_target }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>
+              <span>邮箱</span>
+              <input type="email" name="email" value="{{ form_email }}" autocomplete="email" autofocus>
+            </label>
+            <label>
+              <span>密码</span>
+              <input type="password" name="password" autocomplete="new-password">
+            </label>
+            <label>
+              <span>确认密码</span>
+              <input type="password" name="confirm_password" autocomplete="new-password">
+            </label>
+            <div class="actions">
+              <button class="primary" type="submit">创建账号</button>
+            </div>
+          </form>
+
+          <div class="button-row compact-row">
+            <a class="text-button" href="{{ url_for('customer_login', next=next_target) }}">已有账号，去登录</a>
+            <a class="text-button" href="{{ url_for('plans_page') }}">返回套餐页</a>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

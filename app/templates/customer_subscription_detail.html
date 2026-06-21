@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>服务详情 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body class="dashboard-page">
+    <main class="app-shell tenant-app-shell">
+      <aside class="side-nav">
+        <div class="nav-brand">
+          <p class="eyebrow">SERVICE DETAIL</p>
+          <h2>{{ service.plan_name }}</h2>
+          <p>端口 {{ service.listen_port or '未开通' }} · {{ service.status_label }}</p>
+        </div>
+
+        <nav class="nav-links" aria-label="客户导航">
+          <a class="nav-link" href="{{ url_for('customer_dashboard') }}">总览</a>
+          <a class="nav-link" href="{{ url_for('customer_orders') }}">我的订单</a>
+          <a class="nav-link active" href="{{ url_for('customer_subscriptions') }}">我的服务</a>
+        </nav>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <p class="eyebrow">SERVICE</p>
+            <h1 class="page-title">{{ service.plan_name }}</h1>
+            <p class="page-subtitle">端口 {{ service.listen_port or '未开通' }} · 到期 {{ service.expires_at_display }}</p>
+          </div>
+        </header>
+
+        {% if request.args.get('message') %}
+        <section class="banner {{ request.args.get('level', 'info') }}">
+          <div class="banner-row">
+            <span>{{ request.args.get('message') }}</span>
+          </div>
+        </section>
+        {% endif %}
+
+        <section class="stats-grid">
+          <article class="stat-card stat-card-emphasis">
+            <span>当前状态</span>
+            <strong>{{ service.status_label }}</strong>
+            <small>监听端口 {{ service.listen_port or '未开通' }}</small>
+          </article>
+          <article class="stat-card">
+            <span>总流量</span>
+            <strong>{{ service.traffic_limit_display }}</strong>
+            <small>时长 {{ service.plan_name }}</small>
+          </article>
+          <article class="stat-card">
+            <span>已用流量</span>
+            <strong>{{ service.traffic_used_display }}</strong>
+            <small>最近访问 {{ service.last_seen_display }}</small>
+          </article>
+        </section>
+
+        {% if service.renewal_allowed %}
+        <section class="panel workspace-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-eyebrow">RENEW</p>
+              <h2>续费当前套餐</h2>
+              <p>v1 仅支持按原套餐续费，续费后保留原端口和原订阅链接。</p>
+            </div>
+          </div>
+          <form method="post" action="{{ url_for('customer_subscription_renew', service_subscription_id=service.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="primary" type="submit">创建续费订单</button>
+          </form>
+        </section>
+        {% endif %}
+
+        {% if service.access and subscription_available %}
+        <section class="panel subscription-shell">
+          <div class="subscription-shell-head">
+            <div>
+              <p class="section-eyebrow">SUBSCRIPTIONS</p>
+              <h2>技术订阅</h2>
+              <p>审核完成后可直接复制下面的客户端地址。</p>
+            </div>
+          </div>
+
+          <div class="subscription-grid">
+            <label class="full">
+              <span>Clash 订阅</span>
+              <div class="copy-block">
+                <div class="copy-value">{{ service.access.tenant_subscription_clash_url }}</div>
+              </div>
+            </label>
+            <label class="full">
+              <span>V2Ray 订阅</span>
+              <div class="copy-block">
+                <div class="copy-value">{{ service.access.tenant_subscription_v2ray_url }}</div>
+              </div>
+            </label>
+            <label class="full">
+              <span>VLESS 直连分享</span>
+              <div class="copy-block">
+                <div class="copy-value">{{ service.access.share_link }}</div>
+              </div>
+            </label>
+            <label class="full">
+              <span>租户登录地址</span>
+              <div class="copy-block">
+                <div class="copy-value">{{ service.access.tenant_login_url }}</div>
+              </div>
+            </label>
+          </div>
+        </section>
+        {% elif not subscription_available %}
+        <section class="subscription-alert">
+          <strong>订阅功能未就绪</strong>
+          <p>{{ subscription_error }}</p>
+        </section>
+        {% endif %}
+      </div>
+    </main>
+  </body>
+</html>

@@ -1,14 +1,19 @@
 import base64
 import hashlib
 import hmac
+import secrets
 from urllib.parse import urlsplit
 
 from flask import jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash
 
 from .config import (
     AUTH_ENABLED,
     AUTH_SESSION_KEY,
     AUTH_SESSION_MARKER,
+    CSRF_SESSION_KEY,
+    CUSTOMER_SESSION_ID_KEY,
+    CUSTOMER_SESSION_MARKER_KEY,
     PANEL_PASSWORD,
     PANEL_USERNAME,
     TENANT_SESSION_MARKER_KEY,
@@ -43,7 +48,13 @@ def clear_tenant_session():
     session.pop(TENANT_SESSION_MARKER_KEY, None)
 
 
+def clear_customer_session():
+    session.pop(CUSTOMER_SESSION_ID_KEY, None)
+    session.pop(CUSTOMER_SESSION_MARKER_KEY, None)
+
+
 def mark_session_authenticated():
+    clear_customer_session()
     clear_tenant_session()
     session[AUTH_SESSION_KEY] = AUTH_SESSION_MARKER
 
@@ -64,9 +75,42 @@ def is_tenant_session_authenticated(port):
 
 def mark_tenant_session_authenticated(port):
     clear_admin_session()
+    clear_customer_session()
     clear_tenant_session()
     session[TENANT_SESSION_TOKEN_KEY] = str(port.get("tenant_token") or "")
     session[TENANT_SESSION_MARKER_KEY] = tenant_session_marker(port)
+
+
+def customer_session_marker(customer):
+    return hashlib.sha256(
+        f"{customer.get('id', '')}\0{customer.get('email', '')}\0{customer.get('password_hash', '')}\0{customer.get('status', '')}".encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def is_customer_session_authenticated(customer):
+    return session.get(CUSTOMER_SESSION_ID_KEY) == int(customer.get("id") or 0) and session.get(
+        CUSTOMER_SESSION_MARKER_KEY
+    ) == customer_session_marker(customer)
+
+
+def mark_customer_session_authenticated(customer):
+    clear_admin_session()
+    clear_tenant_session()
+    clear_customer_session()
+    session[CUSTOMER_SESSION_ID_KEY] = int(customer.get("id") or 0)
+    session[CUSTOMER_SESSION_MARKER_KEY] = customer_session_marker(customer)
+
+
+def customer_credentials_match(customer, password):
+    password_hash = str(customer.get("password_hash") or "")
+    if not password_hash:
+        return False
+    try:
+        return check_password_hash(password_hash, str(password or ""))
+    except ValueError:
+        return False
 
 
 def extract_basic_credentials():
@@ -124,6 +168,12 @@ def login_url_for_request():
     return url_for("login", next=login_next_target_for_request())
 
 
+def customer_login_url_for_request():
+    if request.method != "GET":
+        return url_for("customer_login", next=normalize_next_target(request.referrer, fallback=url_for("plans_page")))
+    return url_for("customer_login", next=normalize_next_target(current_request_target(), fallback=url_for("plans_page")))
+
+
 def auth_required_response():
     if request.path.startswith("/api/"):
         response = jsonify(
@@ -140,6 +190,10 @@ def auth_required_response():
     return redirect(login_url_for_request(), code=303)
 
 
+def customer_auth_required_response():
+    return redirect(customer_login_url_for_request(), code=303)
+
+
 def render_login_page(next_target, form_username="", error_message="", status_code=200):
     return (
         render_template(
@@ -149,6 +203,36 @@ def render_login_page(next_target, form_username="", error_message="", status_co
             error_message=error_message,
             message=request.args.get("message", "").strip(),
             message_level=request.args.get("level", "info").strip() or "info",
+        ),
+            status_code,
+    )
+
+
+def render_customer_login_page(next_target, form_email="", error_message="", status_code=200):
+    return (
+        render_template(
+            "customer_login.html",
+            next_target=next_target,
+            form_email=form_email,
+            error_message=error_message,
+            message=request.args.get("message", "").strip(),
+            message_level=request.args.get("level", "info").strip() or "info",
+            csrf_token=ensure_csrf_token(),
+        ),
+        status_code,
+    )
+
+
+def render_customer_register_page(next_target, form_email="", error_message="", status_code=200):
+    return (
+        render_template(
+            "customer_register.html",
+            next_target=next_target,
+            form_email=form_email,
+            error_message=error_message,
+            message=request.args.get("message", "").strip(),
+            message_level=request.args.get("level", "info").strip() or "info",
+            csrf_token=ensure_csrf_token(),
         ),
         status_code,
     )
@@ -164,5 +248,18 @@ def render_tenant_login_page(port, form_username="", error_message="", status_co
             message=request.args.get("message", "").strip(),
             message_level=request.args.get("level", "info").strip() or "info",
         ),
-        status_code,
+            status_code,
     )
+
+
+def ensure_csrf_token():
+    token = str(session.get(CSRF_SESSION_KEY) or "").strip()
+    if not token:
+        token = secrets.token_urlsafe(24)
+        session[CSRF_SESSION_KEY] = token
+    return token
+
+
+def validate_csrf_token(value):
+    expected = str(session.get(CSRF_SESSION_KEY) or "").strip()
+    return bool(expected) and hmac.compare_digest(expected, str(value or "").strip())

@@ -7,6 +7,19 @@ function createEmptyPortForm() {
   };
 }
 
+function createEmptyPlanForm() {
+  return {
+    slug: "",
+    name: "",
+    description: "",
+    price_fen: "",
+    duration_days: "",
+    traffic_limit: "",
+    enabled: true,
+    sort_order: "0",
+  };
+}
+
 function fallbackCopyText(value) {
   const textarea = document.createElement("textarea");
   textarea.value = value;
@@ -31,8 +44,13 @@ function createPanelApp(initialState) {
         dataPlaneStatus: {},
         aiRoutingStatus: {},
         dnsFailoverStatus: {},
+        commerceSummary: {},
+        commerceSettings: {},
+        plans: [],
+        orders: [],
         flash: { message: "", level: "info" },
         createForm: createEmptyPortForm(),
+        planCreateForm: createEmptyPlanForm(),
         filters: {
           query: "",
           status: "all",
@@ -106,6 +124,10 @@ function createPanelApp(initialState) {
         this.dnsFailoverStatus = dashboard.meta?.dns_failover_status || {};
         this.flash = dashboard.flash || { message: "", level: "info" };
         this.ports = (dashboard.ports || []).map((port) => this.preparePort(port));
+        this.commerceSummary = dashboard.commerce?.summary || {};
+        this.commerceSettings = { ...(dashboard.commerce?.settings || {}) };
+        this.plans = (dashboard.commerce?.plans || []).map((plan) => this.preparePlan(plan));
+        this.orders = (dashboard.commerce?.orders || []).map((order) => this.prepareOrder(order));
       },
 
       preparePort(port) {
@@ -116,6 +138,31 @@ function createPanelApp(initialState) {
             expires_at: port.expires_at_input || "",
             traffic_limit: port.traffic_limit_input || "",
             note: port.note || "",
+          },
+        };
+      },
+
+      preparePlan(plan) {
+        return {
+          ...plan,
+          form: {
+            slug: String(plan.slug || ""),
+            name: String(plan.name || ""),
+            description: String(plan.description || ""),
+            price_fen: String(plan.price_fen ?? ""),
+            duration_days: String(plan.duration_days ?? ""),
+            traffic_limit: String(plan.traffic_limit_display || ""),
+            enabled: Boolean(plan.enabled),
+            sort_order: String(plan.sort_order ?? 0),
+          },
+        };
+      },
+
+      prepareOrder(order) {
+        return {
+          ...order,
+          form: {
+            review_note: String(order.review_note || order.rejection_reason || ""),
           },
         };
       },
@@ -190,11 +237,15 @@ function createPanelApp(initialState) {
           Accept: "application/json",
           ...(options.headers || {}),
         };
+        const method = String(options.method || "GET").toUpperCase();
+        if (method !== "GET" && this.meta?.csrf_token) {
+          headers["X-CSRF-Token"] = this.meta.csrf_token;
+        }
         if (options.body !== undefined) {
           headers["Content-Type"] = "application/json";
         }
         const response = await fetch(url, {
-          method: options.method || "GET",
+          method,
           headers,
           body: options.body,
           credentials: "same-origin",
@@ -235,6 +286,10 @@ function createPanelApp(initialState) {
         this.createForm = createEmptyPortForm();
       },
 
+      resetPlanCreateForm() {
+        this.planCreateForm = createEmptyPlanForm();
+      },
+
       async createPort() {
         await this.runAction("create-port", async () => {
           const createdListenPort = String(this.createForm.listen_port || "");
@@ -250,6 +305,77 @@ function createPanelApp(initialState) {
             }
           }
           this.resetCreateForm();
+        });
+      },
+
+      async createPlan() {
+        await this.runAction("create-plan", async () => {
+          const data = await this.requestJson("/api/plans", {
+            method: "POST",
+            body: JSON.stringify(this.planCreateForm),
+          });
+          this.applyResponse(data);
+          this.resetPlanCreateForm();
+        });
+      },
+
+      async updatePlan(plan) {
+        await this.runAction(`update-plan:${plan.id}`, async () => {
+          const data = await this.requestJson(`/api/plans/${plan.id}`, {
+            method: "PUT",
+            body: JSON.stringify(plan.form),
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async updateCommerceSettings() {
+        await this.runAction("update-commerce-settings", async () => {
+          const data = await this.requestJson("/api/commerce-settings", {
+            method: "PUT",
+            body: JSON.stringify(this.commerceSettings),
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async fulfillOrder(order) {
+        if (!window.confirm(`确认审核通过订单 ${order.order_no} 并立即开通吗？`)) {
+          return;
+        }
+        await this.runAction(`fulfill-order:${order.id}`, async () => {
+          const data = await this.requestJson(`/api/orders/${order.id}/fulfill`, {
+            method: "POST",
+            body: JSON.stringify({ review_note: order.form.review_note }),
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async rejectOrder(order) {
+        if (!order.form.review_note.trim()) {
+          this.setFlash("驳回订单前请填写原因。", "error");
+          return;
+        }
+        await this.runAction(`reject-order:${order.id}`, async () => {
+          const data = await this.requestJson(`/api/orders/${order.id}/reject`, {
+            method: "POST",
+            body: JSON.stringify({ review_note: order.form.review_note }),
+          });
+          this.applyResponse(data);
+        });
+      },
+
+      async cancelOrder(order) {
+        if (!window.confirm(`确认取消订单 ${order.order_no} 吗？`)) {
+          return;
+        }
+        await this.runAction(`cancel-order:${order.id}`, async () => {
+          const data = await this.requestJson(`/api/orders/${order.id}/cancel`, {
+            method: "POST",
+            body: JSON.stringify({ review_note: order.form.review_note }),
+          });
+          this.applyResponse(data);
         });
       },
 

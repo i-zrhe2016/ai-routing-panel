@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>订单详情 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body class="dashboard-page">
+    <main class="app-shell tenant-app-shell">
+      <aside class="side-nav">
+        <div class="nav-brand">
+          <p class="eyebrow">ORDER DETAIL</p>
+          <h2>{{ order.order_no }}</h2>
+          <p>{{ order.plan_name_snapshot }} · {{ order.kind == 'renewal' and '续费订单' or '新购订单' }}</p>
+        </div>
+
+        <nav class="nav-links" aria-label="客户导航">
+          <a class="nav-link" href="{{ url_for('customer_dashboard') }}">总览</a>
+          <a class="nav-link active" href="{{ url_for('customer_orders') }}">我的订单</a>
+          <a class="nav-link" href="{{ url_for('customer_subscriptions') }}">我的服务</a>
+        </nav>
+
+        <section class="nav-card">
+          <span>状态</span>
+          <strong>{{ order.status_label }}</strong>
+          <p>订单有效期至 {{ order.expires_at_display }}</p>
+        </section>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <p class="eyebrow">ORDER</p>
+            <h1 class="page-title">{{ order.plan_name_snapshot }}</h1>
+            <p class="page-subtitle">{{ order.price_display }} · {{ order.duration_days_snapshot }} 天 · {{ order.traffic_limit_display }}</p>
+          </div>
+        </header>
+
+        {% if request.args.get('message') %}
+        <section class="banner {{ request.args.get('level', 'info') }}">
+          <div class="banner-row">
+            <span>{{ request.args.get('message') }}</span>
+          </div>
+        </section>
+        {% endif %}
+
+        <section class="workspace-grid">
+          <section class="panel workspace-card">
+            <div class="panel-head">
+              <div>
+                <p class="section-eyebrow">STATUS</p>
+                <h2>订单状态</h2>
+                <p>创建于 {{ order.created_at_display }}，当前状态为 {{ order.status_label }}。</p>
+              </div>
+            </div>
+
+            <div class="subscription-overview">
+              <div class="info-tile">
+                <span>订单号</span>
+                <strong>{{ order.order_no }}</strong>
+              </div>
+              <div class="info-tile">
+                <span>状态</span>
+                <strong>{{ order.status_label }}</strong>
+              </div>
+              <div class="info-tile">
+                <span>支付备注</span>
+                <strong>{{ order.payer_note or '暂无' }}</strong>
+              </div>
+              <div class="info-tile">
+                <span>审核备注</span>
+                <strong>{{ order.review_note or order.rejection_reason or '暂无' }}</strong>
+              </div>
+            </div>
+
+            {% if order.proof_available %}
+            <div class="button-row compact-row">
+              <a class="text-button" href="{{ url_for('payment_proof_file', submission_id=order.latest_submission_id) }}" target="_blank" rel="noreferrer">查看已提交截图</a>
+            </div>
+            {% endif %}
+          </section>
+
+          <section class="panel workspace-card">
+            <div class="panel-head">
+              <div>
+                <p class="section-eyebrow">PAYMENT</p>
+                <h2>支付凭证</h2>
+                <p>{{ commerce_settings.payment_instructions or '上传支付宝付款截图和备注。' }}</p>
+              </div>
+            </div>
+
+            {% if commerce_settings.payment_qr_code_url %}
+            <div class="payment-proof-preview">
+              <img src="{{ commerce_settings.payment_qr_code_url }}" alt="支付宝收款二维码">
+            </div>
+            {% endif %}
+
+            {% if order.status in ['pending_payment', 'payment_rejected'] %}
+            <form class="auth-form" method="post" action="{{ url_for('customer_submit_order_payment_proof', order_no=order.order_no) }}" enctype="multipart/form-data">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label>
+                <span>支付截图</span>
+                <input type="file" name="proof_image" accept="image/png,image/jpeg,image/webp" required>
+              </label>
+              <label>
+                <span>付款备注</span>
+                <input type="text" name="payer_note" value="{{ order.payer_note }}" maxlength="300" placeholder="例如付款人姓名、尾号或转账备注">
+              </label>
+              <div class="actions">
+                <button class="primary" type="submit">{{ order.status == 'payment_rejected' and '重新提交凭证' or '提交支付凭证' }}</button>
+              </div>
+            </form>
+            {% elif order.status == 'payment_submitted' %}
+            <div class="subscription-alert">
+              <strong>支付凭证已提交</strong>
+              <p>管理员正在人工核对付款，请等待审核结果。</p>
+            </div>
+            {% elif order.status == 'fulfilled' %}
+            <div class="subscription-alert success">
+              <strong>订单已完成开通</strong>
+              <p>可直接前往服务详情查看技术订阅和租户面板信息。</p>
+            </div>
+            {% else %}
+            <div class="subscription-alert">
+              <strong>当前订单不可再提交凭证</strong>
+              <p>状态：{{ order.status_label }}</p>
+            </div>
+            {% endif %}
+          </section>
+        </section>
+
+        {% if service %}
+        <section class="panel workspace-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-eyebrow">SERVICE</p>
+              <h2>关联服务</h2>
+              <p>订单完成后可直接进入服务详情查看订阅。</p>
+            </div>
+          </div>
+          <div class="button-row compact-row">
+            <a class="link-pill secondary" href="{{ url_for('customer_subscription_detail', service_subscription_id=service.id) }}">打开服务详情</a>
+          </div>
+        </section>
+        {% endif %}
+      </div>
+    </main>
+  </body>
+</html>

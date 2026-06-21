@@ -63,6 +63,8 @@ def parse_shell_words_env(value, field_name):
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = Path(os.environ.get("DB_PATH", DATA_DIR / "panel.db"))
+UPLOADS_DIR = DATA_DIR / "uploads"
+PAYMENT_PROOFS_DIR = UPLOADS_DIR / "payment-proofs"
 XRAY_ENV_FILE_PATH = Path(os.environ.get("XRAY_ENV_FILE_PATH", BASE_DIR / "xray" / ".env"))
 XRAY_CONFIG_PATH = Path(os.environ.get("XRAY_CONFIG_PATH", BASE_DIR / "xray" / "runtime" / "config.json"))
 XRAY_DYNAMIC_ROUTING_PATH = Path(
@@ -172,4 +174,27 @@ PROBE_DASHBOARD_RANGES = {
     "7d": {"hours": 24 * 7, "label": "7天"},
 }
 
+COMMERCE_AUTO_PORT_START = parse_optional_env_port(
+    os.environ.get("COMMERCE_AUTO_PORT_START", "31000"),
+    "COMMERCE_AUTO_PORT_START",
+)
+COMMERCE_AUTO_PORT_END = parse_optional_env_port(
+    os.environ.get("COMMERCE_AUTO_PORT_END", "39999"),
+    "COMMERCE_AUTO_PORT_END",
+)
+if COMMERCE_AUTO_PORT_START is not None and COMMERCE_AUTO_PORT_END is not None:
+    if COMMERCE_AUTO_PORT_START > COMMERCE_AUTO_PORT_END:
+        raise ValueError("COMMERCE_AUTO_PORT_START 不能大于 COMMERCE_AUTO_PORT_END。")
+COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT = parse_positive_env_int(
+    os.environ.get("COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT", "24"),
+    "COMMERCE_ORDER_EXPIRY_HOURS_DEFAULT",
+)
+PAYMENT_PROOF_MAX_BYTES = parse_positive_env_int(
+    os.environ.get("PAYMENT_PROOF_MAX_BYTES", str(5 * 1024 * 1024)),
+    "PAYMENT_PROOF_MAX_BYTES",
+)
+
 LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
+CUSTOMER_SESSION_ID_KEY = "customer_session_id"
+CUSTOMER_SESSION_MARKER_KEY = "customer_session_marker"
+CSRF_SESSION_KEY = "csrf_token"

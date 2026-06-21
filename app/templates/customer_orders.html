@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>我的订单 - xray-routing-panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body class="dashboard-page">
+    <main class="app-shell tenant-app-shell">
+      <aside class="side-nav">
+        <div class="nav-brand">
+          <p class="eyebrow">ORDERS</p>
+          <h2>{{ customer.email }}</h2>
+          <p>查看订单状态、上传支付截图和审核结果。</p>
+        </div>
+
+        <nav class="nav-links" aria-label="客户导航">
+          <a class="nav-link" href="{{ url_for('customer_dashboard') }}">总览</a>
+          <a class="nav-link active" href="{{ url_for('customer_orders') }}">我的订单</a>
+          <a class="nav-link" href="{{ url_for('customer_subscriptions') }}">我的服务</a>
+          <a class="nav-link" href="{{ url_for('plans_page') }}">购买套餐</a>
+        </nav>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <p class="eyebrow">CUSTOMER ORDERS</p>
+            <h1 class="page-title">我的订单</h1>
+            <p class="page-subtitle">订单创建后先付款，再上传截图和备注等待人工审核。</p>
+          </div>
+        </header>
+
+        <section class="panel workspace-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-eyebrow">LIST</p>
+              <h2>全部订单</h2>
+              <p>点击订单进入详情页提交凭证或查看开通结果。</p>
+            </div>
+          </div>
+
+          {% if orders %}
+          <div class="commerce-order-list">
+            {% for order in orders %}
+            <a class="commerce-order-item" href="{{ url_for('customer_order_detail', order_no=order.order_no) }}">
+              <div>
+                <strong>{{ order.order_no }}</strong>
+                <p>{{ order.plan_name_snapshot }} · {{ order.kind == 'renewal' and '续费' or '新购' }} · {{ order.created_at_display }}</p>
+              </div>
+              <div class="commerce-order-meta">
+                <span>{{ order.price_display }}</span>
+                <span class="badge {{ order.status_tone }}">{{ order.status_label }}</span>
+              </div>
+            </a>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty-state">当前还没有订单。</div>
+          {% endif %}
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
