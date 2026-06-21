@@ -1,0 +1,61 @@
+[project]
+name = "xray-routing-panel"
+version = "0.1.0"
+description = "Control panel for managing Xray REALITY proxy nodes, tenants, and subscription commerce."
+requires-python = ">=3.10"
+# Runtime versions are pinned to match the Debian bookworm python3-flask stack
+# the container currently ships, so the pip-based image stays behavior-compatible
+# with the apt-based one. Bump deliberately in a dedicated phase, never as a
+# side effect of an unrelated change.
+dependencies = [
+    "Flask==2.2.5",
+    "Werkzeug==2.2.3",
+    "Jinja2==3.1.2",
+    "itsdangerous==2.1.2",
+    "click==8.1.3",
+]
+
+[project.optional-dependencies]
+# Introduced by the refactor (see plan P7/P8). Not yet imported by the app;
+# kept here so the data-layer migration installs cleanly when it lands.
+orm = [
+    "SQLAlchemy>=2.0,<2.1",
+    "alembic>=1.13,<2.0",
+]
+dev = [
+    "pytest>=7.4,<9.0",
+    "ruff>=0.4,<1.0",
+    "black>=24.0,<25.0",
+    "mypy>=1.8,<2.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# Existing unittest.TestCase classes run unchanged under pytest.
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+# Check-only at first; format module-by-module as each is touched (plan P0).
+extend-exclude = [".venv", "app/static/vendor"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+extend-exclude = "app/static/vendor"
+
+[tool.mypy]
+python_version = "3.10"
+# Start scoped to the new typed layers; legacy modules stay untyped for now.
+files = ["app/core", "app/repositories", "app/services"]
+ignore_missing_imports = true
+warn_unused_ignores = true

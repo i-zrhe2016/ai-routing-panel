@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -405,17 +406,21 @@ class ProbeDashboardRenderTest(unittest.TestCase):
 
     def test_probe_dashboard_renders_recent_status_grid(self):
         port = self.create_port(34001, "Probe Tenant")
+        # Timestamps are relative to "now" so the rows stay inside the default
+        # 24h dashboard window regardless of the wall-clock date the suite runs on.
+        now = datetime.now(timezone.utc)
+        recent = [
+            (port["listen_port"], 1, (now - timedelta(hours=3)).isoformat(), ""),
+            (port["listen_port"], 0, (now - timedelta(hours=2)).isoformat(), "timeout"),
+            (port["listen_port"], 1, (now - timedelta(hours=1)).isoformat(), ""),
+        ]
         with self.panel.state.connect() as conn:
             conn.executemany(
                 """
                 INSERT INTO upstream_probe_history (listen_port, is_reachable, checked_at, failure_reason)
                 VALUES (?, ?, ?, ?)
                 """,
-                [
-                    (port["listen_port"], 1, "2026-06-18T00:00:00+00:00", ""),
-                    (port["listen_port"], 0, "2026-06-18T01:00:00+00:00", "timeout"),
-                    (port["listen_port"], 1, "2026-06-18T02:00:00+00:00", ""),
-                ],
+                recent,
             )
             conn.commit()
 

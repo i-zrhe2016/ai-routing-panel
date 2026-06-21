@@ -1,0 +1,7 @@
+# Development dependencies (test runner, linters, type checker).
+# Source of truth is pyproject.toml [project.optional-dependencies].dev
+-r requirements.txt
+pytest>=7.4,<9.0
+ruff>=0.4,<1.0
+black>=24.0,<25.0
+mypy>=1.8,<2.0
