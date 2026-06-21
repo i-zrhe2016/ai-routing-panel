@@ -1,0 +1,713 @@
+import json
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+
+
+from ..config import (
+    CF_API_TOKEN,
+    CF_DNS_RECORD_ID,
+    CF_DNS_RECORD_NAME,
+    CF_DNS_RECORD_PROXIED,
+    CF_DNS_RECORD_TTL,
+    CF_DNS_RECORD_TYPE,
+    CF_ZONE_ID,
+    DATAPLANE_ACCESS_LOG_PATH,
+    DATAPLANE_API_SERVER,
+    DATAPLANE_AI_REPORT_PATH,
+    DATAPLANE_CONFIG_PATH,
+    DATAPLANE_CONTAINER_NAME,
+    DATAPLANE_DOCKER_BIN,
+    DATAPLANE_DYNAMIC_ROUTING_PATH,
+    DATAPLANE_LOCAL_BIN,
+    DATAPLANE_PANEL_DB_PATH,
+    DATAPLANE_PANEL_PORTS_PATH,
+    DATAPLANE_RESTART_COMMAND,
+    DATAPLANE_SSH_BIN,
+    DATAPLANE_SSH_OPTIONS,
+    DATAPLANE_SSH_TARGET,
+    DATAPLANE_XRAY_BIN,
+    DATA_DIR,
+    DB_PATH,
+    DEFAULT_UPSTREAM_HOST,
+    DEFAULT_UPSTREAM_PORT,
+    DNS_FAILOVER_BACKUP_CONTENT,
+    DNS_FAILOVER_BACKUP_LABEL,
+    DNS_FAILOVER_ENABLED,
+    DNS_FAILOVER_FAILURE_THRESHOLD,
+    DNS_FAILOVER_INTERVAL,
+    DNS_FAILOVER_PRIMARY_CONTENT,
+    DNS_FAILOVER_PROBE_HOST,
+    DNS_FAILOVER_PROBE_PORT,
+    DNS_FAILOVER_RECOVERY_THRESHOLD,
+    DNS_FAILOVER_TIMEOUT,
+    MAINTENANCE_INTERVAL,
+    PAYMENT_PROOFS_DIR,
+    PROBE_ENABLED,
+    PROBE_INTERVAL,
+    SEED_LISTEN_PORT,
+    XRAY_ACCESS_LOG_PATH,
+    XRAY_CLIENT_CONFIG_PATH,
+    XRAY_CONFIG_PATH,
+    XRAY_DYNAMIC_ROUTING_PATH,
+    XRAY_ENV_FILE_PATH,
+    XRAY_PANEL_PORTS_PATH,
+    XRAY_STATS_QUERY_TIMEOUT,
+)
+from ..dns_failover import DnsFailoverConfig, DnsFailoverManager
+from ..errors import ValidationError
+from ..helpers import (
+    generate_access_token,
+    generate_subscription_token,
+    generate_tenant_password,
+    generate_tenant_username,
+    localize_time,
+    parse_port,
+    utc_iso_now,
+    utc_now,
+)
+from ..xray.node_control import DataPlaneConfig, DataPlaneController
+
+
+
+class CoreMixin:
+    def __init__(self):
+        self.write_lock = threading.Lock()
+        self.stop_event = threading.Event()
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        PAYMENT_PROOFS_DIR.mkdir(parents=True, exist_ok=True)
+        XRAY_PANEL_PORTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        XRAY_ACCESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self.data_plane = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                api_server=DATAPLANE_API_SERVER,
+                xray_bin=DATAPLANE_XRAY_BIN,
+                local_bin=DATAPLANE_LOCAL_BIN,
+                docker_bin=DATAPLANE_DOCKER_BIN,
+                container_name=DATAPLANE_CONTAINER_NAME,
+                restart_command=DATAPLANE_RESTART_COMMAND,
+                ssh_target=DATAPLANE_SSH_TARGET,
+                ssh_bin=DATAPLANE_SSH_BIN,
+                ssh_options=DATAPLANE_SSH_OPTIONS,
+                config_path=self.data_plane_config_path(),
+                dynamic_routing_path=DATAPLANE_DYNAMIC_ROUTING_PATH.strip(),
+                ai_report_path=DATAPLANE_AI_REPORT_PATH.strip(),
+                panel_db_path=DATAPLANE_PANEL_DB_PATH.strip(),
+                access_log_path=DATAPLANE_ACCESS_LOG_PATH.strip() or str(XRAY_ACCESS_LOG_PATH),
+                panel_ports_path=DATAPLANE_PANEL_PORTS_PATH.strip(),
+                source_config_path=XRAY_CONFIG_PATH,
+                source_dynamic_routing_path=XRAY_DYNAMIC_ROUTING_PATH,
+                source_ai_report_path=self.data_plane_ai_report_source_path(),
+                source_panel_ports_path=XRAY_PANEL_PORTS_PATH,
+                upstream_host=DEFAULT_UPSTREAM_HOST,
+                upstream_port=DEFAULT_UPSTREAM_PORT,
+            )
+        )
+        self.dns_failover_manager = DnsFailoverManager(
+            DnsFailoverConfig(
+                enabled=DNS_FAILOVER_ENABLED,
+                interval=DNS_FAILOVER_INTERVAL,
+                timeout=DNS_FAILOVER_TIMEOUT,
+                failure_threshold=DNS_FAILOVER_FAILURE_THRESHOLD,
+                recovery_threshold=DNS_FAILOVER_RECOVERY_THRESHOLD,
+                probe_host=DNS_FAILOVER_PROBE_HOST,
+                probe_port=DNS_FAILOVER_PROBE_PORT,
+                api_token=CF_API_TOKEN,
+                zone_id=CF_ZONE_ID,
+                record_id=CF_DNS_RECORD_ID,
+                record_type=CF_DNS_RECORD_TYPE,
+                record_name=CF_DNS_RECORD_NAME,
+                record_proxied=CF_DNS_RECORD_PROXIED,
+                record_ttl=CF_DNS_RECORD_TTL,
+                primary_content=DNS_FAILOVER_PRIMARY_CONTENT,
+                backup_content=DNS_FAILOVER_BACKUP_CONTENT,
+                backup_label=DNS_FAILOVER_BACKUP_LABEL,
+            )
+        )
+    def data_plane_config_path(self):
+        explicit = DATAPLANE_CONFIG_PATH.strip()
+        if explicit:
+            return explicit
+        if DATAPLANE_SSH_TARGET:
+            return str(XRAY_CONFIG_PATH)
+        if DATAPLANE_LOCAL_BIN:
+            return str(XRAY_CONFIG_PATH)
+        return "/etc/xray/config.json"
+    def data_plane_ai_report_source_path(self):
+        return XRAY_ENV_FILE_PATH.parent / "reports" / "hourly-domains" / "latest.json"
+    def data_plane_status(self):
+        return self.data_plane.status_summary()
+    def connect(self):
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
+    def init_db(self):
+        with self.connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS ports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    listen_port INTEGER NOT NULL UNIQUE,
+                    upstream_host TEXT NOT NULL,
+                    upstream_port INTEGER NOT NULL,
+                    tenant_token TEXT NOT NULL DEFAULT '',
+                    subscription_token TEXT NOT NULL DEFAULT '',
+                    tenant_username TEXT NOT NULL DEFAULT '',
+                    tenant_password TEXT NOT NULL DEFAULT '',
+                    expires_at TEXT,
+                    traffic_limit_bytes INTEGER,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS traffic_totals (
+                    listen_port INTEGER PRIMARY KEY,
+                    total_connections INTEGER NOT NULL DEFAULT 0,
+                    total_bytes_sent INTEGER NOT NULL DEFAULT 0,
+                    total_bytes_received INTEGER NOT NULL DEFAULT 0,
+                    last_seen TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS traffic_daily (
+                    listen_port INTEGER NOT NULL,
+                    stat_date TEXT NOT NULL,
+                    total_connections INTEGER NOT NULL DEFAULT 0,
+                    total_bytes_sent INTEGER NOT NULL DEFAULT 0,
+                    total_bytes_received INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (listen_port, stat_date)
+                );
+
+                CREATE TABLE IF NOT EXISTS app_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS upstream_probes (
+                    listen_port INTEGER PRIMARY KEY,
+                    is_reachable INTEGER NOT NULL,
+                    checked_at TEXT NOT NULL,
+                    failure_reason TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS upstream_probe_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    listen_port INTEGER NOT NULL,
+                    is_reachable INTEGER NOT NULL,
+                    checked_at TEXT NOT NULL,
+                    failure_reason TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS ai_domains (
+                    domain TEXT PRIMARY KEY,
+                    classification TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT '',
+                    first_seen TEXT,
+                    last_seen TEXT,
+                    total_hits INTEGER NOT NULL DEFAULT 0,
+                    last_protocols TEXT NOT NULL DEFAULT '[]',
+                    last_report_window_start TEXT,
+                    last_report_window_end TEXT,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS ai_domain_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    domain TEXT NOT NULL,
+                    window_start TEXT NOT NULL,
+                    window_end TEXT NOT NULL,
+                    hits INTEGER NOT NULL,
+                    classification TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT '',
+                    protocols TEXT NOT NULL DEFAULT '[]',
+                    first_seen TEXT,
+                    last_seen TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_domain_observations_window
+                ON ai_domain_observations(domain, window_start, window_end);
+
+                CREATE INDEX IF NOT EXISTS idx_ai_domain_observations_domain
+                ON ai_domain_observations(domain);
+
+                CREATE TABLE IF NOT EXISTS dns_failover_state (
+                    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                    current_target TEXT NOT NULL DEFAULT 'primary',
+                    current_record_content TEXT NOT NULL DEFAULT '',
+                    current_record_ttl INTEGER,
+                    current_record_proxied INTEGER,
+                    last_probe_status TEXT NOT NULL DEFAULT 'unknown',
+                    last_probe_checked_at TEXT,
+                    last_probe_error TEXT NOT NULL DEFAULT '',
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    consecutive_successes INTEGER NOT NULL DEFAULT 0,
+                    last_switch_at TEXT,
+                    last_switch_reason TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS dns_failover_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    event_status TEXT NOT NULL,
+                    target TEXT NOT NULL DEFAULT '',
+                    record_content TEXT NOT NULL DEFAULT '',
+                    detail TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+                """
+            )
+            self.ensure_port_schema(conn)
+            self.ensure_dns_failover_schema(conn)
+            self.ensure_commerce_schema(conn)
+    def ensure_port_schema(self, conn):
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(ports)").fetchall()}
+        if "tenant_token" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN tenant_token TEXT NOT NULL DEFAULT ''")
+        if "subscription_token" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN subscription_token TEXT NOT NULL DEFAULT ''")
+        if "tenant_username" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN tenant_username TEXT NOT NULL DEFAULT ''")
+        if "tenant_password" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN tenant_password TEXT NOT NULL DEFAULT ''")
+        if "traffic_limit_bytes" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN traffic_limit_bytes INTEGER")
+        if "customer_id" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN customer_id INTEGER")
+        if "service_subscription_id" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN service_subscription_id INTEGER")
+        if "source_order_id" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN source_order_id INTEGER")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ports_tenant_token
+            ON ports(tenant_token)
+            WHERE tenant_token != ''
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ports_subscription_token
+            ON ports(subscription_token)
+            WHERE subscription_token != ''
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ports_tenant_username
+            ON ports(tenant_username)
+            WHERE tenant_username != ''
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ports_customer_id ON ports(customer_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ports_service_subscription_id ON ports(service_subscription_id)")
+        self.cleanup_expired_ports_in_tx(conn)
+        self.ensure_port_tokens_in_tx(conn)
+        self.ensure_port_credentials_in_tx(conn)
+    def ensure_dns_failover_schema(self, conn):
+        conn.execute(
+            """
+            INSERT INTO dns_failover_state (singleton_id)
+            VALUES (1)
+            ON CONFLICT(singleton_id) DO NOTHING
+            """
+        )
+    def generate_unique_port_token(self, conn, column_name):
+        if column_name not in {"tenant_token", "subscription_token"}:
+            raise ValueError("unsupported port token column")
+        for _ in range(16):
+            token = generate_access_token()
+            row = conn.execute(
+                f"SELECT 1 FROM ports WHERE {column_name} = ? LIMIT 1",
+                (token,),
+            ).fetchone()
+            if row is None:
+                return token
+        raise RuntimeError(f"无法为 {column_name} 生成唯一 token。")
+    def generate_unique_tenant_username(self, conn):
+        for _ in range(16):
+            username = generate_tenant_username()
+            row = conn.execute(
+                "SELECT 1 FROM ports WHERE tenant_username = ? LIMIT 1",
+                (username,),
+            ).fetchone()
+            if row is None:
+                return username
+        raise RuntimeError("无法生成唯一租户用户名。")
+    def ensure_port_tokens_in_tx(self, conn):
+        rows = conn.execute(
+            """
+            SELECT id, tenant_token, subscription_token
+            FROM ports
+            """
+        ).fetchall()
+        for row in rows:
+            updates = {}
+            if not str(row["tenant_token"] or "").strip():
+                updates["tenant_token"] = self.generate_unique_port_token(conn, "tenant_token")
+            if not str(row["subscription_token"] or "").strip():
+                updates["subscription_token"] = self.generate_unique_port_token(conn, "subscription_token")
+            if not updates:
+                continue
+            assignments = ", ".join(f"{column} = ?" for column in updates)
+            values = list(updates.values()) + [row["id"]]
+            conn.execute(f"UPDATE ports SET {assignments} WHERE id = ?", values)
+    def ensure_port_credentials_in_tx(self, conn):
+        rows = conn.execute(
+            """
+            SELECT id, tenant_username, tenant_password
+            FROM ports
+            """
+        ).fetchall()
+        for row in rows:
+            updates = {}
+            if not str(row["tenant_username"] or "").strip():
+                updates["tenant_username"] = self.generate_unique_tenant_username(conn)
+            if not str(row["tenant_password"] or "").strip():
+                updates["tenant_password"] = generate_tenant_password()
+            if not updates:
+                continue
+            assignments = ", ".join(f"{column} = ?" for column in updates)
+            values = list(updates.values()) + [row["id"]]
+            conn.execute(f"UPDATE ports SET {assignments} WHERE id = ?", values)
+    def ensure_subscription_token_in_tx(self, conn):
+        token = str(self.get_state(conn, "subscription_token", "") or "").strip()
+        if token:
+            return token
+        token = generate_subscription_token()
+        self.set_state(conn, "subscription_token", token)
+        return token
+    def normalize_upstream_targets(self):
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE ports
+                SET upstream_host = ?, upstream_port = ?
+                WHERE upstream_host != ? OR upstream_port != ?
+                """,
+                (
+                    DEFAULT_UPSTREAM_HOST,
+                    DEFAULT_UPSTREAM_PORT,
+                    DEFAULT_UPSTREAM_HOST,
+                    DEFAULT_UPSTREAM_PORT,
+                ),
+            )
+            conn.commit()
+    def seed_defaults(self):
+        if not SEED_LISTEN_PORT:
+            return
+        listen_port = parse_port(SEED_LISTEN_PORT, "默认监听端口")
+        with self.connect() as conn:
+            exists = conn.execute("SELECT COUNT(*) FROM ports").fetchone()[0]
+            if exists:
+                return
+            now = utc_iso_now()
+            conn.execute(
+                """
+                INSERT INTO ports (
+                    listen_port, upstream_host, upstream_port, tenant_token, subscription_token,
+                    tenant_username, tenant_password,
+                    expires_at, enabled, note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?, ?)
+                """,
+                (
+                    listen_port,
+                    DEFAULT_UPSTREAM_HOST,
+                    DEFAULT_UPSTREAM_PORT,
+                    self.generate_unique_port_token(conn, "tenant_token"),
+                    self.generate_unique_port_token(conn, "subscription_token"),
+                    self.generate_unique_tenant_username(conn),
+                    generate_tenant_password(),
+                    "默认初始化端口",
+                    now,
+                    now,
+                ),
+            )
+    def bootstrap(self):
+        self.init_db()
+        self.seed_defaults()
+        self.normalize_upstream_targets()
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self.cleanup_expired_ports_in_tx(conn)
+            self.ensure_subscription_token_in_tx(conn)
+            self.ensure_port_tokens_in_tx(conn)
+            self.ensure_port_credentials_in_tx(conn)
+            conn.commit()
+        self.sync_traffic_state()
+        self.disable_auto_stopped_ports(reload_xray=False)
+        self.write_current_config()
+        try:
+            self.refresh_dns_failover_record_snapshot()
+        except Exception:
+            pass
+    def get_state(self, conn, key, default=None):
+        row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return default
+        return row["value"]
+    def set_state(self, conn, key, value):
+        conn.execute(
+            """
+            INSERT INTO app_state (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, str(value)),
+        )
+    def format_optional_display_time(self, value, default="暂无"):
+        localized = localize_time(value)
+        if localized is None:
+            return default
+        return localized.strftime("%Y-%m-%d %H:%M:%S")
+    def disable_auto_stopped_ports(self, reload_xray=True):
+        with self.write_lock:
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                changed = self.disable_auto_stopped_ports_in_tx(conn)
+                if changed:
+                    self.persist_and_reload(conn, reload_xray=reload_xray)
+                else:
+                    conn.commit()
+                return changed
+    def apply_mutation(self, operation):
+        with self.write_lock:
+            self.sync_traffic_state_locked()
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    result = operation(conn)
+                    self.disable_auto_stopped_ports_in_tx(conn)
+                    self.persist_and_reload(conn, reload_xray=True)
+                    return result
+                except Exception:
+                    conn.rollback()
+                    raise
+    def apply_state_update(self, operation):
+        with self.write_lock:
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    result = operation(conn)
+                    conn.commit()
+                    return result
+                except Exception:
+                    conn.rollback()
+                    raise
+    def disable_auto_stopped_ports_in_tx(self, conn):
+        now_dt = utc_now()
+        now_text = now_dt.isoformat(timespec="seconds")
+        cleaned = self.cleanup_expired_ports_in_tx(conn)
+        rows = conn.execute(
+            """
+            SELECT
+                p.id,
+                p.listen_port,
+                p.expires_at,
+                p.traffic_limit_bytes,
+                COALESCE(t.total_bytes_sent, 0) AS total_bytes_sent,
+                COALESCE(t.total_bytes_received, 0) AS total_bytes_received
+            FROM ports p
+            LEFT JOIN traffic_totals t ON t.listen_port = p.listen_port
+            WHERE p.enabled = 1
+            """,
+        ).fetchall()
+        changed = 0
+        for row in rows:
+            usage_bytes = int(row["total_bytes_sent"]) + int(row["total_bytes_received"])
+            quota_reached = row["traffic_limit_bytes"] is not None and usage_bytes >= int(row["traffic_limit_bytes"])
+            if quota_reached:
+                conn.execute(
+                    "UPDATE ports SET enabled = 0, updated_at = ? WHERE id = ?",
+                    (now_text, row["id"]),
+                )
+                changed += 1
+        return changed + cleaned
+    def persist_and_reload(self, conn, reload_xray):
+        previous_panel_ports = XRAY_PANEL_PORTS_PATH.read_text(encoding="utf-8") if XRAY_PANEL_PORTS_PATH.exists() else None
+        previous_config = XRAY_CONFIG_PATH.read_text(encoding="utf-8") if XRAY_CONFIG_PATH.exists() else None
+        panel_ports_payload = self.render_panel_ports_payload(conn)
+        self.write_json_file(XRAY_PANEL_PORTS_PATH, panel_ports_payload)
+        try:
+            self.render_xray_config()
+            self.xray_config_test()
+            if reload_xray:
+                self.restart_data_plane()
+        except Exception:
+            if previous_panel_ports is None:
+                XRAY_PANEL_PORTS_PATH.unlink(missing_ok=True)
+            else:
+                XRAY_PANEL_PORTS_PATH.write_text(previous_panel_ports, encoding="utf-8")
+            if previous_config is None:
+                XRAY_CONFIG_PATH.unlink(missing_ok=True)
+            else:
+                XRAY_CONFIG_PATH.write_text(previous_config, encoding="utf-8")
+            if self.data_plane.supports_sync():
+                try:
+                    self.data_plane.sync_generated_files(validate_config=True)
+                except RuntimeError:
+                    pass
+            raise
+        conn.commit()
+    def render_panel_ports_payload(self, conn):
+        rows = conn.execute(
+            """
+            SELECT
+                p.listen_port
+            FROM ports
+            AS p
+            LEFT JOIN traffic_totals t ON t.listen_port = p.listen_port
+            WHERE p.enabled = 1
+              AND (p.expires_at IS NULL OR p.expires_at > ?)
+              AND (
+                    p.traffic_limit_bytes IS NULL
+                    OR COALESCE(t.total_bytes_sent, 0) + COALESCE(t.total_bytes_received, 0) < p.traffic_limit_bytes
+                  )
+            ORDER BY p.listen_port ASC
+            """,
+            (utc_iso_now(),),
+        ).fetchall()
+        return {
+            "ports": [int(row["listen_port"]) for row in rows],
+        }
+    def write_current_config(self):
+        with self.connect() as conn:
+            self.write_json_file(XRAY_PANEL_PORTS_PATH, self.render_panel_ports_payload(conn))
+        self.render_xray_config()
+        self.xray_config_test()
+    def write_json_file(self, path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    def render_xray_config(self):
+        self.sync_data_plane_dynamic_routing()
+        share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
+        self.run_command(
+            [
+                sys.executable,
+                "-m",
+                "app.xray.render_config",
+                "--env-file",
+                str(XRAY_ENV_FILE_PATH),
+                "--config-out",
+                str(XRAY_CONFIG_PATH),
+                "--client-out",
+                str(XRAY_CLIENT_CONFIG_PATH),
+                "--share-out",
+                str(share_path),
+                "--panel-ports-file",
+                str(XRAY_PANEL_PORTS_PATH),
+            ],
+            "Xray 配置渲染失败",
+        )
+    def sync_data_plane_dynamic_routing(self):
+        if not self.data_plane.supports_dynamic_routing_pull():
+            return False
+        return self.data_plane.sync_dynamic_routing_from_remote()
+    def sync_data_plane_artifacts(self):
+        if not self.data_plane.supports_sync():
+            return []
+        return self.data_plane.sync_generated_files(validate_config=True)
+    def xray_config_test(self):
+        if self.data_plane.supports_sync():
+            self.sync_data_plane_artifacts()
+            return
+        self.data_plane.test_config()
+    def restart_data_plane(self):
+        return self.data_plane.restart()
+    def data_plane_configured(self):
+        return self.data_plane.is_configured()
+    def data_plane_running(self):
+        return self.data_plane.is_running()
+    def read_xray_traffic_stats(self):
+        if not self.data_plane_running():
+            return {}
+        try:
+            completed = self.data_plane.run_statsquery(
+                XRAY_STATS_QUERY_TIMEOUT,
+                "inbound>>>panel-",
+            )
+            if completed is None:
+                return {}
+            payload = json.loads(completed.stdout or "{}")
+        except (RuntimeError, json.JSONDecodeError):
+            return {}
+
+        counters = {}
+        for item in payload.get("stat", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            parts = name.split(">>>")
+            if len(parts) != 4 or parts[0] != "inbound" or parts[2] != "traffic":
+                continue
+            tag = parts[1]
+            if not tag.startswith("panel-"):
+                continue
+            try:
+                listen_port = int(tag.removeprefix("panel-"))
+                value = int(item.get("value", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            counter = counters.setdefault(
+                listen_port,
+                {
+                    "bytes_sent": 0,
+                    "bytes_received": 0,
+                },
+            )
+            if parts[3] == "uplink":
+                counter["bytes_received"] += value
+            elif parts[3] == "downlink":
+                counter["bytes_sent"] += value
+        return counters
+    def restart_data_plane_or_raise(self):
+        if not self.data_plane.is_configured():
+            raise ValidationError("数据面未配置。")
+        if not self.data_plane.supports_restart():
+            raise ValidationError("当前数据面未配置可用的重启方式。")
+        restarted = self.data_plane.restart()
+        if not restarted:
+            raise ValidationError("当前数据面不可重启。")
+        return self.data_plane.status_summary()
+    def run_command(self, command, error_prefix, timeout=None):
+        completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)
+        if completed.returncode == 0:
+            return completed
+        detail = completed.stderr.strip() or completed.stdout.strip() or "未知错误"
+        raise RuntimeError(f"{error_prefix}: {detail}")
+    def maintenance_loop(self):
+        last_probe_at = 0.0
+        last_dns_failover_at = 0.0
+        while not self.stop_event.wait(MAINTENANCE_INTERVAL):
+            try:
+                self.sync_traffic_state()
+                self.disable_auto_stopped_ports(reload_xray=True)
+                now_monotonic = time.monotonic()
+                if PROBE_ENABLED and now_monotonic - last_probe_at >= PROBE_INTERVAL:
+                    self.run_upstream_probes()
+                    last_probe_at = now_monotonic
+                if (
+                    self.dns_failover_manager.config.enabled
+                    and now_monotonic - last_dns_failover_at >= self.dns_failover_manager.config.interval
+                ):
+                    self.run_dns_failover_check()
+                    last_dns_failover_at = now_monotonic
+            except Exception:
+                continue
+    def stop(self):
+        if self.stop_event.is_set():
+            return
+        self.stop_event.set()
+        self.sync_traffic_state()
