@@ -7,6 +7,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Built SPA bundles — produced by `npm run build` (and the Docker frontend-builder
+# stage). Not committed; run the build for local non-Docker serving.
+app/static/admin/
+app/static/portal/
+
 # Frontend toolchain deps/cache. The BUILT app/static/panel.js IS committed
 # (runtime Docker has no build step), so do not ignore that.
 frontend/node_modules/

@@ -4,3 +4,13 @@ backups
 __pycache__
 app/__pycache__
 app/static/.DS_Store
+
+# Built SPA bundles are produced by the frontend-builder stage, not copied from
+# the build context.
+app/static/admin
+app/static/portal
+
+# Keep the build context small.
+.git
+.venv
+frontend/node_modules
