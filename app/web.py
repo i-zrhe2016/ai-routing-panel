@@ -56,19 +56,61 @@ from .subscriptions import (
     parse_xray_client_profile,
 )
 
-app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config.update(
-    SECRET_KEY=PANEL_SECRET_KEY or secrets.token_hex(32),
-    SESSION_COOKIE_NAME="xray-routing-panel-session",
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=PANEL_PUBLIC_URL.startswith("https://"),
-)
+# Routes, before_request hooks and template filters are collected at import time
+# and applied by create_app(). This gives the module a real app factory while
+# every handler stays a plain module-level function, and — crucially — endpoint
+# names stay bare (the function name), so url_for(...) in templates and the
+# endpoint-name sets in the before_request guards keep working unchanged.
+_ROUTES = []
+_BEFORE_REQUEST = []
+_TEMPLATE_FILTERS = []
+
+
+def route(rule, **options):
+    def decorator(view_func):
+        _ROUTES.append((rule, options, view_func))
+        return view_func
+
+    return decorator
+
+
+def before_request(view_func):
+    _BEFORE_REQUEST.append(view_func)
+    return view_func
+
+
+def template_filter(name):
+    def decorator(filter_func):
+        _TEMPLATE_FILTERS.append((name, filter_func))
+        return filter_func
+
+    return decorator
+
+
+def create_app():
+    flask_app = Flask(__name__, template_folder="templates", static_folder="static")
+    flask_app.config.update(
+        SECRET_KEY=PANEL_SECRET_KEY or secrets.token_hex(32),
+        SESSION_COOKIE_NAME="xray-routing-panel-session",
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=PANEL_PUBLIC_URL.startswith("https://"),
+    )
+    for rule, options, view_func in _ROUTES:
+        endpoint = options.get("endpoint", view_func.__name__)
+        extra = {key: value for key, value in options.items() if key != "endpoint"}
+        flask_app.add_url_rule(rule, endpoint, view_func, **extra)
+    for view_func in _BEFORE_REQUEST:
+        flask_app.before_request(view_func)
+    for name, filter_func in _TEMPLATE_FILTERS:
+        flask_app.add_template_filter(filter_func, name)
+    return flask_app
+
 
 state = PanelState()
 
 
-@app.before_request
+@before_request
 def ensure_basic_auth():
     if request.path == "/healthz":
         return None
@@ -115,7 +157,7 @@ def ensure_basic_auth():
     return auth_required_response()
 
 
-@app.before_request
+@before_request
 def ensure_tenant_panel_auth():
     if request.endpoint != "tenant_panel":
         return None
@@ -147,7 +189,7 @@ def ensure_tenant_panel_auth():
     return redirect(tenant_login_target(tenant_token), code=303)
 
 
-@app.before_request
+@before_request
 def ensure_customer_portal_auth():
     customer_endpoints = {
         "customer_dashboard",
@@ -168,7 +210,7 @@ def ensure_customer_portal_auth():
     return customer_auth_required_response()
 
 
-@app.template_filter("human_bytes")
+@template_filter("human_bytes")
 def human_bytes_filter(value):
     return human_bytes(value)
 
@@ -402,7 +444,7 @@ def require_csrf():
         abort(400, description="CSRF token 无效。")
 
 
-@app.route("/login", methods=["GET", "POST"])
+@route("/login", methods=["GET", "POST"])
 def login():
     next_target = normalize_next_target(request.values.get("next"), fallback=url_for("index"))
     authenticated_tenant = get_authenticated_tenant()
@@ -436,13 +478,13 @@ def login():
     return render_login_page(next_target=next_target)
 
 
-@app.route("/logout", methods=["GET", "POST"])
+@route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
     return redirect(url_for("login", message="已退出登录。", level="info"), code=303)
 
 
-@app.route("/plans", methods=["GET"])
+@route("/plans", methods=["GET"])
 def plans_page():
     return render_template(
         "plans.html",
@@ -452,7 +494,7 @@ def plans_page():
     )
 
 
-@app.route("/checkout/<plan_slug>", methods=["GET"])
+@route("/checkout/<plan_slug>", methods=["GET"])
 def checkout_plan(plan_slug):
     customer = get_authenticated_customer()
     if customer is None:
@@ -469,7 +511,7 @@ def checkout_plan(plan_slug):
     )
 
 
-@app.route("/customer/register", methods=["GET", "POST"])
+@route("/customer/register", methods=["GET", "POST"])
 def customer_register():
     next_target = normalize_next_target(request.values.get("next"), fallback=url_for("plans_page"))
     customer = get_authenticated_customer()
@@ -508,7 +550,7 @@ def customer_register():
     return render_customer_register_page(next_target=next_target)
 
 
-@app.route("/customer/login", methods=["GET", "POST"])
+@route("/customer/login", methods=["GET", "POST"])
 def customer_login():
     next_target = normalize_next_target(request.values.get("next"), fallback=customer_dashboard_target())
     customer = get_authenticated_customer()
@@ -539,13 +581,13 @@ def customer_login():
     return render_customer_login_page(next_target=next_target)
 
 
-@app.route("/customer/logout", methods=["GET", "POST"])
+@route("/customer/logout", methods=["GET", "POST"])
 def customer_logout():
     clear_customer_session()
     return redirect(url_for("plans_page"), code=303)
 
 
-@app.route("/", methods=["GET"])
+@route("/", methods=["GET"])
 def index():
     return render_template(
         "index.html",
@@ -557,7 +599,7 @@ def index():
     )
 
 
-@app.route("/customer/dashboard", methods=["GET"])
+@route("/customer/dashboard", methods=["GET"])
 def customer_dashboard():
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
@@ -574,7 +616,7 @@ def customer_dashboard():
     )
 
 
-@app.route("/customer/orders", methods=["GET"])
+@route("/customer/orders", methods=["GET"])
 def customer_orders():
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
@@ -590,7 +632,7 @@ def customer_orders():
     )
 
 
-@app.route("/customer/orders/<order_no>", methods=["GET"])
+@route("/customer/orders/<order_no>", methods=["GET"])
 def customer_order_detail(order_no):
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
@@ -616,7 +658,7 @@ def customer_order_detail(order_no):
     )
 
 
-@app.route("/customer/orders/<order_no>/payment-proof", methods=["POST"])
+@route("/customer/orders/<order_no>/payment-proof", methods=["POST"])
 def customer_submit_order_payment_proof(order_no):
     customer = get_authenticated_customer()
     if customer is None:
@@ -646,7 +688,7 @@ def customer_submit_order_payment_proof(order_no):
         )
 
 
-@app.route("/customer/subscriptions", methods=["GET"])
+@route("/customer/subscriptions", methods=["GET"])
 def customer_subscriptions():
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
@@ -667,7 +709,7 @@ def customer_subscriptions():
     )
 
 
-@app.route("/customer/subscriptions/<int:service_subscription_id>", methods=["GET"])
+@route("/customer/subscriptions/<int:service_subscription_id>", methods=["GET"])
 def customer_subscription_detail(service_subscription_id):
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
@@ -689,7 +731,7 @@ def customer_subscription_detail(service_subscription_id):
     )
 
 
-@app.route("/customer/subscriptions/<int:service_subscription_id>/renew", methods=["POST"])
+@route("/customer/subscriptions/<int:service_subscription_id>/renew", methods=["POST"])
 def customer_subscription_renew(service_subscription_id):
     customer = get_authenticated_customer()
     if customer is None:
@@ -718,7 +760,7 @@ def customer_subscription_renew(service_subscription_id):
         )
 
 
-@app.route("/orders", methods=["POST"])
+@route("/orders", methods=["POST"])
 def create_order():
     customer = get_authenticated_customer()
     if customer is None:
@@ -754,7 +796,7 @@ def create_order():
         return redirect(url_for("customer_dashboard", message=str(exc), level="error"), code=303)
 
 
-@app.route("/probe-dashboard", methods=["GET"])
+@route("/probe-dashboard", methods=["GET"])
 def probe_dashboard():
     if not PROBE_ENABLED:
         return redirect(url_for("index", message="探针检测已停用。", level="info"), code=303)
@@ -772,7 +814,7 @@ def probe_dashboard():
     )
 
 
-@app.route("/ai-domain-dashboard", methods=["GET"])
+@route("/ai-domain-dashboard", methods=["GET"])
 def ai_domain_dashboard():
     ai_sync_error = ""
     try:
@@ -792,7 +834,7 @@ def ai_domain_dashboard():
     )
 
 
-@app.route("/tenant/<tenant_token>/login", methods=["GET", "POST"])
+@route("/tenant/<tenant_token>/login", methods=["GET", "POST"])
 def tenant_login(tenant_token):
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
@@ -821,13 +863,13 @@ def tenant_login(tenant_token):
     )
 
 
-@app.route("/tenant/<tenant_token>/logout", methods=["GET", "POST"])
+@route("/tenant/<tenant_token>/logout", methods=["GET", "POST"])
 def tenant_logout(tenant_token):
     clear_tenant_session()
     return redirect(tenant_login_target(tenant_token, message="已退出登录。", level="info"), code=303)
 
 
-@app.route("/tenant/<tenant_token>", methods=["GET"])
+@route("/tenant/<tenant_token>", methods=["GET"])
 def tenant_panel(tenant_token):
     state.sync_traffic_state()
     state.disable_auto_stopped_ports(reload_xray=True)
@@ -841,7 +883,7 @@ def tenant_panel(tenant_token):
     return render_template("tenant_panel.html", dashboard=dashboard)
 
 
-@app.route("/healthz", methods=["GET"])
+@route("/healthz", methods=["GET"])
 def healthz():
     state.sync_traffic_state()
     data_plane_running = state.data_plane_running()
@@ -850,17 +892,17 @@ def healthz():
     return jsonify({"ok": healthy, "data_plane_running": data_plane_running}), status_code
 
 
-@app.route("/api/dashboard", methods=["GET"])
+@route("/api/dashboard", methods=["GET"])
 def api_dashboard():
     return jsonify({"ok": True, "dashboard": build_dashboard_state()})
 
 
-@app.route("/api/plans", methods=["GET"])
+@route("/api/plans", methods=["GET"])
 def api_plans():
     return jsonify({"ok": True, "plans": state.query_plans(public_only=False)})
 
 
-@app.route("/api/plans", methods=["POST"])
+@route("/api/plans", methods=["POST"])
 def api_create_plan():
     require_csrf()
     try:
@@ -873,7 +915,7 @@ def api_create_plan():
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/plans/<int:plan_id>", methods=["PUT"])
+@route("/api/plans/<int:plan_id>", methods=["PUT"])
 def api_update_plan(plan_id):
     require_csrf()
     try:
@@ -886,12 +928,12 @@ def api_update_plan(plan_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/orders", methods=["GET"])
+@route("/api/orders", methods=["GET"])
 def api_orders():
     return jsonify({"ok": True, "orders": state.query_admin_orders(request.args.get("status", "").strip())})
 
 
-@app.route("/api/orders/<int:order_id>/fulfill", methods=["POST"])
+@route("/api/orders/<int:order_id>/fulfill", methods=["POST"])
 def api_fulfill_order(order_id):
     require_csrf()
     try:
@@ -903,7 +945,7 @@ def api_fulfill_order(order_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/orders/<int:order_id>/reject", methods=["POST"])
+@route("/api/orders/<int:order_id>/reject", methods=["POST"])
 def api_reject_order(order_id):
     require_csrf()
     try:
@@ -913,7 +955,7 @@ def api_reject_order(order_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/orders/<int:order_id>/cancel", methods=["POST"])
+@route("/api/orders/<int:order_id>/cancel", methods=["POST"])
 def api_cancel_order(order_id):
     require_csrf()
     try:
@@ -923,12 +965,12 @@ def api_cancel_order(order_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/commerce-settings", methods=["GET"])
+@route("/api/commerce-settings", methods=["GET"])
 def api_commerce_settings():
     return jsonify({"ok": True, "settings": state.get_commerce_settings()})
 
 
-@app.route("/api/commerce-settings", methods=["PUT"])
+@route("/api/commerce-settings", methods=["PUT"])
 def api_update_commerce_settings():
     require_csrf()
     try:
@@ -938,12 +980,12 @@ def api_update_commerce_settings():
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/dns-failover", methods=["GET"])
+@route("/api/dns-failover", methods=["GET"])
 def api_dns_failover_status():
     return jsonify({"ok": True, "status": state.dns_failover_status()})
 
 
-@app.route("/api/dns-failover/check", methods=["POST"])
+@route("/api/dns-failover/check", methods=["POST"])
 def api_dns_failover_check():
     try:
         state.run_dns_failover_check(force=True)
@@ -952,7 +994,7 @@ def api_dns_failover_check():
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/dns-failover/switch", methods=["POST"])
+@route("/api/dns-failover/switch", methods=["POST"])
 def api_dns_failover_switch():
     try:
         payload = request_payload()
@@ -962,13 +1004,13 @@ def api_dns_failover_switch():
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/subscriptions/rotate", methods=["POST"])
+@route("/api/subscriptions/rotate", methods=["POST"])
 def api_rotate_subscription():
     state.rotate_subscription_token()
     return json_success_response("订阅链接已重新生成，旧链接已失效。")
 
 
-@app.route("/api/ports", methods=["POST"])
+@route("/api/ports", methods=["POST"])
 def api_create_port():
     try:
         payload = state.validate_port_payload(request_payload())
@@ -980,7 +1022,7 @@ def api_create_port():
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/ports/<int:port_id>", methods=["PUT"])
+@route("/api/ports/<int:port_id>", methods=["PUT"])
 def api_update_port(port_id):
     try:
         payload = state.validate_port_payload(request_payload())
@@ -992,7 +1034,7 @@ def api_update_port(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/ports/<int:port_id>/toggle", methods=["POST"])
+@route("/api/ports/<int:port_id>/toggle", methods=["POST"])
 def api_toggle_port(port_id):
     try:
         state.toggle_port(port_id)
@@ -1001,7 +1043,7 @@ def api_toggle_port(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/ports/<int:port_id>", methods=["DELETE"])
+@route("/api/ports/<int:port_id>", methods=["DELETE"])
 def api_delete_port(port_id):
     try:
         state.delete_port(port_id)
@@ -1010,7 +1052,7 @@ def api_delete_port(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/ports/<int:port_id>/reset-traffic", methods=["POST"])
+@route("/api/ports/<int:port_id>/reset-traffic", methods=["POST"])
 def api_reset_port_traffic(port_id):
     try:
         restored = state.reset_port_traffic(port_id)
@@ -1020,7 +1062,7 @@ def api_reset_port_traffic(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/ports/<int:port_id>/rotate-tenant-token", methods=["POST"])
+@route("/api/ports/<int:port_id>/rotate-tenant-token", methods=["POST"])
 def api_rotate_port_tenant_token(port_id):
     try:
         state.rotate_port_tenant_token(port_id)
@@ -1029,7 +1071,7 @@ def api_rotate_port_tenant_token(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/ports/<int:port_id>/rotate-tenant-credentials", methods=["POST"])
+@route("/api/ports/<int:port_id>/rotate-tenant-credentials", methods=["POST"])
 def api_rotate_port_tenant_credentials(port_id):
     try:
         state.rotate_port_tenant_credentials(port_id)
@@ -1038,7 +1080,7 @@ def api_rotate_port_tenant_credentials(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/ports/<int:port_id>/rotate-subscription-token", methods=["POST"])
+@route("/api/ports/<int:port_id>/rotate-subscription-token", methods=["POST"])
 def api_rotate_port_subscription_token(port_id):
     try:
         state.rotate_port_subscription_token(port_id)
@@ -1047,7 +1089,7 @@ def api_rotate_port_subscription_token(port_id):
         return json_error_response(str(exc), status_code=400)
 
 
-@app.route("/api/data-plane/restart", methods=["POST"])
+@route("/api/data-plane/restart", methods=["POST"])
 def api_restart_data_plane():
     try:
         state.restart_data_plane_or_raise()
@@ -1098,43 +1140,43 @@ def build_port_token_subscription_response(subscription_token, output_format):
     return Response(content, content_type=content_type)
 
 
-@app.route("/subscriptions/rotate", methods=["POST"])
+@route("/subscriptions/rotate", methods=["POST"])
 def rotate_subscription():
     state.rotate_subscription_token()
     return message_redirect("订阅链接已重新生成，旧链接已失效。", "success")
 
 
-@app.route("/<token>/<int:listen_port>", methods=["GET"])
+@route("/<token>/<int:listen_port>", methods=["GET"])
 def subscription_default(token, listen_port):
     return build_subscription_response(token, listen_port, "clash")
 
 
-@app.route("/<token>/<int:listen_port>/clash", methods=["GET"])
+@route("/<token>/<int:listen_port>/clash", methods=["GET"])
 def subscription_clash(token, listen_port):
     return build_subscription_response(token, listen_port, "clash")
 
 
-@app.route("/<token>/<int:listen_port>/v2ray", methods=["GET"])
+@route("/<token>/<int:listen_port>/v2ray", methods=["GET"])
 def subscription_v2ray(token, listen_port):
     return build_subscription_response(token, listen_port, "v2ray")
 
 
-@app.route("/tenant-subscriptions/<subscription_token>", methods=["GET"])
+@route("/tenant-subscriptions/<subscription_token>", methods=["GET"])
 def tenant_subscription_default(subscription_token):
     return build_port_token_subscription_response(subscription_token, "clash")
 
 
-@app.route("/tenant-subscriptions/<subscription_token>/clash", methods=["GET"])
+@route("/tenant-subscriptions/<subscription_token>/clash", methods=["GET"])
 def tenant_subscription_clash(subscription_token):
     return build_port_token_subscription_response(subscription_token, "clash")
 
 
-@app.route("/tenant-subscriptions/<subscription_token>/v2ray", methods=["GET"])
+@route("/tenant-subscriptions/<subscription_token>/v2ray", methods=["GET"])
 def tenant_subscription_v2ray(subscription_token):
     return build_port_token_subscription_response(subscription_token, "v2ray")
 
 
-@app.route("/payment-proofs/<int:submission_id>", methods=["GET"])
+@route("/payment-proofs/<int:submission_id>", methods=["GET"])
 def payment_proof_file(submission_id):
     record = state.get_payment_submission_record(submission_id)
     if record is None:
@@ -1158,7 +1200,7 @@ def payment_proof_file(submission_id):
     return send_file(path)
 
 
-@app.route("/ports/create", methods=["POST"])
+@route("/ports/create", methods=["POST"])
 def create_port():
     try:
         payload = state.validate_port_payload(request.form)
@@ -1170,7 +1212,7 @@ def create_port():
         return message_redirect(str(exc), "error")
 
 
-@app.route("/ports/<int:port_id>/update", methods=["POST"])
+@route("/ports/<int:port_id>/update", methods=["POST"])
 def update_port(port_id):
     try:
         payload = state.validate_port_payload(request.form)
@@ -1182,7 +1224,7 @@ def update_port(port_id):
         return message_redirect(str(exc), "error")
 
 
-@app.route("/ports/<int:port_id>/toggle", methods=["POST"])
+@route("/ports/<int:port_id>/toggle", methods=["POST"])
 def toggle_port(port_id):
     try:
         state.toggle_port(port_id)
@@ -1191,7 +1233,7 @@ def toggle_port(port_id):
         return message_redirect(str(exc), "error")
 
 
-@app.route("/ports/<int:port_id>/delete", methods=["POST"])
+@route("/ports/<int:port_id>/delete", methods=["POST"])
 def delete_port(port_id):
     try:
         state.delete_port(port_id)
@@ -1200,7 +1242,7 @@ def delete_port(port_id):
         return message_redirect(str(exc), "error")
 
 
-@app.route("/ports/<int:port_id>/reset-traffic", methods=["POST"])
+@route("/ports/<int:port_id>/reset-traffic", methods=["POST"])
 def reset_port_traffic(port_id):
     try:
         restored = state.reset_port_traffic(port_id)
@@ -1212,6 +1254,11 @@ def reset_port_traffic(port_id):
 
 def message_redirect(message, level):
     return redirect(url_for("index", message=message, level=level), code=303)
+
+
+# Built once at import so `from app.web import app` and the test harness's
+# `module.app` keep working. Tests re-import the module to get a fresh app.
+app = create_app()
 
 
 def handle_shutdown(signum, _frame):
