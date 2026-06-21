@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Build/test toolchain for the admin panel Vue app (emits app/static/panel.js).",
+  "description": "Build/test toolchain for the admin + portal Vue SPAs (emits app/static/{admin,portal}/).",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build -c vite.portal.config.js",
+    "build:admin": "vite build",
+    "build:portal": "vite build -c vite.portal.config.js",
     "test": "vitest run"
   },
   "devDependencies": {

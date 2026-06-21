@@ -145,6 +145,23 @@ def ensure_basic_auth():
         "tenant_subscription_default",
         "tenant_subscription_clash",
         "tenant_subscription_v2ray",
+        # Subscriber portal shell + JSON API (self-gate via the customer session
+        # / are public). Allowlisted so admin Basic auth does not intercept them.
+        "portal_shell",
+        "portal_shell_path",
+        "api_customer_me",
+        "api_customer_overview",
+        "api_customer_subscriptions",
+        "api_customer_subscription_detail",
+        "api_customer_subscription_renew",
+        "api_customer_orders",
+        "api_customer_order_detail",
+        "api_customer_create_order",
+        "api_customer_submit_payment_proof",
+        "api_customer_plans",
+        "api_customer_login",
+        "api_customer_register",
+        "api_customer_logout",
     }:
         return None
     if session.get(AUTH_SESSION_KEY) and not is_session_authenticated():
@@ -386,6 +403,39 @@ def json_success_response(message="", level="success", status_code=200):
 
 def json_error_response(message, status_code=400):
     return jsonify({"ok": False, "message": message}), status_code
+
+
+def json_customer_success(data=None, message="", level="success", status_code=200):
+    # Subscriber-portal success envelope. Unlike json_success_response it does NOT
+    # rebuild the admin dashboard; it returns just the affected resource so the
+    # portal SPA updates in place.
+    return (
+        jsonify({"ok": True, "message": message, "level": level, "data": data if data is not None else {}}),
+        status_code,
+    )
+
+
+def json_customer_auth_required():
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "code": "auth_required",
+                "message": "请先登录。",
+                "login_url": url_for("customer_login"),
+            }
+        ),
+        401,
+    )
+
+
+def json_validate_csrf():
+    # Returns a JSON 400 tuple when the CSRF token is missing/invalid, else None,
+    # so JSON endpoints stay JSON instead of aborting to an HTML error page.
+    token = request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
+    if not validate_csrf_token(token):
+        return json_error_response("CSRF token 无效。", 400)
+    return None
 
 
 def request_payload():
