@@ -5,6 +5,7 @@ from flask import redirect, render_template, request, session, url_for
 
 from ..auth import (
     credentials_match,
+    ensure_csrf_token,
     mark_session_authenticated,
     mark_tenant_session_authenticated,
     normalize_next_target,
@@ -20,7 +21,6 @@ from ..config import (
 )
 from ..errors import ValidationError
 from .core import (
-    build_dashboard_state,
     customer_dashboard_target,
     get_authenticated_customer,
     get_authenticated_tenant,
@@ -74,13 +74,12 @@ def logout():
 
 @route("/", methods=["GET"])
 def index():
+    # The admin is now a built SPA (app/static/admin/*). The shell only needs the
+    # CSRF token and auth flag; the SPA fetches GET /api/dashboard on mount (which
+    # runs the same build_dashboard_state side effects the page render used to).
     return render_template(
         "index.html",
-        auth_enabled=AUTH_ENABLED,
-        initial_state=build_dashboard_state(
-            message=request.args.get("message", "").strip(),
-            level=request.args.get("level", "info").strip(),
-        ),
+        boot={"csrf_token": ensure_csrf_token(), "auth_enabled": AUTH_ENABLED},
     )
 
 

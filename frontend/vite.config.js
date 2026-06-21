@@ -1,27 +1,22 @@
 import { resolve } from "node:path";
+import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 
-// Builds the admin panel into a single IIFE bundle emitted as app/static/panel.js.
-// Vue is kept EXTERNAL and mapped to the global `Vue` so the bundle keeps using the
-// CDN build loaded by index.html (vue.global.prod.js), which ships the runtime
-// template compiler that the in-DOM template in index.html needs. The runtime
-// deployment is therefore unchanged: index.html still loads CDN Vue + this file.
+// Builds the admin SPA (SFC + Naive UI, Vue bundled in) to app/static/admin/.
+// index.html is a thin shell loading admin/admin.js (+ admin.css). A `portal`
+// entry will be added in P3. The old IIFE panel.js entry is retired in this
+// phase — the SFC admin replaces it.
 export default defineConfig({
+  plugins: [vue()],
   build: {
-    outDir: resolve(__dirname, "../app/static"),
-    emptyOutDir: false,
-    minify: false,
-    lib: {
-      entry: resolve(__dirname, "src/main.js"),
-      formats: ["iife"],
-      name: "PanelApp",
-      fileName: () => "panel.js",
-    },
+    outDir: resolve(__dirname, "../app/static/admin"),
+    emptyOutDir: true,
     rollupOptions: {
-      external: ["vue"],
+      input: resolve(__dirname, "src/admin/main.js"),
       output: {
-        globals: { vue: "Vue" },
-        entryFileNames: "panel.js",
+        entryFileNames: "admin.js",
+        assetFileNames: "admin.[ext]",
+        chunkFileNames: "admin-[name].js",
       },
     },
   },
