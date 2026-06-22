@@ -6,7 +6,14 @@ Error messages are kept verbatim (Chinese) because callers surface them to the
 admin UI and tests assert on them.
 """
 
+import re
 import shlex
+from datetime import timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+TIME_OF_DAY_RE = re.compile(r"^(?P<hour>\d{2}):(?P<minute>\d{2})$")
+UTC_OFFSET_RE = re.compile(r"^(?P<sign>[+-])(?P<hour>\d{2}):(?P<minute>\d{2})$")
 
 
 def parse_optional_env_port(value, field_name):
@@ -62,3 +69,39 @@ def parse_shell_words_env(value, field_name):
         return tuple(shlex.split(raw))
     except ValueError as exc:
         raise ValueError(f"{field_name} 配置格式无效。") from exc
+
+
+def parse_time_of_day_env(value, field_name):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = TIME_OF_DAY_RE.fullmatch(raw)
+    if match is None:
+        raise ValueError(f"{field_name} 必须使用 HH:MM 格式。")
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute"))
+    if hour > 23 or minute > 59:
+        raise ValueError(f"{field_name} 必须使用有效的 HH:MM 时间。")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def parse_timezone_env(value, field_name):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    offset_match = UTC_OFFSET_RE.fullmatch(raw)
+    if offset_match is not None:
+        hour = int(offset_match.group("hour"))
+        minute = int(offset_match.group("minute"))
+        if hour > 23 or minute > 59:
+            raise ValueError(f"{field_name} UTC 偏移必须有效，例如 +08:00。")
+        sign = -1 if offset_match.group("sign") == "-" else 1
+        timezone(sign * timedelta(hours=hour, minutes=minute))
+        return raw
+
+    try:
+        ZoneInfo(raw)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"{field_name} 必须是有效的时区名或 UTC 偏移，例如 Asia/Shanghai 或 +08:00。") from exc
+    return raw

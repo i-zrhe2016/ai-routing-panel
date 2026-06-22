@@ -1,7 +1,11 @@
 
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 
 from ..config import (
     CONTROL_PLANE_BACKUP_XRAY_ENABLED,
+    LOCAL_TZ,
 )
 from ..dns_failover import CloudflareApiError, resolve_public_ip
 from ..errors import ValidationError
@@ -15,9 +19,139 @@ from ..helpers import (
 class DnsFailoverService:
     def __init__(self, panel):
         self._panel = panel
+    def parse_time_of_day_minutes(self, value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        hour_text, _, minute_text = text.partition(":")
+        try:
+            hour = int(hour_text)
+            minute = int(minute_text)
+        except ValueError:
+            return None
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            return None
+        return (hour * 60) + minute
+    def resolve_dns_failover_peak_timezone(self, raw):
+        text = str(raw or "").strip()
+        if not text:
+            return LOCAL_TZ, "local"
+        if len(text) == 6 and text[0] in {"+", "-"} and text[3] == ":":
+            try:
+                hours = int(text[1:3])
+                minutes = int(text[4:6])
+            except ValueError as exc:
+                raise ValidationError("DNS_FAILOVER_PEAK_TIMEZONE 格式无效。") from exc
+            offset = timedelta(hours=hours, minutes=minutes)
+            if text[0] == "-":
+                offset = -offset
+            return timezone(offset), text
+        try:
+            return ZoneInfo(text), text
+        except ZoneInfoNotFoundError as exc:
+            raise ValidationError("DNS_FAILOVER_PEAK_TIMEZONE 无法识别。") from exc
+    def peak_window_active(self, current_minutes, start_minutes, end_minutes):
+        """Whether ``current_minutes`` falls inside the window, handling spans that cross midnight."""
+        if start_minutes < end_minutes:
+            return start_minutes <= current_minutes < end_minutes
+        return current_minutes >= start_minutes or current_minutes < end_minutes
+
+    def dns_failover_peak_window_status(self, now=None):
+        config = self._panel.dns_failover_manager.config
+        status = {
+            "enabled": bool(config.peak_enabled),
+            "configured": False,
+            "active": False,
+            "target": "backup",
+            "target_label": config.backup_label,
+            "preferred_target": "primary",
+            "preferred_target_label": self._panel.dns_failover_manager.target_label("primary"),
+            "next_preferred_target": "",
+            "next_preferred_target_label": "",
+            "start": str(config.peak_start or "").strip(),
+            "end": str(config.peak_end or "").strip(),
+            "timezone": str(config.peak_timezone or "").strip(),
+            "timezone_label": "服务器本地时区",
+            "current_time": "",
+            "next_transition_at": "",
+            "seconds_to_next_transition": 0,
+            "config_error": "",
+        }
+        if not status["enabled"]:
+            return status
+
+        start_minutes = self._panel.parse_time_of_day_minutes(status["start"])
+        end_minutes = self._panel.parse_time_of_day_minutes(status["end"])
+        if start_minutes is None or end_minutes is None:
+            status["config_error"] = "缺少有效的 DNS_FAILOVER_PEAK_START / DNS_FAILOVER_PEAK_END。"
+            return status
+        if start_minutes == end_minutes:
+            status["config_error"] = "DNS_FAILOVER_PEAK_START 与 DNS_FAILOVER_PEAK_END 不能相同。"
+            return status
+
+        try:
+            tzinfo, tz_label = self._panel.resolve_dns_failover_peak_timezone(status["timezone"])
+        except ValidationError as exc:
+            status["config_error"] = str(exc)
+            return status
+
+        current = (now or datetime.now(timezone.utc)).astimezone(tzinfo)
+        current_minutes = (current.hour * 60) + current.minute
+        active = self._panel.peak_window_active(current_minutes, start_minutes, end_minutes)
+        preferred_target = "backup" if active else "primary"
+
+        # The preference flips at the window's end boundary while active, at its start boundary otherwise.
+        next_boundary_minutes = end_minutes if active else start_minutes
+        current_seconds = (current.hour * 3600) + (current.minute * 60) + current.second
+        delta_seconds = ((next_boundary_minutes * 60) - current_seconds) % 86400 or 86400
+        next_transition = current + timedelta(seconds=delta_seconds)
+        next_preferred_target = "primary" if active else "backup"
+
+        status.update(
+            {
+                "configured": True,
+                "active": active,
+                "preferred_target": preferred_target,
+                "preferred_target_label": self._panel.dns_failover_manager.target_label(preferred_target),
+                "next_preferred_target": next_preferred_target,
+                "next_preferred_target_label": self._panel.dns_failover_manager.target_label(next_preferred_target),
+                "timezone_label": tz_label,
+                "current_time": current.strftime("%Y-%m-%d %H:%M:%S"),
+                "next_transition_at": next_transition.strftime("%Y-%m-%d %H:%M"),
+                "seconds_to_next_transition": int(delta_seconds),
+            }
+        )
+        return status
+    def evaluate_dns_failover_transition(
+        self,
+        current_target,
+        consecutive_failures,
+        consecutive_successes,
+        probe_ok,
+        preferred_target="primary",
+    ):
+        preferred = str(preferred_target or "").strip().lower()
+        if preferred not in {"primary", "backup"}:
+            preferred = "primary"
+        alternate = "backup" if preferred == "primary" else "primary"
+
+        if probe_ok:
+            if current_target == alternate and consecutive_successes >= self._panel.dns_failover_manager.config.recovery_threshold:
+                return {
+                    "target": preferred,
+                    "reason": "peak_recovery" if preferred == "backup" else "auto_recovery",
+                }
+            return None
+        if current_target == preferred and consecutive_failures >= self._panel.dns_failover_manager.config.failure_threshold:
+            return {
+                "target": alternate,
+                "reason": "peak_failover" if preferred == "backup" else "auto_failover",
+            }
+        return None
     def dns_failover_status(self):
         config = self._panel.dns_failover_manager.config
         resolved_contents = self._panel.resolve_dns_failover_contents()
+        peak_window = self._panel.dns_failover_peak_window_status()
         with self._panel.connect() as conn:
             row = conn.execute("SELECT * FROM dns_failover_state WHERE singleton_id = 1").fetchone()
         item = dict(row) if row is not None else {}
@@ -32,7 +166,13 @@ class DnsFailoverService:
             current_target = inferred if inferred in {"primary", "backup"} else "primary"
         return {
             "enabled": bool(config.enabled),
-            "configured": bool(config.enabled and config.configured() and config.record_type_supported() and not resolved_contents["error"]),
+            "configured": bool(
+                config.enabled
+                and config.configured()
+                and config.record_type_supported()
+                and not resolved_contents["error"]
+                and (not peak_window["enabled"] or peak_window["configured"])
+            ),
             "config_error": self._panel.dns_failover_config_error(),
             "current_target": current_target,
             "current_target_label": self._panel.dns_failover_manager.target_label(current_target),
@@ -66,6 +206,7 @@ class DnsFailoverService:
             "control_plane_backup_xray_enabled": bool(CONTROL_PLANE_BACKUP_XRAY_ENABLED),
             "control_plane_backup_xray_label": "控制面备用 Xray",
             "fast_propagation_note": "已使用低 TTL；非代理记录建议保持 60 秒以尽快生效。",
+            "peak_window": peak_window,
         }
     def dns_failover_config_error(self):
         config = self._panel.dns_failover_manager.config
@@ -91,6 +232,9 @@ class DnsFailoverService:
         resolved_contents = self._panel.resolve_dns_failover_contents()
         if resolved_contents["error"]:
             return resolved_contents["error"]
+        peak_window = self._panel.dns_failover_peak_window_status()
+        if peak_window["enabled"] and not peak_window["configured"]:
+            return peak_window["config_error"]
         return ""
     def resolve_dns_failover_contents(self):
         config = self._panel.dns_failover_manager.config
@@ -227,11 +371,14 @@ class DnsFailoverService:
                     record_content=row["current_record_content"] or "",
                     detail=detail,
                 )
-                transition = self._panel.dns_failover_manager.evaluate_transition(
+                peak_window = self._panel.dns_failover_peak_window_status()
+                preferred_target = peak_window["preferred_target"] if peak_window["configured"] else "primary"
+                transition = self._panel.evaluate_dns_failover_transition(
                     current_target,
                     consecutive_failures,
                     consecutive_successes,
                     probe["ok"],
+                    preferred_target=preferred_target,
                 )
                 conn.commit()
 

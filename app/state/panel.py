@@ -31,6 +31,10 @@ from ..config import (
     DNS_FAILOVER_ENABLED,
     DNS_FAILOVER_FAILURE_THRESHOLD,
     DNS_FAILOVER_INTERVAL,
+    DNS_FAILOVER_PEAK_ENABLED,
+    DNS_FAILOVER_PEAK_END,
+    DNS_FAILOVER_PEAK_START,
+    DNS_FAILOVER_PEAK_TIMEZONE,
     DNS_FAILOVER_PRIMARY_CONTENT,
     DNS_FAILOVER_PROBE_HOST,
     DNS_FAILOVER_PROBE_PORT,
@@ -137,6 +141,10 @@ class PanelState:
                 primary_content=DNS_FAILOVER_PRIMARY_CONTENT,
                 backup_content=DNS_FAILOVER_BACKUP_CONTENT,
                 backup_label=DNS_FAILOVER_BACKUP_LABEL,
+                peak_enabled=DNS_FAILOVER_PEAK_ENABLED,
+                peak_start=DNS_FAILOVER_PEAK_START,
+                peak_end=DNS_FAILOVER_PEAK_END,
+                peak_timezone=DNS_FAILOVER_PEAK_TIMEZONE,
             )
         )
 

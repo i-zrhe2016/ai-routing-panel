@@ -23,6 +23,8 @@ from .parsers import (
     parse_positive_env_float,
     parse_positive_env_int,
     parse_shell_words_env,
+    parse_time_of_day_env,
+    parse_timezone_env,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -122,6 +124,19 @@ CF_DNS_RECORD_TTL = parse_positive_env_int(
 DNS_FAILOVER_PRIMARY_CONTENT = os.environ.get("DNS_FAILOVER_PRIMARY_CONTENT", "").strip()
 DNS_FAILOVER_BACKUP_CONTENT = os.environ.get("DNS_FAILOVER_BACKUP_CONTENT", "").strip()
 DNS_FAILOVER_BACKUP_LABEL = os.environ.get("DNS_FAILOVER_BACKUP_LABEL", "控制面备用节点").strip() or "控制面备用节点"
+DNS_FAILOVER_PEAK_ENABLED = parse_bool_env(os.environ.get("DNS_FAILOVER_PEAK_ENABLED"), default=False)
+DNS_FAILOVER_PEAK_START = parse_time_of_day_env(
+    os.environ.get("DNS_FAILOVER_PEAK_START", ""),
+    "DNS_FAILOVER_PEAK_START",
+)
+DNS_FAILOVER_PEAK_END = parse_time_of_day_env(
+    os.environ.get("DNS_FAILOVER_PEAK_END", ""),
+    "DNS_FAILOVER_PEAK_END",
+)
+DNS_FAILOVER_PEAK_TIMEZONE = parse_timezone_env(
+    os.environ.get("DNS_FAILOVER_PEAK_TIMEZONE", ""),
+    "DNS_FAILOVER_PEAK_TIMEZONE",
+)
 CONTROL_PLANE_BACKUP_XRAY_ENABLED = parse_bool_env(
     os.environ.get("CONTROL_PLANE_BACKUP_XRAY_ENABLED"),
     default=False,

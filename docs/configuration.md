@@ -61,12 +61,16 @@
 | `CONTROL_PLANE_BACKUP_XRAY_ENABLED` | 是否启用“控制面本机公网 IP + 备用 Xray”自动备用模式 |
 | `DNS_FAILOVER_BACKUP_CONTENT` | 控制面备用节点 IP 或 CNAME；留空时自动获取控制面本机公网 IP |
 | `DNS_FAILOVER_BACKUP_LABEL` | 首页展示用备用节点名称 |
+| `DNS_FAILOVER_PEAK_ENABLED` | 是否启用“高峰窗口优先专用节点” |
+| `DNS_FAILOVER_PEAK_START` / `DNS_FAILOVER_PEAK_END` | 高峰窗口起止时间，格式 `HH:MM` |
+| `DNS_FAILOVER_PEAK_TIMEZONE` | 高峰窗口时区；支持 `Asia/Shanghai` 或 `+08:00` |
 
 说明：
 
 - 当前只支持通过 `CF_DNS_RECORD_ID` 更新单条记录
 - 自动切换只看 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
 - AI 节点状态只展示，不参与任何 DNS 切换决策
+- 若启用高峰窗口，窗口内会把备用/专用节点视为首选目标；窗口外恢复主节点优先
 - 如果 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP
 - 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 且 `DNS_FAILOVER_BACKUP_CONTENT` 留空，控制面会自动获取本机公网 IP，适合作为控制面备用 Xray 的 DNS 指向
 - 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，则必须显式填写 `DNS_FAILOVER_BACKUP_CONTENT`
@@ -136,6 +140,7 @@
 - `AI_UPSTREAM_FALLBACKS` 在主上游后追加多个备用上游
 - `AI_UPSTREAMS` 直接覆盖完整优先级列表
 - `AI_UPSTREAM_FALLBACK_URL` 适合备用上游使用不同 UUID / `pbk` / `sid` / `sni`
+- 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
 
 ### 域名分类器
 

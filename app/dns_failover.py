@@ -47,6 +47,10 @@ class DnsFailoverConfig:
     primary_content: str
     backup_content: str
     backup_label: str
+    peak_enabled: bool = False
+    peak_start: str = ""
+    peak_end: str = ""
+    peak_timezone: str = ""
 
     def configured(self):
         return all(

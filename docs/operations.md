@@ -73,6 +73,7 @@
 - 只探测 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
 - 连续失败达到 `DNS_FAILOVER_FAILURE_THRESHOLD` 时，把单条 Cloudflare DNS 记录切到备用目标
 - 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD` 时，自动回切到主数据面
+- 如果启用了高峰窗口，窗口内会把备用/专用节点视为首选目标，窗口外恢复主节点优先
 - AI 路由或 AI 节点状态不会触发任何 DNS 切换
 
 手动入口：
@@ -95,6 +96,14 @@
 - 控制面作为备用时，启动方式为：`docker compose --profile backup-xray up -d xray-reality-backup`
 - 如果控制面本机要接管流量，可把 `DNS_FAILOVER_BACKUP_CONTENT` 留空，让面板自动获取控制面本机公网 IP
 - 如果不想启用这套本机备用模式，保持 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，并手动填写 `DNS_FAILOVER_BACKUP_CONTENT`
+
+高峰专用节点示例：
+
+- `DNS_FAILOVER_PEAK_ENABLED=1`
+- `DNS_FAILOVER_PEAK_START=19:00`
+- `DNS_FAILOVER_PEAK_END=23:00`
+- `DNS_FAILOVER_PEAK_TIMEZONE=America/Los_Angeles`
+- 启用后，面板会在该时区的 19:00-23:00 把备用目标当作首选线路
 
 排查建议：
 

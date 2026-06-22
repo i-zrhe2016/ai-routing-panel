@@ -52,6 +52,10 @@ services:
       CONTROL_PLANE_BACKUP_XRAY_ENABLED: "${CONTROL_PLANE_BACKUP_XRAY_ENABLED:-0}"
       DNS_FAILOVER_BACKUP_CONTENT: "${DNS_FAILOVER_BACKUP_CONTENT:-}"
       DNS_FAILOVER_BACKUP_LABEL: "${DNS_FAILOVER_BACKUP_LABEL:-控制面备用Xray}"
+      DNS_FAILOVER_PEAK_ENABLED: "${DNS_FAILOVER_PEAK_ENABLED:-0}"
+      DNS_FAILOVER_PEAK_START: "${DNS_FAILOVER_PEAK_START:-}"
+      DNS_FAILOVER_PEAK_END: "${DNS_FAILOVER_PEAK_END:-}"
+      DNS_FAILOVER_PEAK_TIMEZONE: "${DNS_FAILOVER_PEAK_TIMEZONE:-}"
       PANEL_USERNAME: "${PANEL_USERNAME:-}"
       PANEL_PASSWORD: "${PANEL_PASSWORD:-}"
       PANEL_SECRET_KEY: "${PANEL_SECRET_KEY:-}"
@@ -178,5 +182,6 @@ services:
       - ./:/workspace
       - ./data:/panel-data
       - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.ssh:/root/.ssh:ro
       - /root/.codex:/host-codex-home:ro
       - /root/.nvm/versions/node:/host-node-versions:ro

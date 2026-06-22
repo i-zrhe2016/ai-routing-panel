@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -54,8 +55,22 @@ def load_state_module(temp_root, extra_env=None):
     flask_stub.url_for = lambda *args, **kwargs: "/"
     sys.modules["flask"] = flask_stub
 
-    for module_name in ["app.config", "app.dns_failover", "app.state"]:
-        sys.modules.pop(module_name, None)
+    werkzeug_stub = ModuleType("werkzeug")
+    werkzeug_security_stub = ModuleType("werkzeug.security")
+    werkzeug_security_stub.generate_password_hash = lambda value, method="scrypt", salt_length=16: f"hash:{value}"
+    werkzeug_security_stub.check_password_hash = lambda hashed, value: hashed == f"hash:{value}"
+    werkzeug_stub.security = werkzeug_security_stub
+    sys.modules["werkzeug"] = werkzeug_stub
+    sys.modules["werkzeug.security"] = werkzeug_security_stub
+
+    for module_name in list(sys.modules):
+        if (
+            module_name == "app.config"
+            or module_name.startswith("app.config.")
+            or module_name == "app.dns_failover"
+            or module_name.startswith("app.state")
+        ):
+            sys.modules.pop(module_name, None)
     state_module = importlib.import_module("app.state")
     return importlib.reload(state_module)
 
@@ -64,6 +79,8 @@ class DnsFailoverTest(unittest.TestCase):
     def setUp(self):
         self.original_environ = os.environ.copy()
         self.original_flask = sys.modules.get("flask")
+        self.original_werkzeug = sys.modules.get("werkzeug")
+        self.original_werkzeug_security = sys.modules.get("werkzeug.security")
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
 
@@ -74,6 +91,14 @@ class DnsFailoverTest(unittest.TestCase):
             sys.modules.pop("flask", None)
         else:
             sys.modules["flask"] = self.original_flask
+        if self.original_werkzeug is None:
+            sys.modules.pop("werkzeug", None)
+        else:
+            sys.modules["werkzeug"] = self.original_werkzeug
+        if self.original_werkzeug_security is None:
+            sys.modules.pop("werkzeug.security", None)
+        else:
+            sys.modules["werkzeug.security"] = self.original_werkzeug_security
         self.tempdir.cleanup()
 
     def build_state(self, extra_env=None):
@@ -227,6 +252,97 @@ class DnsFailoverTest(unittest.TestCase):
         self.assertEqual(status["current_target"], "backup")
         self.assertEqual(status["last_switch_reason"], "manual_switch")
         self.assertEqual(status["record_content"], "2.2.2.2")
+
+    def test_peak_window_prefers_backup_during_configured_hours(self):
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_PEAK_ENABLED": "1",
+                "DNS_FAILOVER_PEAK_START": "19:00",
+                "DNS_FAILOVER_PEAK_END": "23:00",
+                "DNS_FAILOVER_PEAK_TIMEZONE": "+08:00",
+            }
+        )
+
+        active = state.dns_failover_peak_window_status(datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc))
+        inactive = state.dns_failover_peak_window_status(datetime(2026, 6, 22, 16, 0, tzinfo=timezone.utc))
+
+        self.assertTrue(active["configured"])
+        self.assertTrue(active["active"])
+        self.assertEqual(active["preferred_target"], "backup")
+        self.assertFalse(inactive["active"])
+        self.assertEqual(inactive["preferred_target"], "primary")
+
+    def test_peak_window_reports_next_transition(self):
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_PEAK_ENABLED": "1",
+                "DNS_FAILOVER_PEAK_START": "19:00",
+                "DNS_FAILOVER_PEAK_END": "23:00",
+                "DNS_FAILOVER_PEAK_TIMEZONE": "+08:00",
+            }
+        )
+
+        # 20:00 +08:00 == 12:00 UTC: inside the window, flips back to primary at 23:00.
+        active = state.dns_failover_peak_window_status(datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc))
+        self.assertTrue(active["active"])
+        self.assertEqual(active["next_preferred_target"], "primary")
+        self.assertEqual(active["next_transition_at"][-5:], "23:00")
+        self.assertEqual(active["seconds_to_next_transition"], 3 * 3600)
+
+        # 16:00 +08:00 == 08:00 UTC: outside the window, flips to backup at 19:00.
+        inactive = state.dns_failover_peak_window_status(datetime(2026, 6, 22, 8, 0, tzinfo=timezone.utc))
+        self.assertFalse(inactive["active"])
+        self.assertEqual(inactive["next_preferred_target"], "backup")
+        self.assertEqual(inactive["next_transition_at"][-5:], "19:00")
+        self.assertEqual(inactive["seconds_to_next_transition"], 3 * 3600)
+
+    def test_run_dns_failover_check_switches_to_backup_during_peak_window(self):
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_PEAK_ENABLED": "1",
+                "DNS_FAILOVER_PEAK_START": "19:00",
+                "DNS_FAILOVER_PEAK_END": "23:00",
+                "DNS_FAILOVER_PEAK_TIMEZONE": "+00:00",
+            }
+        )
+        self.seed_record(state, "1.1.1.1")
+        state.dns_failover_peak_window_status = lambda now=None: {
+            "enabled": True,
+            "configured": True,
+            "active": True,
+            "preferred_target": "backup",
+            "preferred_target_label": "控制面备用节点",
+            "config_error": "",
+        }
+        state.dns_failover_manager.probe_once = lambda: {"ok": True, "error": ""}
+        switch_calls = []
+        state.dns_failover_manager.sync_target = lambda target, primary_content=None, backup_content=None: switch_calls.append(target) or {
+            "content": "2.2.2.2",
+            "ttl": 60,
+            "proxied": False,
+        }
+
+        first = state.run_dns_failover_check()
+        second = state.run_dns_failover_check()
+
+        self.assertEqual(first["current_target"], "primary")
+        self.assertEqual(second["current_target"], "backup")
+        self.assertEqual(second["last_switch_reason"], "peak_recovery")
+        self.assertEqual(switch_calls, ["backup"])
+
+    def test_peak_window_missing_hours_marks_status_unconfigured(self):
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_PEAK_ENABLED": "1",
+                "DNS_FAILOVER_PEAK_START": "",
+                "DNS_FAILOVER_PEAK_END": "",
+            }
+        )
+
+        status = state.dns_failover_status()
+
+        self.assertFalse(status["configured"])
+        self.assertIn("DNS_FAILOVER_PEAK_START", status["config_error"])
 
 
 if __name__ == "__main__":
