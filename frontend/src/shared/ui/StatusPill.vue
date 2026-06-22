@@ -29,7 +29,7 @@ const palette = computed(() => TONES[effectiveTone.value] || TONES.neutral);
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;

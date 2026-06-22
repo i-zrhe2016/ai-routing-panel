@@ -53,7 +53,7 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 .copy-field__label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--c-text-muted, #5b6573);
 }
 .copy-field__row {
@@ -70,7 +70,7 @@ onBeforeUnmount(() => {
   background: var(--c-surface-muted, #f6f8fb);
   color: var(--c-text, #1a1f26);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 13px;
+  font-size: 15px;
 }
 .copy-field__btn {
   flex: none;

@@ -162,16 +162,16 @@ body {
 }
 .brand h2 {
   margin: 4px 0;
-  font-size: 20px;
+  font-size: 22px;
 }
 .brand-sub {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--c-text-muted);
 }
 .eyebrow {
   margin: 0;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -193,14 +193,14 @@ body {
   background: var(--c-surface-muted);
 }
 .sider-card span {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--c-text-muted);
 }
 .sider-card strong {
-  font-size: 15px;
+  font-size: 17px;
 }
 .sider-card small {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--c-text-soft);
 }
 .topbar {
@@ -213,7 +213,7 @@ body {
 }
 .topbar-copy h1 {
   margin: 2px 0 0;
-  font-size: 22px;
+  font-size: 26px;
 }
 .topbar-actions {
   display: flex;
@@ -221,7 +221,7 @@ body {
   gap: var(--space-3);
 }
 .topbar-badge {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--c-text-muted);
   padding: 4px 10px;
   border: 1px solid var(--c-line);
@@ -273,11 +273,11 @@ body {
 }
 .a-card-head h3 {
   margin: 2px 0;
-  font-size: 18px;
+  font-size: 21px;
 }
 .a-card-head p {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--c-text-muted);
 }
 .a-tiles {
@@ -295,14 +295,14 @@ body {
   background: var(--c-surface-muted);
 }
 .a-tile span {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--c-text-muted);
 }
 .a-tile strong {
-  font-size: 22px;
+  font-size: 26px;
 }
 .a-tile small {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--c-text-soft);
 }
 .a-tile strong.ok {
@@ -328,7 +328,7 @@ body {
   grid-column: 1 / -1;
 }
 .a-field span {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--c-text-muted);
 }
 .a-input {
@@ -338,7 +338,7 @@ body {
   border-radius: var(--r-md);
   background: var(--c-surface);
   color: var(--c-text);
-  font-size: 14px;
+  font-size: 16px;
 }
 .a-input:focus {
   outline: none;
@@ -360,7 +360,7 @@ body {
   padding: 0 16px;
   border-radius: var(--r-md);
   border: 1px solid transparent;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
 }

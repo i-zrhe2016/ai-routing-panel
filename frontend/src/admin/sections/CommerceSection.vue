@@ -161,18 +161,18 @@ export default {
 .plan-item-head p,
 .order-item-head p {
   margin: 2px 0 0;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--c-text-muted);
 }
 .order-meta {
   display: flex;
   gap: var(--space-4);
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--c-text-muted);
 }
 .proof-link {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--c-primary);
 }
 </style>

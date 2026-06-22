@@ -209,7 +209,7 @@ export default {
 .a-btn.filter {
   height: 30px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: 15px;
 }
 .a-btn.filter.active {
   background: var(--c-primary-soft);
@@ -243,14 +243,14 @@ export default {
 }
 .port-card-note {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--c-text-muted);
 }
 .port-card-stats {
   display: flex;
   gap: var(--space-3);
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--c-text-soft);
 }
 .access-block {

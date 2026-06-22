@@ -53,11 +53,11 @@ const tone = computed(() => {
   gap: 2px;
 }
 .traffic-ring__core strong {
-  font-size: 22px;
+  font-size: 26px;
   color: var(--c-text, #1a1f26);
 }
 .traffic-ring__core small {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--c-text-muted, #5b6573);
 }
 </style>
