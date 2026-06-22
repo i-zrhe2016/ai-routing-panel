@@ -1180,6 +1180,12 @@ def summarize_ai_target_for_report(ai_target):
     return summary
 
 
+def should_fallback_to_primary_route(ai_target):
+    if not isinstance(ai_target, dict):
+        return False
+    return str(ai_target.get("probe_status", "")).strip().lower() == "all_unreachable"
+
+
 def select_ai_target(candidates, timeout_seconds):
     probes = [probe_ai_upstream_candidate(candidate, timeout_seconds) for candidate in candidates]
     selected_index = 0
@@ -1665,16 +1671,20 @@ def run_once(args):
 
     proxy_payload = None
     if ai_domains:
-        proxy_payload, proxy_error = render_proxy_template(args.proxy_template_path, ai_target, panel_target)
-        if proxy_payload is None:
+        if should_fallback_to_primary_route(ai_target):
             args.dynamic_routing_path.unlink(missing_ok=True)
-            route_status = {"status": "pending_proxy_template", "reason": proxy_error}
+            route_status = {"status": "fallback_to_primary", "reason": "ai_upstream_unreachable"}
         else:
-            applied = write_routing_fragment(args.dynamic_routing_path, ai_domains, proxy_payload)
-            route_status = {
-                "status": "applied" if applied else "disabled",
-                "reason": proxy_error if applied else "no_ai_domains",
-            }
+            proxy_payload, proxy_error = render_proxy_template(args.proxy_template_path, ai_target, panel_target)
+            if proxy_payload is None:
+                args.dynamic_routing_path.unlink(missing_ok=True)
+                route_status = {"status": "pending_proxy_template", "reason": proxy_error}
+            else:
+                applied = write_routing_fragment(args.dynamic_routing_path, ai_domains, proxy_payload)
+                route_status = {
+                    "status": "applied" if applied else "disabled",
+                    "reason": proxy_error if applied else "no_ai_domains",
+                }
     else:
         args.dynamic_routing_path.unlink(missing_ok=True)
         route_status = {"status": "idle", "reason": "no_ai_domains"}

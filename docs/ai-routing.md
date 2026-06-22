@@ -44,6 +44,12 @@ AI 路由由 `xray-ai-domain-manager` 驱动，默认流程如下：
 
 管理器会按顺序做 TCP 探测，首个不可达时切换到下一个可达上游。
 
+如果所有 AI 上游都不可达：
+
+- 不再下发 `ai_proxy` 动态路由
+- 已命中的 AI 域名会回退到主链路流量
+- 报表中的 `route_status` 会标记为 `fallback_to_primary`
+
 ## 代理模板
 
 仓库默认提供：

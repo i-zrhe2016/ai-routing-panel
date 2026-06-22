@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from app.xray import ai_domain_manager
@@ -143,6 +144,97 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(pending, ["unknown.example"])
         self.assertEqual(decisions["domains"], {})
         self.assertIn("openai classifier unavailable", stderr.getvalue())
+
+    @mock.patch("app.xray.ai_domain_manager.build_data_plane_controller")
+    @mock.patch("app.xray.ai_domain_manager.rerender_config")
+    @mock.patch("app.xray.ai_domain_manager.probe_ai_upstream_candidate")
+    def test_run_once_falls_back_to_primary_route_when_all_ai_upstreams_are_unreachable(
+        self,
+        mocked_probe,
+        mocked_rerender,
+        mocked_controller_builder,
+    ):
+        mocked_probe.return_value = {
+            "upstream_host": "ai.example.com",
+            "upstream_port": 443,
+            "candidate_type": "template",
+            "is_reachable": False,
+            "failure_reason": "timed out",
+            "checked_at": "2026-06-22T00:00:00+00:00",
+        }
+        mocked_rerender.side_effect = (
+            lambda _render_script, _env_file, config_out, _client_out, _share_out, _dynamic_routing_file:
+            config_out.write_text("{}", encoding="utf-8")
+        )
+        mocked_controller_builder.return_value = mock.Mock(
+            is_configured=mock.Mock(return_value=False),
+            supports_restart=mock.Mock(return_value=False),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            log_path = root / "access.log"
+            log_state_path = root / "log-state.json"
+            decisions_path = root / "ai-domain-decisions.json"
+            dynamic_routing_path = root / "dynamic-routing.json"
+            config_out = root / "config.json"
+            client_out = root / "client.json"
+            share_out = root / "share.txt"
+            report_output_dir = root / "reports"
+
+            decisions_path.write_text(
+                json.dumps(
+                    {
+                        "domains": {
+                            "openai.com": {
+                                "classification": "ai",
+                                "reason": "known ai",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            dynamic_routing_path.write_text('{"stale": true}', encoding="utf-8")
+
+            args = mock.Mock(
+                log_state_path=log_state_path,
+                log_path=log_path,
+                lookback_seconds=3600,
+                classification_state_path=decisions_path,
+                ai_upstream_candidates=[
+                    {
+                        "upstream_host": "ai.example.com",
+                        "upstream_port": 443,
+                        "candidate_type": "template",
+                    }
+                ],
+                ai_upstream_probe_timeout_seconds=2.0,
+                panel_db_path=root / "panel.db",
+                panel_route_listen_port=None,
+                batch_size=50,
+                codex_classifier_enabled=False,
+                openai_classifier_enabled=False,
+                proxy_template_path=root / "missing-ai-proxy-outbound.json",
+                dynamic_routing_path=dynamic_routing_path,
+                render_script="app.xray.render_config",
+                env_file=root / "xray.env",
+                config_out=config_out,
+                client_out=client_out,
+                share_out=share_out,
+                restart_command="",
+                restart_container_name="",
+                docker_timeout_seconds=5,
+                report_output_dir=report_output_dir,
+            )
+
+            ai_domain_manager.run_once(args)
+
+            self.assertFalse(dynamic_routing_path.exists())
+            report = json.loads((report_output_dir / "latest.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["route_status"]["status"], "fallback_to_primary")
+            self.assertEqual(report["route_status"]["reason"], "ai_upstream_unreachable")
+            self.assertEqual(report["ai_target"]["probe_status"], "all_unreachable")
 
 
 if __name__ == "__main__":

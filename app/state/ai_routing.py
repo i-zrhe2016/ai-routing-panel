@@ -96,6 +96,8 @@ class AiRoutingService:
         status_text = str(status or "").strip().lower()
         if status_text == "applied":
             return "已应用 AI 路由"
+        if status_text == "fallback_to_primary":
+            return "AI 节点不可达，已回退主链路"
         if status_text == "idle":
             return "当前窗口无 AI 域名"
         if status_text == "pending_proxy_template":
@@ -109,7 +111,7 @@ class AiRoutingService:
         status_text = str(status or "").strip().lower()
         if status_text == "applied":
             return "ok"
-        if status_text in {"idle", "disabled"}:
+        if status_text in {"fallback_to_primary", "idle", "disabled"}:
             return "warn"
         return "bad"
     def ai_source_label(self, value):
