@@ -25,7 +25,7 @@ onMounted(async () => {
 <template>
   <n-spin :show="loading">
     <div v-if="data">
-      <n-grid :cols="3" :x-gap="16" responsive="screen" item-responsive>
+      <n-grid cols="1 s:3" :x-gap="16" :y-gap="12" responsive="screen" item-responsive>
         <n-gi><n-card><n-statistic label="生效订阅" :value="data.summary.service_count" /></n-card></n-gi>
         <n-gi><n-card><n-statistic label="可续费" :value="data.summary.renewable_count" /></n-card></n-gi>
         <n-gi><n-card><n-statistic label="进行中订单" :value="data.summary.open_order_count" /></n-card></n-gi>

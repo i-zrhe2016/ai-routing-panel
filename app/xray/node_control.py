@@ -3,6 +3,7 @@ import os
 import shlex
 import shutil
 import socket
+import ssl
 import subprocess
 import ipaddress
 from dataclasses import dataclass
@@ -224,6 +225,84 @@ def build_temp_target_path(path_text):
         return f"{path}.codex-tmp"
     base_name = path.name[: -len(suffix)]
     return str(path.with_name(f"{base_name}.codex-tmp{suffix}"))
+
+
+def _cert_common_name(name_field):
+    for rdn in name_field or ():
+        for entry in rdn:
+            if len(entry) == 2 and entry[0] in ("commonName", "CN"):
+                return entry[1]
+    return ""
+
+
+def _apply_cert_fields(result, cert):
+    if not cert:
+        return
+    result["cert_subject_cn"] = _cert_common_name(cert.get("subject"))
+    result["cert_issuer_cn"] = _cert_common_name(cert.get("issuer"))
+    result["cert_not_after"] = str(cert.get("notAfter", ""))
+
+
+def reality_handshake_probe(host, port, server_name, timeout=6.0):
+    """Probe a VLESS+Reality node from the control plane by doing a TLS handshake.
+
+    A healthy Reality inbound forwards any non-authenticated TLS client to its
+    masquerade destination, so a plain probe with the configured SNI should
+    complete and present that site's real, chain-valid certificate. A failed
+    handshake, an untrusted chain, or a certificate whose host differs from the
+    SNI all signal that the data-plane Reality service is missing, broken, or
+    pointed at the wrong ``dest`` — the classic "port open but node unusable"
+    failure mode that a bare TCP probe cannot detect.
+    """
+    result = {
+        "ok": False,
+        "tls_handshake": False,
+        "cert_chain_valid": False,
+        "cert_matches_sni": None,
+        "cert_subject_cn": "",
+        "cert_issuer_cn": "",
+        "cert_not_after": "",
+        "error": "",
+    }
+    if not host or not server_name:
+        result["error"] = "缺少节点地址或 SNI，无法进行 Reality 握手探测。"
+        return result
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        result["error"] = f"无效端口：{port!r}"
+        return result
+
+    def _handshake(check_hostname):
+        context = ssl.create_default_context()
+        context.check_hostname = check_hostname
+        with socket.create_connection((host, port), timeout=timeout) as raw:
+            with context.wrap_socket(raw, server_hostname=server_name) as tls:
+                return tls.getpeercert()
+
+    # 1) Strict: require a trusted chain AND a certificate that matches the SNI.
+    try:
+        _apply_cert_fields(result, _handshake(True))
+        result.update(tls_handshake=True, cert_chain_valid=True, cert_matches_sni=True, ok=True)
+        return result
+    except ssl.CertificateError as exc:
+        # Chain is trusted, but the presented host differs from the SNI.
+        result.update(tls_handshake=True, cert_chain_valid=True, cert_matches_sni=False)
+        result["error"] = f"证书与 SNI 不匹配：{exc}"
+    except ssl.SSLError as exc:
+        result["error"] = f"TLS 握手失败（证书链无效或非 Reality 回落）：{exc}"
+        return result
+    except OSError as exc:
+        result["error"] = f"TCP 连接失败：{exc}"
+        return result
+
+    # 2) Best-effort: capture the presented certificate for diagnostics when the
+    #    chain is trusted but the host did not match the SNI.
+    try:
+        _apply_cert_fields(result, _handshake(False))
+    except (ssl.SSLError, OSError):
+        pass
+    return result
 
 
 @dataclass(frozen=True)
@@ -586,6 +665,65 @@ class DataPlaneController:
             "ai_domains": [item for item in rows if isinstance(item, dict)],
         }
 
+    def read_live_server_config(self):
+        """Read the xray server config the data plane is actually running.
+
+        Returns ``{available, source, config, error}``. In ssh mode the live
+        remote ``config_path`` is read over the wire; in local/docker mode the
+        on-disk ``config_path`` is read directly. When neither is reachable
+        (e.g. an unmanaged upstream) it falls back to the panel-generated
+        ``source_config_path`` so the caller can still compare artifacts, and
+        labels the source honestly so callers never mistake a stale local file
+        for the live data plane.
+        """
+        result = {"available": False, "source": "", "config": None, "error": ""}
+
+        text = None
+        if self.mode == "ssh" and self.config.config_path:
+            try:
+                completed = self._run_remote(
+                    ["python3", "-c", REMOTE_READ_FILE_SCRIPT, self.config.config_path],
+                    f"{self.config.label} 配置读取失败",
+                )
+                payload = json.loads(completed.stdout or "{}")
+            except json.JSONDecodeError as exc:
+                result["error"] = f"数据面配置返回无效 JSON：{exc}"
+                return result
+            except RuntimeError as exc:
+                result["error"] = str(exc)[:300]
+                return result
+            if not isinstance(payload, dict) or not payload.get("exists"):
+                result["error"] = f"数据面未找到配置文件：{self.config.config_path}"
+                return result
+            text = str(payload.get("data", ""))
+            result["source"] = f"数据面实时配置 (ssh:{self.config.config_path})"
+        else:
+            candidate = None
+            source_label = ""
+            if self.config.config_path and Path(self.config.config_path).is_file():
+                candidate = Path(self.config.config_path)
+                source_label = f"数据面本地配置 ({self.config.config_path})"
+            elif self.config.source_config_path and self.config.source_config_path.is_file():
+                candidate = self.config.source_config_path
+                source_label = f"面板生成的配置 ({self.config.source_config_path})"
+            if candidate is None:
+                result["error"] = "未找到可比对的数据面配置（unmanaged 模式且文件缺失）。"
+                return result
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except OSError as exc:
+                result["error"] = str(exc)[:300]
+                return result
+            result["source"] = source_label
+
+        try:
+            result["config"] = json.loads(text or "{}")
+        except json.JSONDecodeError as exc:
+            result["error"] = f"配置 JSON 解析失败：{exc}"
+            return result
+        result["available"] = True
+        return result
+
     def test_config(self, config_path=None):
         active_config_path = str(config_path or self.config.config_path or "").strip()
         if not active_config_path:
@@ -619,24 +757,49 @@ class DataPlaneController:
 
         if self.mode == "ssh":
             if self.config.container_name:
-                return self._run_remote(
-                    [
-                        self.config.docker_bin,
-                        "exec",
-                        self.config.container_name,
-                        self.config.xray_bin,
-                        "run",
-                        "-test",
-                        "-config",
-                        active_config_path,
-                    ],
-                    f"{self.config.label} 配置校验失败",
-                )
+                return self._validate_config_in_remote_container(active_config_path)
             return self._run_remote(
                 [self.config.xray_bin, "run", "-test", "-config", active_config_path],
                 f"{self.config.label} 配置校验失败",
             )
         return None
+
+    def _validate_config_in_remote_container(self, host_config_path):
+        """Validate a config file living on the remote host using the data-plane
+        container's own xray binary.
+
+        The container mounts only the live config file (single-file bind mount),
+        so a freshly written temp file on the host is invisible inside the
+        container. Copy it into a fixed scratch path within the running
+        container and run ``xray -test`` against it there. This leaves the live
+        config untouched and validates with the exact xray build that will serve
+        traffic.
+
+        The scratch path is fixed, so each run overwrites the previous one (it
+        never accumulates) and it is wiped whenever the container is recreated.
+        No explicit cleanup is attempted: data-plane images are commonly
+        distroless and ship neither ``rm`` nor a shell, and xray never reads the
+        scratch path at runtime, so a lingering temp file is inert.
+        """
+        container = self.config.container_name
+        scratch = "/tmp/.xray-config-validate.json"
+        self._run_remote(
+            [self.config.docker_bin, "cp", host_config_path, f"{container}:{scratch}"],
+            f"{self.config.label} 配置校验文件注入失败",
+        )
+        return self._run_remote(
+            [
+                self.config.docker_bin,
+                "exec",
+                container,
+                self.config.xray_bin,
+                "run",
+                "-test",
+                "-config",
+                scratch,
+            ],
+            f"{self.config.label} 配置校验失败",
+        )
 
     def restart(self):
         if self.config.restart_command:

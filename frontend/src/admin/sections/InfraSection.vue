@@ -47,10 +47,30 @@ export default {
       if (!this.peakCountdown) return "";
       return `${this.peakCountdown} · 切到 ${this.peak.next_preferred_target_label || "-"}`;
     },
+    diag() {
+      return this.panel.dataPlaneDiagnosis;
+    },
   },
   methods: {
     toneClass(tone) {
       return tone === "ok" ? "ok" : tone === "bad" ? "bad" : "warn";
+    },
+    summaryTone(ok, total) {
+      if (!total) return "warn";
+      return ok === total ? "ok" : "bad";
+    },
+    realityTone(port) {
+      if (!port.tcp_reachable) return "warn";
+      if (!port.reality) return "warn";
+      return port.reality.ok ? "ok" : "bad";
+    },
+    realityLabel(port) {
+      if (!port.tcp_reachable) return "—";
+      const reality = port.reality;
+      if (!reality) return "未检测";
+      if (reality.ok) return "正常";
+      if (reality.cert_matches_sni === false) return "证书与 SNI 不符";
+      return "失败";
     },
   },
 };
@@ -139,6 +159,14 @@ export default {
       </div>
       <div class="a-actions">
         <button
+          class="a-btn secondary"
+          type="button"
+          :disabled="panel.isBusy('diagnose-data-plane')"
+          @click="panel.diagnoseDataPlane"
+        >
+          {{ panel.isBusy("diagnose-data-plane") ? "体检中..." : "数据面体检" }}
+        </button>
+        <button
           v-if="panel.dataPlaneStatus.configured && panel.dataPlaneStatus.supports_restart"
           class="a-btn secondary"
           type="button"
@@ -149,6 +177,61 @@ export default {
         </button>
         <a v-if="panel.meta.ai_domain_dashboard_url" class="a-btn ghost" :href="panel.meta.ai_domain_dashboard_url">打开 AI 域名页</a>
         <a v-if="panel.meta.probe_enabled && panel.meta.probe_dashboard_url" class="a-btn ghost" :href="panel.meta.probe_dashboard_url">打开探针页</a>
+      </div>
+
+      <div v-if="diag" class="diag">
+        <div class="diag-summary">
+          <span :class="toneClass(diag.subscription_profile_available ? 'ok' : 'bad')">
+            订阅配置：{{ diag.subscription_profile_available ? "可用" : ("不可用 · " + (diag.subscription_error || "")) }}
+          </span>
+          <span>节点 {{ diag.node_host || "—" }} · SNI {{ diag.server_name || "—" }} · {{ diag.data_plane_mode }} 模式</span>
+          <span :class="toneClass(summaryTone(diag.summary.ports_tcp_ok, diag.summary.ports_total))">
+            TCP {{ diag.summary.ports_tcp_ok }}/{{ diag.summary.ports_total }}
+          </span>
+          <span :class="toneClass(summaryTone(diag.summary.ports_reality_ok, diag.summary.ports_total))">
+            Reality {{ diag.summary.ports_reality_ok }}/{{ diag.summary.ports_total }}
+          </span>
+        </div>
+
+        <div class="diag-block">
+          <h4>订阅 ↔ 数据面配置一致性</h4>
+          <p v-if="!diag.consistency.available" class="bad">无法比对：{{ diag.consistency.error }}</p>
+          <template v-else>
+            <p class="diag-src">来源：{{ diag.consistency.source }}</p>
+            <div class="diag-table-wrap">
+              <table class="diag-table">
+                <thead><tr><th>字段</th><th>订阅下发</th><th>数据面实际</th><th>结果</th></tr></thead>
+                <tbody>
+                  <tr v-for="field in diag.consistency.fields" :key="field.field">
+                    <td>{{ field.field }}</td>
+                    <td class="mono">{{ field.subscription }}</td>
+                    <td class="mono">{{ field.data_plane.join(", ") || "（空）" }}</td>
+                    <td :class="field.match ? 'ok' : 'bad'">{{ field.match ? "一致" : "不一致" }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+
+        <div class="diag-block">
+          <h4>端口连通性 / Reality 握手</h4>
+          <div class="diag-table-wrap">
+            <table class="diag-table">
+              <thead><tr><th>端口</th><th>备注</th><th>TCP</th><th>Reality</th><th>回落证书</th></tr></thead>
+              <tbody>
+                <tr v-for="port in diag.ports" :key="port.listen_port">
+                  <td class="mono">{{ port.listen_port }}</td>
+                  <td>{{ port.note || "—" }}</td>
+                  <td :class="port.tcp_reachable ? 'ok' : 'bad'">{{ port.tcp_reachable ? "通" : ("不通 · " + (port.tcp_error || "")) }}</td>
+                  <td :class="toneClass(realityTone(port))">{{ realityLabel(port) }}</td>
+                  <td class="mono">{{ port.reality && port.reality.cert_subject_cn ? port.reality.cert_subject_cn : "—" }}</td>
+                </tr>
+                <tr v-if="!diag.ports.length"><td colspan="5">无启用端口可检测。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -175,5 +258,74 @@ export default {
 <style scoped>
 .a-tile.peak-active {
   box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.5);
+}
+
+.diag {
+  margin-top: 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  padding-top: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.diag-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 13px;
+}
+
+.diag-block h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.diag-src {
+  margin: 0 0 8px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.diag-table-wrap {
+  /* On phones the multi-column diag tables would otherwise crush each column;
+   * let the table keep a readable width and scroll horizontally instead. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.diag-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.diag-table th,
+.diag-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  vertical-align: top;
+}
+
+.diag-table th {
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.diag .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
+.diag .ok {
+  color: #16a34a;
+}
+
+.diag .bad {
+  color: #dc2626;
+}
+
+.diag .warn {
+  color: #d97706;
 }
 </style>

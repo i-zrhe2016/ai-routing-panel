@@ -4,6 +4,7 @@ export const AiDomainsMixin = {
     return {
       dataPlaneStatus: {},
       aiRoutingStatus: {},
+      dataPlaneDiagnosis: null,
     };
   },
 
@@ -39,6 +40,16 @@ export const AiDomainsMixin = {
         const data = await this.requestJson("/api/data-plane/restart", {
           method: "POST",
         });
+        this.applyResponse(data);
+      });
+    },
+
+    async diagnoseDataPlane() {
+      await this.runAction("diagnose-data-plane", async () => {
+        const data = await this.requestJson("/api/data-plane/diagnose", {
+          method: "POST",
+        });
+        this.dataPlaneDiagnosis = data.diagnosis || null;
         this.applyResponse(data);
       });
     },

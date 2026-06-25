@@ -199,7 +199,8 @@ export default {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-width: 260px;
+  flex: 1 1 260px;
+  min-width: min(260px, 100%);
 }
 .status-filters {
   display: flex;

@@ -52,6 +52,7 @@ from ..xray.node_control import DataPlaneConfig, DataPlaneController
 from .ai_routing import AiRoutingService
 from .base import CoreService
 from .commerce import CommerceService
+from .diagnostics import DiagnosticsService
 from .dns_failover import DnsFailoverService
 from .ports import PortsService
 from .probes import ProbesService
@@ -76,9 +77,10 @@ class PanelState:
         self.dns_failover = DnsFailoverService(self)
         self.ai_routing = AiRoutingService(self)
         self.commerce = CommerceService(self)
+        self.diagnostics = DiagnosticsService(self)
         self._services = [
             self.core, self.ports, self.traffic, self.probes,
-            self.dns_failover, self.ai_routing, self.commerce,
+            self.dns_failover, self.ai_routing, self.commerce, self.diagnostics,
         ]
         self._method_owner = {}
         for service in self._services:

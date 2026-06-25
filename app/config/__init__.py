@@ -141,6 +141,13 @@ CONTROL_PLANE_BACKUP_XRAY_ENABLED = parse_bool_env(
     os.environ.get("CONTROL_PLANE_BACKUP_XRAY_ENABLED"),
     default=False,
 )
+# Full vless:// share URL for the upstream the control-plane backup Xray relays
+# every client connection to (e.g. a NAT-forwarded exit at nat.qq.pw). When set,
+# the backup node config replaces the direct "freedom" exit with a VLESS outbound
+# to this upstream, so failover traffic is forwarded instead of leaving directly.
+CONTROL_PLANE_BACKUP_UPSTREAM_URL = os.environ.get(
+    "CONTROL_PLANE_BACKUP_UPSTREAM_URL", ""
+).strip()
 AI_ROUTING_ENABLED = parse_bool_env(os.environ.get("AI_ROUTING_ENABLED"), default=True)
 PANEL_HEALTH_REQUIRES_XRAY = parse_bool_env(os.environ.get("PANEL_HEALTH_REQUIRES_XRAY"), default=True)
 AUTH_ENABLED = bool(PANEL_USERNAME or PANEL_PASSWORD)

@@ -6,6 +6,8 @@ import time
 
 
 from ..config import (
+    CONTROL_PLANE_BACKUP_UPSTREAM_URL,
+    CONTROL_PLANE_BACKUP_XRAY_ENABLED,
     DATAPLANE_CONFIG_PATH,
     DATAPLANE_LOCAL_BIN,
     DATAPLANE_SSH_TARGET,
@@ -504,24 +506,33 @@ class CoreService:
     def render_xray_config(self):
         self._panel.sync_data_plane_dynamic_routing()
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
-        self._panel.run_command(
-            [
-                sys.executable,
-                "-m",
-                "app.xray.render_config",
-                "--env-file",
-                str(XRAY_ENV_FILE_PATH),
-                "--config-out",
-                str(XRAY_CONFIG_PATH),
-                "--client-out",
-                str(XRAY_CLIENT_CONFIG_PATH),
-                "--share-out",
-                str(share_path),
-                "--panel-ports-file",
-                str(XRAY_PANEL_PORTS_PATH),
-            ],
-            "Xray 配置渲染失败",
-        )
+        command = [
+            sys.executable,
+            "-m",
+            "app.xray.render_config",
+            "--env-file",
+            str(XRAY_ENV_FILE_PATH),
+            "--config-out",
+            str(XRAY_CONFIG_PATH),
+            "--client-out",
+            str(XRAY_CLIENT_CONFIG_PATH),
+            "--share-out",
+            str(share_path),
+            "--panel-ports-file",
+            str(XRAY_PANEL_PORTS_PATH),
+        ]
+        # When the control-plane backup Xray is enabled with a relay upstream,
+        # also render config-backup.json next to config.json so the backup
+        # container forwards failover traffic to that upstream (e.g. nat.qq.pw).
+        if CONTROL_PLANE_BACKUP_XRAY_ENABLED and CONTROL_PLANE_BACKUP_UPSTREAM_URL:
+            backup_config_path = XRAY_CONFIG_PATH.parent / "config-backup.json"
+            command += [
+                "--backup-config-out",
+                str(backup_config_path),
+                "--backup-upstream-url",
+                CONTROL_PLANE_BACKUP_UPSTREAM_URL,
+            ]
+        self._panel.run_command(command, "Xray 配置渲染失败")
     def sync_data_plane_dynamic_routing(self):
         if not self._panel.data_plane.supports_dynamic_routing_pull():
             return False

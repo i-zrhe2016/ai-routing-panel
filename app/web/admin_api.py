@@ -218,3 +218,11 @@ def api_restart_data_plane():
         return json_success_response("数据面已执行重启。")
     except (ValidationError, RuntimeError) as exc:
         return json_error_response(str(exc), status_code=400)
+
+
+@route("/api/data-plane/diagnose", methods=["POST"])
+def api_diagnose_data_plane():
+    try:
+        return jsonify({"ok": True, "diagnosis": state.diagnose_data_plane()})
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)

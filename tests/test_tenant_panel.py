@@ -31,6 +31,7 @@ def load_panel_module(temp_root, panel_username="", panel_password="", probe_ena
                             "vnext": [
                                 {
                                     "address": "example.com",
+                                    "port": 443,
                                     "users": [
                                         {
                                             "id": "11111111-1111-1111-1111-111111111111",

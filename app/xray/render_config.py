@@ -4,7 +4,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse
 
 from app.xray.config import BASE_DIR, REQUIRED_ENV_KEYS, RUNTIME_DIR
 from app.xray.envfile import load_env_file
@@ -130,7 +130,11 @@ def merge_dynamic_routing(config: dict, dynamic_payload: dict | None) -> dict:
             if not isinstance(rules, list):
                 raise ValueError("dynamic routing rules must be a JSON list")
             routing.setdefault("rules", [])
-            routing["rules"] = list(rules) + list(routing["rules"])
+            # Static rules (e.g. the QUIC block) are kept first so they take
+            # priority over the dynamic AI-domain rules. A QUIC packet to an AI
+            # domain matches both the block rule and the AI-domain rule; xray
+            # uses first-match, so the block must win to force a TCP fallback.
+            routing["rules"] = list(routing["rules"]) + list(rules)
 
     return config
 
@@ -172,16 +176,120 @@ def build_reality_inbound(values: dict[str, str], listen_port: int) -> dict:
     }
 
 
+def build_backup_relay_outbound(share_url: str) -> dict:
+    """Build the default outbound for the control-plane backup node from a
+    ``vless://`` share URL so every client connection is relayed to that upstream
+    (e.g. a NAT-forwarded exit at nat.qq.pw) instead of leaving directly.
+
+    The outbound is tagged ``direct`` so it becomes xray's default route and any
+    existing routing rule that targets ``direct`` keeps working. Reality and
+    plain (security=none) upstreams are supported; the parsing mirrors the AI
+    upstream fallback URL handling so a single share link describes the hop.
+    """
+    text = str(share_url or "").strip()
+    if not text:
+        raise ValueError("CONTROL_PLANE_BACKUP_UPSTREAM_URL is empty")
+
+    parsed = urlparse(text)
+    if parsed.scheme.lower() != "vless":
+        raise ValueError("CONTROL_PLANE_BACKUP_UPSTREAM_URL must use a vless:// URL")
+    if not parsed.username:
+        raise ValueError("CONTROL_PLANE_BACKUP_UPSTREAM_URL is missing the VLESS UUID")
+    if not parsed.hostname:
+        raise ValueError("CONTROL_PLANE_BACKUP_UPSTREAM_URL is missing the upstream host")
+    if parsed.port is None:
+        raise ValueError("CONTROL_PLANE_BACKUP_UPSTREAM_URL is missing the upstream port")
+
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    network = str(params.get("type", "tcp")).strip().lower() or "tcp"
+    if network != "tcp":
+        raise ValueError("CONTROL_PLANE_BACKUP_UPSTREAM_URL currently supports only type=tcp")
+
+    security = str(params.get("security", "none")).strip().lower() or "none"
+    encryption = str(params.get("encryption", "none")).strip() or "none"
+    user: dict[str, object] = {"id": unquote(parsed.username), "encryption": encryption}
+    flow = str(params.get("flow", "")).strip()
+    if flow:
+        user["flow"] = flow
+
+    outbound = {
+        "tag": "direct",
+        "protocol": "vless",
+        "settings": {
+            "vnext": [
+                {
+                    "address": parsed.hostname,
+                    "port": parsed.port,
+                    "users": [user],
+                }
+            ]
+        },
+        "streamSettings": {
+            "network": network,
+            "security": security,
+        },
+    }
+
+    if security == "reality":
+        sni = str(params.get("sni", "")).strip()
+        fingerprint = str(params.get("fp", "")).strip()
+        public_key = str(params.get("pbk", "")).strip()
+        short_id = str(params.get("sid", "")).strip()
+        if not sni or not fingerprint or not public_key or not short_id:
+            raise ValueError(
+                "CONTROL_PLANE_BACKUP_UPSTREAM_URL must include sni, fp, pbk, and sid when security=reality"
+            )
+        outbound["streamSettings"]["realitySettings"] = {
+            "serverName": sni,
+            "fingerprint": fingerprint,
+            "publicKey": public_key,
+            "shortId": short_id,
+        }
+    elif security not in {"none", ""}:
+        raise ValueError(
+            "CONTROL_PLANE_BACKUP_UPSTREAM_URL currently supports only security=reality or security=none"
+        )
+
+    return outbound
+
+
 def build_server_config(
     values: dict[str, str],
     dynamic_payload: dict | None = None,
     panel_ports: list[int] | None = None,
+    relay_outbound: dict | None = None,
 ) -> dict:
     panel_ports = list(panel_ports or [])
     if panel_ports:
         inbounds = [build_reality_inbound(values, listen_port) for listen_port in panel_ports]
     else:
         inbounds = [build_reality_inbound(values, int(values["XRAY_LISTEN_PORT"]))]
+
+    # The backup node keeps the same Reality inbound (so failover clients connect
+    # with their existing subscription) but swaps the direct exit for a relay
+    # outbound that forwards every connection to the configured upstream.
+    if relay_outbound is not None:
+        default_outbound = dict(relay_outbound)
+        default_outbound["tag"] = "direct"
+        outbounds = [default_outbound]
+    else:
+        outbounds = [{"protocol": "freedom", "tag": "direct"}]
+    routing_rules: list[dict] = []
+    # Drop QUIC/HTTP3 (UDP 443) so clients fall back to TCP+TLS. Proxied QUIC —
+    # especially AI traffic relayed through the xtls-rprx-vision AI upstream,
+    # which is TCP-oriented — stalls and times out before falling back, which is
+    # the main cause of the iOS ChatGPT app loading very slowly. Forcing TCP
+    # makes the AI path reliable. Toggle off with XRAY_BLOCK_QUIC=0.
+    if env_bool(values, "XRAY_BLOCK_QUIC", True):
+        outbounds.append({"protocol": "blackhole", "tag": "block"})
+        routing_rules.append(
+            {
+                "type": "field",
+                "network": "udp",
+                "port": 443,
+                "outboundTag": "block",
+            }
+        )
 
     config = {
         "log": {
@@ -202,8 +310,10 @@ def build_server_config(
             }
         },
         "inbounds": inbounds,
-        "outbounds": [{"protocol": "freedom", "tag": "direct"}],
+        "outbounds": outbounds,
     }
+    if routing_rules:
+        config["routing"] = {"rules": routing_rules}
     return merge_dynamic_routing(config, dynamic_payload)
 
 
@@ -296,6 +406,16 @@ def main() -> int:
     parser.add_argument("--share-out", default=str(RUNTIME_DIR / "client-share.txt"))
     parser.add_argument("--dynamic-routing-file", default=str(RUNTIME_DIR / "dynamic-routing.json"))
     parser.add_argument("--panel-ports-file", default=str(RUNTIME_DIR / "panel-ports.json"))
+    parser.add_argument(
+        "--backup-config-out",
+        default="",
+        help="Also render a control-plane backup node config that relays to --backup-upstream-url.",
+    )
+    parser.add_argument(
+        "--backup-upstream-url",
+        default="",
+        help="vless:// URL the backup node relays every connection to (e.g. nat.qq.pw).",
+    )
     args = parser.parse_args()
 
     env_path = Path(args.env_file)
@@ -308,12 +428,28 @@ def main() -> int:
         validate_env(values)
         dynamic_payload = load_optional_json(Path(args.dynamic_routing_file))
         panel_ports = load_panel_ports(Path(args.panel_ports_file))
+        backup_config_out = str(args.backup_config_out or "").strip()
+        backup_upstream_url = str(args.backup_upstream_url or "").strip()
+        if backup_config_out and not backup_upstream_url:
+            raise ValueError("--backup-config-out requires --backup-upstream-url")
+        relay_outbound = (
+            build_backup_relay_outbound(backup_upstream_url) if backup_config_out else None
+        )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     write_json(Path(args.config_out), build_server_config(values, dynamic_payload, panel_ports))
     write_json(Path(args.client_out), build_client_config(values))
+
+    if backup_config_out:
+        # The backup node relays everything to the upstream, so it skips the AI
+        # dynamic routing (which would otherwise re-add a direct-exit branch) and
+        # forwards all traffic through the single relay outbound.
+        write_json(
+            Path(backup_config_out),
+            build_server_config(values, None, panel_ports, relay_outbound=relay_outbound),
+        )
 
     share_path = Path(args.share_out)
     share_path.parent.mkdir(parents=True, exist_ok=True)

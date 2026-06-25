@@ -125,5 +125,76 @@ class RenderConfigWrapperTest(unittest.TestCase):
         }
 
 
+class BackupRelayConfigTest(unittest.TestCase):
+    def _values(self):
+        return {
+            "XRAY_LISTEN_HOST": "0.0.0.0",
+            "XRAY_LISTEN_PORT": "443",
+            "XRAY_PUBLIC_HOST": "panel.example.com",
+            "XRAY_PUBLIC_PORT": "443",
+            "XRAY_CLIENT_UUID": "11111111-1111-1111-1111-111111111111",
+            "XRAY_FLOW": "xtls-rprx-vision",
+            "XRAY_REALITY_PRIVATE_KEY": "private-key-example",
+            "XRAY_REALITY_PUBLIC_KEY": "public-key-example",
+            "XRAY_REALITY_SHORT_ID": "0123456789abcdef",
+            "XRAY_SERVER_NAME": "www.microsoft.com",
+            "XRAY_DEST": "www.microsoft.com:443",
+            "XRAY_FINGERPRINT": "chrome",
+            "XRAY_LOGLEVEL": "warning",
+            "XRAY_NODE_TAG": "test-node",
+        }
+
+    def test_backup_config_relays_to_upstream_keeping_inbound(self):
+        from app.xray.render_config import build_backup_relay_outbound, build_server_config
+
+        url = (
+            "vless://relay-uuid@nat.qq.pw:443?encryption=none&security=reality"
+            "&sni=www.cloudflare.com&fp=chrome&pbk=PBKEY&sid=0123456789abcdef"
+            "&type=tcp&flow=xtls-rprx-vision"
+        )
+        relay = build_backup_relay_outbound(url)
+        values = self._values()
+        primary = build_server_config(values)
+        backup = build_server_config(values, relay_outbound=relay)
+
+        # Inbound is identical so failover clients connect with the same profile.
+        self.assertEqual(backup["inbounds"], primary["inbounds"])
+
+        # The default route (first outbound) forwards every connection to the upstream.
+        default_outbound = backup["outbounds"][0]
+        self.assertEqual(default_outbound["tag"], "direct")
+        self.assertEqual(default_outbound["protocol"], "vless")
+        vnext = default_outbound["settings"]["vnext"][0]
+        self.assertEqual(vnext["address"], "nat.qq.pw")
+        self.assertEqual(vnext["port"], 443)
+        self.assertEqual(vnext["users"][0]["id"], "relay-uuid")
+        self.assertEqual(
+            default_outbound["streamSettings"]["realitySettings"]["publicKey"], "PBKEY"
+        )
+
+        # The QUIC blackhole guard is preserved on the backup node too.
+        self.assertIn("block", [o.get("tag") for o in backup["outbounds"]])
+        self.assertEqual(backup["routing"]["rules"][0]["outboundTag"], "block")
+
+    def test_backup_relay_rejects_non_vless_url(self):
+        from app.xray.render_config import build_backup_relay_outbound
+
+        with self.assertRaises(ValueError):
+            build_backup_relay_outbound("https://nat.qq.pw:443")
+
+    def test_backup_relay_requires_reality_params(self):
+        from app.xray.render_config import build_backup_relay_outbound
+
+        with self.assertRaises(ValueError):
+            build_backup_relay_outbound("vless://u@nat.qq.pw:443?security=reality&sni=x")
+
+    def test_backup_relay_accepts_plain_security_none(self):
+        from app.xray.render_config import build_backup_relay_outbound
+
+        outbound = build_backup_relay_outbound("vless://u@nat.qq.pw:443?type=tcp")
+        self.assertEqual(outbound["streamSettings"]["security"], "none")
+        self.assertNotIn("realitySettings", outbound["streamSettings"])
+
+
 if __name__ == "__main__":
     unittest.main()

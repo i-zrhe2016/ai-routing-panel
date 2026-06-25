@@ -45,7 +45,7 @@ async function buy(plan) {
 <template>
   <n-spin :show="loading">
     <n-empty v-if="!loading && !plans.length" description="暂无可购买的套餐" />
-    <n-grid v-else :cols="3" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+    <n-grid v-else cols="1 s:2 l:3" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi v-for="plan in plans" :key="plan.slug">
         <n-card :title="plan.name">
           <p style="color:var(--c-text-muted)">{{ plan.description }}</p>

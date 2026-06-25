@@ -1,6 +1,8 @@
 <script>
 import {
   NConfigProvider,
+  NDrawer,
+  NDrawerContent,
   NLayout,
   NLayoutContent,
   NLayoutHeader,
@@ -29,6 +31,8 @@ export default {
   name: "AdminApp",
   components: {
     NConfigProvider,
+    NDrawer,
+    NDrawerContent,
     NLayout,
     NLayoutContent,
     NLayoutHeader,
@@ -49,6 +53,8 @@ export default {
     return {
       themeOverrides: naiveThemeOverrides(),
       activeSection: "overview",
+      isMobile: false,
+      mobileNavOpen: false,
       loading: true,
       authEnabled: Boolean(typeof window !== "undefined" && window.__BOOT__ && window.__BOOT__.auth_enabled),
       menuOptions: [
@@ -65,6 +71,10 @@ export default {
     },
   },
   async mounted() {
+    this.updateIsMobile();
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", this.updateIsMobile);
+    }
     const boot = (typeof window !== "undefined" && window.__BOOT__) || {};
     this.meta = { csrf_token: boot.csrf_token || "" };
     try {
@@ -76,7 +86,21 @@ export default {
       this.loading = false;
     }
   },
+  beforeUnmount() {
+    if (typeof window !== "undefined") {
+      window.removeEventListener("resize", this.updateIsMobile);
+    }
+  },
   methods: {
+    updateIsMobile() {
+      const mobile = typeof window !== "undefined" && window.innerWidth <= 768;
+      this.isMobile = mobile;
+      if (!mobile) this.mobileNavOpen = false;
+    },
+    selectSection(key) {
+      this.activeSection = key;
+      this.mobileNavOpen = false;
+    },
     logout() {
       const form = document.createElement("form");
       form.method = "post";
@@ -91,7 +115,7 @@ export default {
 <template>
   <n-config-provider :theme-overrides="themeOverrides">
     <n-layout has-sider class="admin-root">
-      <n-layout-sider bordered :width="248" content-class="admin-sider">
+      <n-layout-sider v-if="!isMobile" bordered :width="248" content-class="admin-sider">
         <div class="brand">
           <p class="eyebrow">XRAY ROUTING PANEL</p>
           <h2>控制台</h2>
@@ -112,11 +136,45 @@ export default {
         </div>
       </n-layout-sider>
 
+      <n-drawer v-if="isMobile" v-model:show="mobileNavOpen" :width="262" placement="left">
+        <n-drawer-content body-content-class="admin-sider" :native-scrollbar="false">
+          <div class="brand">
+            <p class="eyebrow">XRAY ROUTING PANEL</p>
+            <h2>控制台</h2>
+            <p class="brand-sub">端口、租户与数据面统一后台</p>
+          </div>
+          <n-menu :value="activeSection" :options="menuOptions" @update:value="selectSection" />
+          <div class="sider-cards">
+            <div class="sider-card">
+              <span>数据面状态</span>
+              <strong>{{ dataPlaneRunningLabel(dataPlaneStatus) }}</strong>
+              <small>{{ dataPlaneStatus.management_target || "当前未配置数据面" }}</small>
+            </div>
+            <div class="sider-card">
+              <span>面板地址</span>
+              <strong>{{ meta.panel_address || "—" }}</strong>
+              <small>{{ (meta.timezone_label || "") + " · Xray Direct" }}</small>
+            </div>
+          </div>
+        </n-drawer-content>
+      </n-drawer>
+
       <n-layout>
         <n-layout-header bordered class="topbar">
           <div class="topbar-copy">
-            <p class="eyebrow">ADMIN WORKSPACE</p>
-            <h1>控制台总览</h1>
+            <button
+              v-if="isMobile"
+              class="a-btn ghost nav-toggle"
+              type="button"
+              aria-label="打开菜单"
+              @click="mobileNavOpen = true"
+            >
+              ☰
+            </button>
+            <div class="topbar-title">
+              <p class="eyebrow">ADMIN WORKSPACE</p>
+              <h1>控制台总览</h1>
+            </div>
           </div>
           <div class="topbar-actions">
             <status-pill :tone="dataPlaneTone" :label="dataPlaneRunningLabel(dataPlaneStatus)" />
@@ -399,5 +457,56 @@ body {
   color: var(--c-text-muted);
   border: 1px dashed var(--c-line);
   border-radius: var(--r-md);
+}
+
+/* Mobile layout: drawer-based nav replaces the persistent sider, paddings and
+ * type scale down so cards and forms stay usable on a phone-width viewport. */
+.topbar-copy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.nav-toggle {
+  flex: none;
+  width: 38px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+  .topbar-copy h1 {
+    font-size: 20px;
+  }
+  .topbar-actions {
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  .content {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+  .a-card {
+    padding: var(--space-4);
+  }
+  .a-card-head h3 {
+    font-size: 19px;
+  }
+  .a-tile strong {
+    font-size: 22px;
+  }
+  .a-tiles,
+  .a-grid {
+    grid-template-columns: 1fr;
+  }
+  .a-actions .a-btn {
+    flex: 1 1 auto;
+  }
 }
 </style>

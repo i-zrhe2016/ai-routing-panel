@@ -33,6 +33,8 @@ services:
       DATAPLANE_ACCESS_LOG_PATH: "${DATAPLANE_ACCESS_LOG_PATH:-}"
       DATAPLANE_RESTART_COMMAND: "${DATAPLANE_RESTART_COMMAND:-}"
       DATAPLANE_CONTAINER_NAME: "${DATAPLANE_CONTAINER_NAME:-xray-reality-local}"
+      # 容器内 docker CLI(20.10/API1.41) 比宿主 daemon(最低API1.44)旧，强制协商版本，否则 docker inspect 失败导致数据面被误判为未运行
+      DOCKER_API_VERSION: "${DOCKER_API_VERSION:-1.44}"
       DATAPLANE_PROBE_HOST: "${DATAPLANE_PROBE_HOST:-127.0.0.1}"
       DNS_FAILOVER_ENABLED: "${DNS_FAILOVER_ENABLED:-0}"
       DNS_FAILOVER_INTERVAL: "${DNS_FAILOVER_INTERVAL:-15}"
@@ -50,6 +52,7 @@ services:
       CF_DNS_RECORD_TTL: "${CF_DNS_RECORD_TTL:-60}"
       DNS_FAILOVER_PRIMARY_CONTENT: "${DNS_FAILOVER_PRIMARY_CONTENT:-}"
       CONTROL_PLANE_BACKUP_XRAY_ENABLED: "${CONTROL_PLANE_BACKUP_XRAY_ENABLED:-0}"
+      CONTROL_PLANE_BACKUP_UPSTREAM_URL: "${CONTROL_PLANE_BACKUP_UPSTREAM_URL:-}"
       DNS_FAILOVER_BACKUP_CONTENT: "${DNS_FAILOVER_BACKUP_CONTENT:-}"
       DNS_FAILOVER_BACKUP_LABEL: "${DNS_FAILOVER_BACKUP_LABEL:-控制面备用Xray}"
       DNS_FAILOVER_PEAK_ENABLED: "${DNS_FAILOVER_PEAK_ENABLED:-0}"
@@ -141,7 +144,9 @@ services:
         hard: 65535
     command: ["run", "-c", "/etc/xray/config.json"]
     volumes:
-      - ./app/xray/runtime/config.json:/etc/xray/config.json:ro
+      # The backup node mounts its own relay config so it forwards failover
+      # traffic to CONTROL_PLANE_BACKUP_UPSTREAM_URL instead of exiting directly.
+      - ./app/xray/runtime/config-backup.json:/etc/xray/config.json:ro
       - ./app/xray/logs:/var/log/xray
     healthcheck:
       test: ["CMD", "/usr/local/bin/xray", "run", "-test", "-config", "/etc/xray/config.json"]
@@ -172,6 +177,7 @@ services:
       CODEX_NODE_BIN: "/usr/bin/node"
       CODEX_NODE_VERSIONS_ROOT: "/host-node-versions"
       DATAPLANE_CONTAINER_NAME: "${DATAPLANE_CONTAINER_NAME:-xray-reality-local}"
+      DOCKER_API_VERSION: "${DOCKER_API_VERSION:-1.44}"
       DATAPLANE_RESTART_CONTAINER: "${DATAPLANE_RESTART_CONTAINER:-xray-reality-local}"
       DATAPLANE_RESTART_COMMAND: "${DATAPLANE_RESTART_COMMAND:-}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"

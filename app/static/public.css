@@ -135,9 +135,20 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
 
 .two-col { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: var(--space-5); }
 @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
-.info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); margin: var(--space-5) 0; }
+.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--space-4); margin: var(--space-5) 0; }
 .info-tile { background: var(--c-surface-muted); border: 1px solid var(--c-line); border-radius: var(--r-md); padding: 14px; }
 .info-tile span { display: block; font-size: 12px; color: var(--c-text-muted); }
 .info-tile strong { font-size: 16px; }
-.qr img { max-width: 220px; border-radius: var(--r-md); border: 1px solid var(--c-line); }
+.qr img { max-width: 220px; width: 100%; border-radius: var(--r-md); border: 1px solid var(--c-line); }
 .muted { color: var(--c-text-muted); font-size: 14px; }
+
+/* ---- Phone layout: tighten paddings, scale type, stack inline rows ---- */
+@media (max-width: 600px) {
+  h1 { font-size: 22px; }
+  .auth-wrap { padding: var(--space-4); }
+  .auth-card { padding: var(--space-6); }
+  .page { padding: var(--space-6) var(--space-4); }
+  .page-top { margin-bottom: var(--space-6); }
+  .card { padding: var(--space-5); }
+  .row-links { flex-direction: column; gap: 8px; }
+}
