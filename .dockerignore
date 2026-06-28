@@ -9,6 +9,7 @@ app/static/.DS_Store
 # the build context.
 app/static/admin
 app/static/portal
+app/static/landing
 
 # Keep the build context small.
 .git

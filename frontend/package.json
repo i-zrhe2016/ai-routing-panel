@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Build/test toolchain for the admin + portal Vue SPAs (emits app/static/{admin,portal}/).",
+  "description": "Build/test toolchain for the admin + portal + landing Vue SPAs (emits app/static/{admin,portal,landing}/).",
   "scripts": {
-    "build": "vite build && vite build -c vite.portal.config.js",
+    "build": "vite build && vite build -c vite.portal.config.js && vite build -c vite.landing.config.js",
     "build:admin": "vite build",
     "build:portal": "vite build -c vite.portal.config.js",
+    "build:landing": "vite build -c vite.landing.config.js",
     "test": "vitest run"
   },
   "devDependencies": {

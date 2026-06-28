@@ -20,6 +20,7 @@ import { DnsMixin } from "../mixins/dns.js";
 import { PortsMixin } from "../mixins/ports.js";
 import CommerceSection from "./sections/CommerceSection.vue";
 import InfraSection from "./sections/InfraSection.vue";
+import MonitoringSection from "./sections/MonitoringSection.vue";
 import OverviewSection from "./sections/OverviewSection.vue";
 import PortsSection from "./sections/PortsSection.vue";
 
@@ -44,6 +45,7 @@ export default {
     PortsSection,
     CommerceSection,
     InfraSection,
+    MonitoringSection,
   },
   mixins: [CoreMixin, PortsMixin, CommerceMixin, DnsMixin, AiDomainsMixin],
   provide() {
@@ -62,6 +64,7 @@ export default {
         { label: "端口管理", key: "ports" },
         { label: "套餐与订单", key: "commerce" },
         { label: "数据面与 DNS", key: "infra" },
+        { label: "监控", key: "monitoring" },
       ],
     };
   },
@@ -194,6 +197,7 @@ export default {
             <ports-section v-show="activeSection === 'ports'" />
             <commerce-section v-show="activeSection === 'commerce'" />
             <infra-section v-show="activeSection === 'infra'" />
+            <monitoring-section v-show="activeSection === 'monitoring'" />
           </n-spin>
         </n-layout-content>
       </n-layout>

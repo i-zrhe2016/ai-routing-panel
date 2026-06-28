@@ -77,6 +77,18 @@ PANEL_PUBLIC_URL = os.environ.get("PANEL_PUBLIC_URL", "").strip().rstrip("/")
 PANEL_USERNAME = os.environ.get("PANEL_USERNAME", "")
 PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
 PANEL_SECRET_KEY = os.environ.get("PANEL_SECRET_KEY", "").strip()
+# Prometheus /metrics scrape token. Empty disables the endpoint (returns 404) so
+# the internet-facing panel never exposes metrics unauthenticated.
+METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "").strip()
+# TTL (seconds) for caching the data-plane running check — the one SSH call on the
+# /metrics path — so frequent/concurrent scrapes never stack SSH round trips.
+METRICS_DP_TTL = float(os.environ.get("METRICS_DP_TTL", "30"))
+# Browser-reachable base URL of the Grafana behind the monitoring stack (e.g.
+# "http://panel-host:3000"). When set, the admin "监控" tab embeds Grafana panels
+# (d-solo iframes) from it; empty disables the tab's charts (shows a hint instead).
+GRAFANA_PUBLIC_URL = os.environ.get("GRAFANA_PUBLIC_URL", "").strip().rstrip("/")
+# UID of the embed-focused Grafana dashboard the 监控 tab pulls single panels from.
+GRAFANA_OBSERVABILITY_UID = os.environ.get("GRAFANA_OBSERVABILITY_UID", "xray-observability").strip() or "xray-observability"
 
 DEFAULT_UPSTREAM_HOST = os.environ.get("DEFAULT_UPSTREAM_HOST", "127.0.0.1")
 DEFAULT_UPSTREAM_PORT = int(os.environ.get("DEFAULT_UPSTREAM_PORT", "443"))

@@ -38,6 +38,7 @@ COPY scripts /app/scripts
 # Built SPA bundles come from the frontend builder, not from the repo.
 COPY --from=frontend-builder /build/app/static/admin /app/static/admin
 COPY --from=frontend-builder /build/app/static/portal /app/static/portal
+COPY --from=frontend-builder /build/app/static/landing /app/static/landing
 COPY --from=xray-core /usr/local/bin/xray /usr/local/bin/xray
 
 ENV DATA_DIR=/data \

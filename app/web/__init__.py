@@ -29,6 +29,7 @@ from . import (  # noqa: F401  (imported for route-registration side effects)
     customer_api,
     customer_views,
     health,
+    metrics,
     portal_views,
     subscription_views,
     tenant_views,

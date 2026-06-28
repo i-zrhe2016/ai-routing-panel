@@ -10,6 +10,7 @@
 - 通过 Docker、本地二进制或 SSH 管理唯一 `data_plane`，并读取 Xray API / `access.log` 做统计。
 - 按小时分析访问域名，生成动态 AI 路由规则、报表和数据库聚合结果。
 - 基于公网 TCP 探测和 Cloudflare API 做单记录 DNS 故障切换，并支持自动回切。
+- 管理后台「监控」标签内嵌 Grafana 图表（数据源自 Prometheus），展示主机系统资源与每端口流量/连接速率；配置/订单等数据仍由面板自身（SQLite）提供。详见 [docs/operations.md](docs/operations.md)。
 - 可选启用控制面备用 Xray，配合 DNS 切换让控制面本机接管流量。
 - 每天备份 `panel.db`，并可选地加密切片后发布到 npm registry。
 
@@ -263,6 +264,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 公共与其他：
 
 - `GET /healthz`: 返回 `{"ok": <bool>, "data_plane_running": <bool>}`
+- `GET /metrics`: Prometheus 文本格式指标（需 `METRICS_TOKEN`，`Authorization: Bearer <token>`）；管理后台「监控」标签把这些指标经 Grafana 内嵌出图（需 `GRAFANA_PUBLIC_URL`）
 - `GET /probe-dashboard`: TCP 探针监控页
 - `GET /ai-domain-dashboard`: AI 域名统计页
 

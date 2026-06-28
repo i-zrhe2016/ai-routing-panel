@@ -65,6 +65,8 @@ services:
       PROBE_ENABLED: "1"
       PROBE_INTERVAL: "180"
       PROBE_TEST_LISTEN_PORT: "31098"
+      METRICS_TOKEN: "${METRICS_TOKEN:-}"
+      METRICS_DP_TTL: "${METRICS_DP_TTL:-30}"
     volumes:
       - ./data:/data
       - ./app/xray:/app/xray

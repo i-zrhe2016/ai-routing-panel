@@ -11,6 +11,7 @@ __pycache__/
 # stage). Not committed; run the build for local non-Docker serving.
 app/static/admin/
 app/static/portal/
+app/static/landing/
 
 # Frontend toolchain deps/cache. The BUILT app/static/panel.js IS committed
 # (runtime Docker has no build step), so do not ignore that.
@@ -41,3 +42,5 @@ components/db-backup-uploader/node_modules/
 # stray env backups
 .env.bak*
 *.env.bak*
+monitoring/.env
+monitoring/prometheus/secrets/

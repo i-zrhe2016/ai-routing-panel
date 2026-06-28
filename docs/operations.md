@@ -10,6 +10,57 @@
 
 - 设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
 
+## Prometheus 监控（`/metrics`）
+
+面板把已采集的状态以 Prometheus 文本格式暴露在 `GET /metrics`，可直接接入 Prometheus + Grafana。
+
+- 鉴权：必须设置 `METRICS_TOKEN`。
+  - 未设置时端点返回 `404`（默认不对外开放）。
+  - 设置后需带请求头 `Authorization: Bearer <METRICS_TOKEN>`，否则返回 `401`。
+- 可选 `METRICS_DP_TTL`（默认 `30` 秒）：缓存数据面存活检测（抓取路径上唯一的 SSH 调用），避免高频/并发抓取叠加 SSH。
+- 抓取路径严格只读、不触发流量同步与探针，可放心按 15–30s 抓取。
+
+暴露的指标（前缀 `xray_panel_`）：
+
+- 业务：`port_traffic_bytes_total`(counter, `port`/`note`/`direction`)、`port_connections_total`(counter)、`ports_total`/`ports_enabled`/`ports_active`/`ports_expired`/`ports_quota`/`ports_disabled`(gauge)
+- 存活/可用性：`up`、`port_reachable`(gauge, 来自 TCP 探针)、`port_probe_timestamp_seconds`
+- 数据面：`data_plane_configured`/`data_plane_running`(gauge, 带 `mode` 标签)
+- DNS 故障切换：`dns_failover_enabled`、`dns_failover_target_info`、`dns_failover_last_probe_healthy`、`dns_failover_consecutive_failures`/`_successes`、`dns_failover_peak_window_active`
+- AI 路由：`ai_domains_total`、`ai_domain_hits_total`、`ai_domains_last_update_timestamp_seconds`
+
+> `traffic`/`connections` 为 counter，但“重置流量并启用”/配额恢复会清零累计值——这是合法的 counter reset，`rate()`/`increase()` 能正确处理。
+
+主机层 CPU/内存/磁盘/网络不在本端点内，按惯例由 node_exporter 提供：在面板主机与数据面主机各部署一份，数据面的 `:9100` 用防火墙限定只允许 Prometheus 源 IP（或走隧道）。
+
+Prometheus `scrape_config` 示例：
+
+```yaml
+scrape_configs:
+  - job_name: xray-panel
+    metrics_path: /metrics
+    scheme: https
+    authorization: { type: Bearer, credentials: "${METRICS_TOKEN}" }
+    static_configs: [{ targets: ["panel.example.com"], labels: { role: control_plane } }]
+  - job_name: node
+    static_configs:
+      - { targets: ["panel-host:9100"],     labels: { host: panel } }
+      - { targets: ["dataplane-host:9100"],  labels: { host: dataplane } }
+```
+
+## 管理后台「监控」标签（内嵌 Grafana）
+
+管理后台新增「监控」标签，把 Grafana 的单图（`d-solo`）以 iframe 内嵌进来，让管理员无需单独登录 Grafana 即可看到主机系统资源（CPU/内存/磁盘/网络/负载/Swap）与每端口流量/连接速率。其余总览/端口/商务/DNS 等数据仍由面板自身（SQLite）提供，不受影响。
+
+启用步骤：
+
+1. 启动 `monitoring/` 监控栈（Prometheus + Grafana + node_exporter）。其中 Grafana 已开启匿名只读（`GF_AUTH_ANONYMOUS_ENABLED=true` + `Viewer`）与内嵌（`GF_SECURITY_ALLOW_EMBEDDING=true`），并通过 provisioning 自动加载内嵌专用 dashboard `monitoring/grafana/dashboards/xray-observability.json`（UID `xray-observability`，带显式 panel id）。
+2. 给面板设置 `GRAFANA_PUBLIC_URL` 为**管理员浏览器可达**的 Grafana 地址（如 `http://your-host:3000`）。
+3. 重新构建前端（`cd frontend && npm run build`），登录后台点「监控」即可。顶部可切换 1h/6h/24h 时间范围。
+
+> ⚠️ **安全权衡**：开启匿名只读后，任何能访问 Grafana `:3000` 的人都能只读全部图表；而 iframe 由管理员浏览器直连 `GRAFANA_PUBLIC_URL`，因此 `:3000` 必须对管理员浏览器可达。务必用云防火墙/iptables 把 `:3000`（以及 `:9090`、`:9100`）限制到可信来源。更稳妥的加固是把 Grafana 反代到面板受登录鉴权的同源子路径（配合 `GF_SERVER_ROOT_URL` + `serve_from_sub_path`），既复用后台鉴权又免开匿名——本最小方案未实现，可作为后续项。
+
+> 前置项：要看**数据面（DMIT `64.186.224.96`）**的系统资源，需在该机部署一份 node_exporter，并在 `monitoring/prometheus/prometheus.yml` 取消 `job_name: node` 下 DMIT target 的注释后 reload；否则「监控」里的主机指标只反映面板主机。
+
 ## 流量与连接统计
 
 当前统计链路拆成两部分：

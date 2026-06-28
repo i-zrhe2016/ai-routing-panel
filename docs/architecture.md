@@ -24,6 +24,7 @@
 - 根据数据库内容生成 `app/xray/runtime/panel-ports.json`
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`
 - 对数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
+- 以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）；管理后台「监控」标签把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
 
 ### 数据面
 

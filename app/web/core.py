@@ -27,6 +27,8 @@ from ..config import (
     CUSTOMER_SESSION_ID_KEY,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
+    GRAFANA_OBSERVABILITY_UID,
+    GRAFANA_PUBLIC_URL,
     PANEL_HOST,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
@@ -114,7 +116,7 @@ state = PanelState()
 
 @before_request
 def ensure_basic_auth():
-    if request.path == "/healthz":
+    if request.path in {"/healthz", "/metrics"}:
         return None
     if not AUTH_ENABLED:
         return None
@@ -122,6 +124,9 @@ def ensure_basic_auth():
         "login",
         "logout",
         "static",
+        "landing_page",
+        "robots_txt",
+        "sitemap_xml",
         "plans_page",
         "checkout_plan",
         "create_order",
@@ -264,6 +269,8 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
             "ai_routing_status": ai_routing_status,
             "dns_failover_status": dns_failover_status,
             "ai_domain_stats": state.query_ai_domain_overview(sync_error=ai_sync_error),
+            "grafana_url": GRAFANA_PUBLIC_URL,
+            "grafana_observability_uid": GRAFANA_OBSERVABILITY_UID,
         },
         "summary": summary,
         "subscription": subscription,
