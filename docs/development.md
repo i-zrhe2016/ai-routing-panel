@@ -70,6 +70,20 @@ docker compose up -d --build
 
 - 把 `DATAPLANE_PROBE_HOST` 设置成远端入口 IP 或域名
 
+## AI 节点远端纳管
+
+AI 节点是远端独立机器上的 VLESS + REALITY Xray，通过 SSH 纳管。详见 [ai-node-deployment.md](ai-node-deployment.md)。
+
+至少配置：
+
+- `AI_NODE_SSH_TARGET`
+- `AI_NODE_SSH_OPTIONS`
+- `AI_NODE_CONFIG_PATH`
+- `AI_NODE_PROBE_HOST`
+- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）
+
+AI 节点复用普通数据面同一套 REALITY 参数，无需单独生成。
+
 ## 常用命令
 
 渲染配置：
@@ -94,6 +108,32 @@ docker compose logs -f xray-routing-panel
 
 ```bash
 docker compose --profile xray logs -f xray-reality
+```
+
+启动本地 AI 节点容器（测试用）：
+
+```bash
+docker compose --profile ai-node up -d xray-ai-node
+docker compose --profile ai-node logs -f xray-ai-node
+```
+
+启动控制面备用 Xray：
+
+```bash
+docker compose --profile backup-xray up -d xray-reality-backup
+docker compose --profile backup-xray logs -f xray-reality-backup
+```
+
+获取 AI 节点状态（目标态 API）：
+
+```bash
+curl -s -u admin:secret http://127.0.0.1:18080/api/ai-node/status | python3 -m json.tool
+```
+
+重启 AI 节点（目标态 API）：
+
+```bash
+curl -s -u admin:secret -X POST http://127.0.0.1:18080/api/ai-node/restart | python3 -m json.tool
 ```
 
 手动跑一轮 AI 域名分析：

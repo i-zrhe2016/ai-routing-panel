@@ -10,6 +10,8 @@
 
 - 设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
 
+> 目标态下，健康检查返回体还将包含 `ai_node_running` 字段，反映 AI 节点可达性。
+
 ## Prometheus 监控（`/metrics`）
 
 面板把已采集的状态以 Prometheus 文本格式暴露在 `GET /metrics`，可直接接入 Prometheus + Grafana。
@@ -25,6 +27,7 @@
 - 业务：`port_traffic_bytes_total`(counter, `port`/`note`/`direction`)、`port_connections_total`(counter)、`ports_total`/`ports_enabled`/`ports_active`/`ports_expired`/`ports_quota`/`ports_disabled`(gauge)
 - 存活/可用性：`up`、`port_reachable`(gauge, 来自 TCP 探针)、`port_probe_timestamp_seconds`
 - 数据面：`data_plane_configured`/`data_plane_running`(gauge, 带 `mode` 标签)
+- AI 节点：`ai_node_configured`/`ai_node_running`(gauge, 带 `mode` 标签)
 - DNS 故障切换：`dns_failover_enabled`、`dns_failover_target_info`、`dns_failover_last_probe_healthy`、`dns_failover_consecutive_failures`/`_successes`、`dns_failover_peak_window_active`
 - AI 路由：`ai_domains_total`、`ai_domain_hits_total`、`ai_domains_last_update_timestamp_seconds`
 
@@ -125,11 +128,20 @@ scrape_configs:
 - 连续失败达到 `DNS_FAILOVER_FAILURE_THRESHOLD` 时，把单条 Cloudflare DNS 记录切到备用目标
 - 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD` 时，自动回切到主数据面
 - 如果启用了高峰窗口，窗口内会把备用/专用节点视为首选目标，窗口外恢复主节点优先
-- AI 路由或 AI 节点状态不会触发任何 DNS 切换
+- AI 节点故障不触发 DNS 切换，由 `ai_domain_manager` 自动回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
+
+故障场景矩阵（详见 [dns-failover.md](dns-failover.md)）：
+
+| 场景 | DNS 切换 | 流量路径 |
+| --- | --- | --- |
+| 正常 | — | 客户端→数据面→直出；AI→数据面→AI节点→直出 |
+| AI 节点故障 | 不切换 | 客户端→数据面→直出（AI 流量回退） |
+| 数据面故障 | → backup | 客户端→控制面备用→relay→AI节点→直出 |
+| 双节点故障 | → backup | 客户端→控制面备用→直出 |
 
 手动入口：
 
-- 首页 “DNS 故障切换” 卡片
+- 首页 "DNS 故障切换" 卡片
 - `POST /api/dns-failover/check`
 - `POST /api/dns-failover/switch`
 
@@ -139,14 +151,16 @@ scrape_configs:
 - `DNS_FAILOVER_INTERVAL` 设小一些可以更快触发切换，但会增加探测频率和 Cloudflare API 调用概率
 - 当前不支持 Cloudflare Load Balancer / Pool，也不做多记录原子切换
 
-控制面备用 Xray：
+控制面备用 Xray（双模式）：
 
 - 已新增 `docker compose` 服务 `xray-reality-backup`
-- 它复用同一份 `app/xray/runtime/config.json`，也就是除了 IP 以外，REALITY 参数与主线路保持一致
+- 双模式运行：AI 节点正常时 relay 到 AI 节点，AI 节点也故障时 freedom 直出
 - 先把 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 写入根 `.env`
 - 控制面作为备用时，启动方式为：`docker compose --profile backup-xray up -d xray-reality-backup`
 - 如果控制面本机要接管流量，可把 `DNS_FAILOVER_BACKUP_CONTENT` 留空，让面板自动获取控制面本机公网 IP
+- `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 在 AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生
 - 如果不想启用这套本机备用模式，保持 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，并手动填写 `DNS_FAILOVER_BACKUP_CONTENT`
+- 完整机制详见 [dns-failover.md](dns-failover.md)
 
 高峰专用节点示例：
 
@@ -184,6 +198,27 @@ scrape_configs:
 - 面板仍可维护端口和租户数据
 - 但不能自动重启、同步或读取数据面状态
 
+## AI 节点重启与同步能力
+
+AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / `unmanaged`），通常使用 `ssh` 模式。
+
+### `ssh`（远端 SSH 纳管）
+
+- 控制面在本地渲染 `config-ai-node.json`，再通过 SSH 上传到 `AI_NODE_CONFIG_PATH`
+- 上传后执行 `xray run -test` 校验，通过后重启远端 Xray
+- 控制面周期性 TCP 探测 `AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT` 的可达性
+- API：`GET /api/ai-node/status`、`POST /api/ai-node/restart`
+- 详见 [ai-node-deployment.md](ai-node-deployment.md)
+
+### `docker`（本地测试）
+
+- 通过 `AI_NODE_CONTAINER_NAME` 管理本地容器
+- 适用于 `docker compose --profile ai-node` 本地测试场景
+
+### `unmanaged`
+
+- 面板仍可渲染 `config-ai-node.json`，但不能自动推送或重启
+
 ## 常见问题
 
 ### 端口显示不可达
@@ -210,6 +245,16 @@ scrape_configs:
 - 未设置 `DATAPLANE_RESTART_COMMAND`
 - Docker 模式下 `DATAPLANE_CONTAINER_NAME` 错误
 
+### AI 节点不可达
+
+检查：
+
+- `AI_NODE_SSH_TARGET` 是否正确，SSH 是否免密
+- `AI_NODE_PROBE_HOST` 是否指向 AI 节点公网入口
+- `AI_UPSTREAM_HOST:PORT` 是否与 `AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT` 一致
+- `GET /api/ai-node/status` 返回的 `last_error` 字段
+- 详见 [ai-node-deployment.md](ai-node-deployment.md) 排障章节
+
 ### AI 路由状态一直没有报告
 
 检查：
@@ -217,3 +262,4 @@ scrape_configs:
 - `docker compose --profile xray logs -f xray-ai-domain-manager`
 - `app/xray/reports/hourly-domains/latest.json` 是否生成
 - `AI_ROUTING_ENABLED` 是否为 `1`
+- AI 节点是否可达（AI 节点不可达时 `route_status` 会标记为 `fallback_to_primary`）

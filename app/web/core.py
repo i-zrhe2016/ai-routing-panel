@@ -241,12 +241,45 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
     summary = state.query_summary(ports)
     subscription = build_subscription_snapshot(ports)
     data_plane_status = state.data_plane_status()
+    ai_node_status = state.ai_node_status()
     ai_routing_status = state.ai_routing_status(sync_error=ai_sync_error)
     dns_failover_status = state.dns_failover_status()
     commerce_summary = state.query_commerce_overview()
     commerce_settings = state.get_commerce_settings()
     commerce_plans = state.query_plans(public_only=False)
     commerce_orders = state.query_admin_orders()
+    nodes = [
+        {
+            "key": "data_plane",
+            "label": data_plane_status.get("label") or "数据面",
+            "configured": bool(data_plane_status.get("configured")),
+            "reachable": bool(data_plane_status.get("reachable")),
+            "xray_running": data_plane_status.get("xray_running"),
+            "management_target": data_plane_status.get("management_target") or "",
+            "supports_restart": bool(data_plane_status.get("supports_restart")),
+        },
+        {
+            "key": "ai_node",
+            "label": ai_node_status.get("label") or "AI 节点",
+            "configured": bool(ai_node_status.get("configured")),
+            "reachable": bool(ai_node_status.get("reachable")),
+            "xray_running": ai_node_status.get("xray_running"),
+            "management_target": ai_node_status.get("management_target") or "",
+            "supports_restart": bool(ai_node_status.get("supports_restart")),
+        },
+    ]
+    dns_failover_running = bool(dns_failover_status.get("enabled") and dns_failover_status.get("configured"))
+    nodes.append({
+        "key": "control_plane_backup",
+        "label": dns_failover_status.get("backup_label") or "控制面备用",
+        "configured": dns_failover_running,
+        "reachable": dns_failover_running,
+        "xray_running": dns_failover_running,
+        "management_target": "控制面本机" if dns_failover_running else "",
+        "supports_restart": False,
+    })
+    traffic_routing = build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, dns_failover_status)
+    backup_xray_mode = state.backup_xray_mode() if hasattr(state, "backup_xray_mode") else "disabled"
     return {
         "flash": {
             "message": message,
@@ -255,6 +288,7 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
         "meta": {
             "panel_address": PANEL_PUBLIC_URL or f"{PANEL_HOST}:{PANEL_PORT}",
             "data_plane_running": bool(data_plane_status.get("xray_running")),
+            "ai_node_running": bool(ai_node_status.get("reachable")),
             "timezone_label": datetime.now().astimezone().strftime("%Z"),
             "probe_enabled": PROBE_ENABLED,
             "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
@@ -266,8 +300,12 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
             "default_upstream_port": DEFAULT_UPSTREAM_PORT,
             "tenant_panel_prefix": "/tenant/",
             "data_plane_status": data_plane_status,
+            "ai_node_status": ai_node_status,
             "ai_routing_status": ai_routing_status,
             "dns_failover_status": dns_failover_status,
+            "nodes": nodes,
+            "traffic_routing": traffic_routing,
+            "backup_xray_mode": backup_xray_mode,
             "ai_domain_stats": state.query_ai_domain_overview(sync_error=ai_sync_error),
             "grafana_url": GRAFANA_PUBLIC_URL,
             "grafana_observability_uid": GRAFANA_OBSERVABILITY_UID,
@@ -281,6 +319,68 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
             "plans": commerce_plans,
             "orders": commerce_orders,
         },
+    }
+
+
+def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, dns_failover_status):
+    """Describe the current traffic-routing path for the dashboard flow diagram."""
+    dp_ok = bool(data_plane_status.get("reachable"))
+    ai_ok = bool(ai_node_status.get("reachable"))
+    ai_fallback = bool(
+        ai_routing_status
+        and str(ai_routing_status.get("route_status") or ai_routing_status.get("status") or "").strip()
+        == "fallback_to_primary"
+    )
+    dns_target = str(dns_failover_status.get("current_target") or "primary").strip()
+    backup_enabled = bool(dns_failover_status.get("enabled") and dns_failover_status.get("configured"))
+    backup_xray_enabled = bool(dns_failover_status.get("control_plane_backup_xray_enabled"))
+    backup_mode = "relay" if backup_xray_enabled and ai_ok else "direct"
+
+    if dns_target == "backup" and backup_enabled:
+        if backup_mode == "relay" and ai_ok:
+            return {
+                "path": "dns_backup_relay_ai",
+                "label": "DNS→控制面备用→AI 节点",
+                "scenario": "数据面故障，控制面备用 relay 到 AI 节点",
+            }
+        return {
+            "path": "dns_backup_direct",
+            "label": "DNS→控制面备用→freedom 直出",
+            "scenario": "双节点故障，控制面备用 freedom 直出",
+        }
+
+    if not dp_ok and backup_enabled:
+        return {
+            "path": "dns_backup_pending",
+            "label": "DNS 待切换到控制面备用",
+            "scenario": "数据面故障，等待 DNS 切换",
+        }
+
+    if dp_ok and ai_ok and not ai_fallback:
+        return {
+            "path": "normal_ai",
+            "label": "数据面→AI 节点直出",
+            "scenario": "正常：AI 流量经 AI 节点直出",
+        }
+
+    if dp_ok and (not ai_ok or ai_fallback):
+        return {
+            "path": "normal_fallback",
+            "label": "数据面→freedom 直出",
+            "scenario": "AI 节点不可达，AI 流量回退到数据面直出",
+        }
+
+    if dp_ok:
+        return {
+            "path": "normal_direct",
+            "label": "数据面→freedom 直出",
+            "scenario": "正常：流量经数据面直出",
+        }
+
+    return {
+        "path": "unknown",
+        "label": "状态未知",
+        "scenario": "节点状态待确认",
     }
 
 

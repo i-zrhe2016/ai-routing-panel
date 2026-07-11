@@ -196,5 +196,124 @@ class BackupRelayConfigTest(unittest.TestCase):
         self.assertNotIn("realitySettings", outbound["streamSettings"])
 
 
+class AiNodeConfigTest(unittest.TestCase):
+    def _values(self):
+        return {
+            "XRAY_LISTEN_HOST": "0.0.0.0",
+            "XRAY_LISTEN_PORT": "443",
+            "XRAY_PUBLIC_HOST": "panel.example.com",
+            "XRAY_PUBLIC_PORT": "443",
+            "XRAY_CLIENT_UUID": "11111111-1111-1111-1111-111111111111",
+            "XRAY_FLOW": "xtls-rprx-vision",
+            "XRAY_REALITY_PRIVATE_KEY": "private-key-example",
+            "XRAY_REALITY_PUBLIC_KEY": "public-key-example",
+            "XRAY_REALITY_SHORT_ID": "0123456789abcdef",
+            "XRAY_SERVER_NAME": "www.microsoft.com",
+            "XRAY_DEST": "www.microsoft.com:443",
+            "XRAY_FINGERPRINT": "chrome",
+            "XRAY_LOGLEVEL": "warning",
+            "XRAY_NODE_TAG": "test-node",
+            "XRAY_API_SERVER": "127.0.0.1:10085",
+        }
+
+    def test_ai_node_config_has_freedom_direct_only(self):
+        from app.xray.render_config import build_ai_node_config
+
+        config = build_ai_node_config(self._values())
+
+        self.assertEqual(config["outbounds"], [{"protocol": "freedom", "tag": "direct"}])
+        self.assertNotIn("routing", config)
+        self.assertNotIn("api", config)
+        self.assertNotIn("stats", config)
+        self.assertNotIn("policy", config)
+        self.assertEqual(len(config["inbounds"]), 1)
+        self.assertEqual(config["inbounds"][0]["protocol"], "vless")
+        self.assertEqual(config["inbounds"][0]["port"], 443)
+
+    def test_ai_node_reuses_reality_params_from_data_plane(self):
+        from app.xray.render_config import build_ai_node_config, build_reality_inbound
+
+        values = self._values()
+        config = build_ai_node_config(values)
+        expected_inbound = build_reality_inbound(values, 443)
+
+        self.assertEqual(config["inbounds"][0], expected_inbound)
+
+    def test_backup_config_without_upstream_url_uses_freedom_direct(self):
+        from app.xray.render_config import build_server_config
+
+        values = self._values()
+        backup = build_server_config(values, None, None, relay_outbound=None)
+
+        self.assertEqual(backup["outbounds"][0], {"protocol": "freedom", "tag": "direct"})
+
+    def test_cli_renders_ai_node_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            env_file = root / "xray.env"
+            env_file.write_text(ENV_CONTENT, encoding="utf-8")
+            config_out = root / "config.json"
+            client_out = root / "client.json"
+            share_out = root / "share.txt"
+            ai_node_out = root / "config-ai-node.json"
+            panel_ports_file = root / "panel-ports.json"
+            panel_ports_file.write_text(json.dumps({"ports": []}), encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable, "-m", "app.xray.render_config",
+                    "--env-file", str(env_file),
+                    "--config-out", str(config_out),
+                    "--client-out", str(client_out),
+                    "--share-out", str(share_out),
+                    "--panel-ports-file", str(panel_ports_file),
+                    "--ai-node-config-out", str(ai_node_out),
+                ],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+            self.assertTrue(ai_node_out.is_file())
+
+            ai_config = json.loads(ai_node_out.read_text(encoding="utf-8"))
+            self.assertEqual(ai_config["outbounds"], [{"protocol": "freedom", "tag": "direct"}])
+            self.assertNotIn("routing", ai_config)
+
+    def test_cli_renders_backup_without_upstream_url(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            env_file = root / "xray.env"
+            env_file.write_text(ENV_CONTENT, encoding="utf-8")
+            config_out = root / "config.json"
+            client_out = root / "client.json"
+            share_out = root / "share.txt"
+            backup_out = root / "config-backup.json"
+            panel_ports_file = root / "panel-ports.json"
+            panel_ports_file.write_text(json.dumps({"ports": []}), encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable, "-m", "app.xray.render_config",
+                    "--env-file", str(env_file),
+                    "--config-out", str(config_out),
+                    "--client-out", str(client_out),
+                    "--share-out", str(share_out),
+                    "--panel-ports-file", str(panel_ports_file),
+                    "--backup-config-out", str(backup_out),
+                ],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+            self.assertTrue(backup_out.is_file())
+
+            backup_config = json.loads(backup_out.read_text(encoding="utf-8"))
+            self.assertEqual(backup_config["outbounds"][0], {"protocol": "freedom", "tag": "direct"})
+
+
 if __name__ == "__main__":
     unittest.main()

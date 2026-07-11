@@ -226,3 +226,17 @@ def api_diagnose_data_plane():
         return jsonify({"ok": True, "diagnosis": state.diagnose_data_plane()})
     except (ValidationError, RuntimeError) as exc:
         return json_error_response(str(exc), status_code=400)
+
+
+@route("/api/ai-node/status", methods=["GET"])
+def api_ai_node_status():
+    return jsonify({"ok": True, "status": state.ai_node_status()})
+
+
+@route("/api/ai-node/restart", methods=["POST"])
+def api_restart_ai_node():
+    try:
+        state.restart_ai_node_or_raise()
+        return json_success_response("AI 节点已执行重启。")
+    except (ValidationError, RuntimeError) as exc:
+        return json_error_response(str(exc), status_code=400)

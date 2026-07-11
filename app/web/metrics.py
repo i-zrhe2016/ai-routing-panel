@@ -236,6 +236,40 @@ def _collect():
         1 if peak.get("active") else 0,
     )
 
+    # --- AI node ---------------------------------------------------------
+    ai_node_status = state.ai_node_status()
+    r.family(
+        "xray_panel_ai_node_configured",
+        "gauge",
+        "AI node is managed via SSH (1/0).",
+    )
+    r.sample(
+        "xray_panel_ai_node_configured",
+        1 if ai_node_status.get("configured") else 0,
+    )
+    r.family(
+        "xray_panel_ai_node_running",
+        "gauge",
+        "AI node is reachable (1/0).",
+    )
+    r.sample(
+        "xray_panel_ai_node_running",
+        1 if ai_node_status.get("reachable") else 0,
+    )
+
+    # --- Backup Xray mode ------------------------------------------------
+    backup_mode = state.backup_xray_mode() if hasattr(state, "backup_xray_mode") else "disabled"
+    r.family(
+        "xray_panel_backup_xray_mode_info",
+        "gauge",
+        "Control-plane backup Xray mode (value=1 on the active mode label).",
+    )
+    r.sample(
+        "xray_panel_backup_xray_mode_info",
+        1,
+        {"mode": backup_mode},
+    )
+
     # --- AI routing -------------------------------------------------------
     ai = state.query_ai_domain_aggregate()
     r.family("xray_panel_ai_domains_total", "gauge", "Number of classified AI domains.")

@@ -47,7 +47,13 @@
 | `GET` | `/api/orders` | 列出商业化订单 |
 | `POST` | `/api/orders/<id>/{fulfill,reject,cancel}` | 订单开通 / 驳回 / 取消 |
 | `GET`/`PUT` | `/api/commerce-settings` | 商业设置（收款说明、二维码、订单有效期）|
-| `POST` | `/api/data-plane/restart` | 重启唯一数据面 |
+| `POST` | `/api/data-plane/restart` | 重启数据面 |
+| `POST` | `/api/data-plane/diagnose` | 数据面体检（TCP 探测 + Reality 握手 + 配置一致性校验）|
+| `GET` | `/api/ai-node/status` | 获取 AI 节点状态 |
+| `POST` | `/api/ai-node/restart` | 重启 AI 节点 |
+| `GET` | `/api/dns-failover` | 获取 DNS 故障切换状态 |
+| `POST` | `/api/dns-failover/check` | 立即执行一次 DNS 检测 |
+| `POST` | `/api/dns-failover/switch` | 手动切主备（`{"target": "primary\|backup"}`）|
 
 ### 订阅者门户 API（客户会话 + CSRF）
 
@@ -131,11 +137,13 @@ curl -u admin:secret \
 ```json
 {
   "ok": true,
-  "data_plane_running": true
+  "data_plane_running": true,
+  "ai_node_running": true
 }
 ```
 
 其中：
 
 - `ok` 受 `PANEL_HEALTH_REQUIRES_XRAY` 影响
-- `data_plane_running` 反映当前数据面是否可用
+- `data_plane_running` 反映当前普通数据面是否可用
+- `ai_node_running` 反映 AI 节点是否可达（目标态）

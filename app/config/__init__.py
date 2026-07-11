@@ -71,6 +71,22 @@ DATAPLANE_PANEL_PORTS_PATH = os.environ.get("DATAPLANE_PANEL_PORTS_PATH", "").st
 DATAPLANE_ACCESS_LOG_PATH = os.environ.get("DATAPLANE_ACCESS_LOG_PATH", "").strip()
 DATAPLANE_PROBE_HOST = os.environ.get("DATAPLANE_PROBE_HOST", "127.0.0.1").strip() or "127.0.0.1"
 
+AI_NODE_SSH_TARGET = os.environ.get("AI_NODE_SSH_TARGET", "").strip()
+AI_NODE_SSH_BIN = os.environ.get("AI_NODE_SSH_BIN", "ssh").strip() or "ssh"
+AI_NODE_SSH_OPTIONS = parse_shell_words_env(
+    os.environ.get("AI_NODE_SSH_OPTIONS", ""),
+    "AI_NODE_SSH_OPTIONS",
+)
+AI_NODE_XRAY_BIN = os.environ.get("AI_NODE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
+AI_NODE_CONTAINER_NAME = os.environ.get("AI_NODE_CONTAINER_NAME", "xray-ai-node").strip()
+AI_NODE_DOCKER_BIN = os.environ.get("AI_NODE_DOCKER_BIN", "docker").strip() or "docker"
+AI_NODE_RESTART_COMMAND = os.environ.get("AI_NODE_RESTART_COMMAND", "").strip()
+AI_NODE_CONFIG_PATH = os.environ.get("AI_NODE_CONFIG_PATH", "/etc/xray/config.json").strip()
+AI_NODE_PROBE_HOST = os.environ.get("AI_NODE_PROBE_HOST", "").strip()
+AI_NODE_CONFIG_OUT = Path(
+    os.environ.get("AI_NODE_CONFIG_OUT", XRAY_CONFIG_PATH.parent / "config-ai-node.json")
+)
+
 PANEL_HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))
 PANEL_PUBLIC_URL = os.environ.get("PANEL_PUBLIC_URL", "").strip().rstrip("/")

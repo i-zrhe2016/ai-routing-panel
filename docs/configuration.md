@@ -1,11 +1,8 @@
 # 配置说明
 
-## 配置入口
-
-- 根目录 `.env`
-  - 面板地址、管理员认证、AI 路由开关、远端数据面接入参数
-- `app/xray/.env`
-  - REALITY 基础参数、AI 上游、分类器、MCP 和 Xray 渲染参数
+- 配置入口
+  - 根目录 `.env`：面板地址、管理员认证、AI 路由开关、远端数据面接入参数、AI 节点纳管参数
+  - `app/xray/.env`：REALITY 基础参数、AI 上游、分类器、MCP 和 Xray 渲染参数
 
 仓库根目录的 `.env.example` 只覆盖高频项；`docker-compose.yml` 里还会注入一批固定运行时默认值。
 
@@ -44,6 +41,24 @@
 - `PROBE_TEST_LISTEN_PORT`
 - `PANEL_HEALTH_REQUIRES_XRAY`
 
+## AI 节点纳管变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `AI_NODE_SSH_TARGET` | AI 节点 SSH 目标，例如 `root@ai-node.example.com` |
+| `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析 |
+| `AI_NODE_CONTAINER_NAME` | AI 节点上 Xray 容器名（容器部署时填写） |
+| `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
+| `AI_NODE_CONFIG_PATH` | AI 节点上 `config.json` 路径 |
+| `AI_NODE_API_SERVER` | AI 节点 Xray API 地址（默认同 `XRAY_API_SERVER`） |
+| `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标 IP 或域名 |
+
+说明：
+
+- AI 节点复用普通数据面同一套 REALITY 参数，无需单独配置
+- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）是数据面 `dynamic-routing.json` 的 redirect 目标，必须指向 AI 节点公网入口
+- 详见 [ai-node-deployment.md](ai-node-deployment.md)
+
 ## DNS 故障切换变量
 
 | 变量 | 说明 |
@@ -62,7 +77,8 @@
 | `CF_DNS_RECORD_PROXIED` | 是否保持 Cloudflare 代理 |
 | `CF_DNS_RECORD_TTL` | 记录 TTL；非代理记录建议 `60` 以尽快生效 |
 | `DNS_FAILOVER_PRIMARY_CONTENT` | 主数据面入口 IP 或 CNAME；留空时自动获取数据面公网 IP |
-| `CONTROL_PLANE_BACKUP_XRAY_ENABLED` | 是否启用“控制面本机公网 IP + 备用 Xray”自动备用模式 |
+| `CONTROL_PLANE_BACKUP_XRAY_ENABLED` | 是否启用"控制面本机公网 IP + 备用 Xray"自动备用模式（relay / 直出双模式） |
+| `CONTROL_PLANE_BACKUP_UPSTREAM_URL` | relay 模式的 vless:// 上游 URL；AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生 |
 | `DNS_FAILOVER_BACKUP_CONTENT` | 控制面备用节点 IP 或 CNAME；留空时自动获取控制面本机公网 IP |
 | `DNS_FAILOVER_BACKUP_LABEL` | 首页展示用备用节点名称 |
 | `DNS_FAILOVER_PEAK_ENABLED` | 是否启用“高峰窗口优先专用节点” |
@@ -73,12 +89,13 @@
 
 - 当前只支持通过 `CF_DNS_RECORD_ID` 更新单条记录
 - 自动切换只看 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
-- AI 节点状态只展示，不参与任何 DNS 切换决策
+- AI 节点故障不触发 DNS 切换，由 `ai_domain_manager` 自动回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
 - 若启用高峰窗口，窗口内会把备用/专用节点视为首选目标；窗口外恢复主节点优先
 - 如果 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP
 - 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 且 `DNS_FAILOVER_BACKUP_CONTENT` 留空，控制面会自动获取本机公网 IP，适合作为控制面备用 Xray 的 DNS 指向
 - 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，则必须显式填写 `DNS_FAILOVER_BACKUP_CONTENT`
 - 对 REALITY 这类直连流量，想让 IP 更快生效，优先把 `CF_DNS_RECORD_TTL` 设为 `60`
+- 完整 DNS 故障切换机制详见 [dns-failover.md](dns-failover.md)
 
 ## 数据库备份上传变量
 
@@ -145,6 +162,7 @@
 - `AI_UPSTREAMS` 直接覆盖完整优先级列表
 - `AI_UPSTREAM_FALLBACK_URL` 适合备用上游使用不同 UUID / `pbk` / `sid` / `sni`
 - 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
+- 当 AI 节点被纳管（`AI_NODE_SSH_TARGET` 已配置）时，`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 应指向 AI 节点公网入口，同时控制面会自动派生 `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 供 DNS 故障切换 relay 模式使用
 
 ### 域名分类器
 
@@ -177,6 +195,14 @@
 
 - 默认通过 `DATAPLANE_CONTAINER_NAME=xray-reality-local` 管理本地容器
 - 如不使用本地容器，可显式清空并改用 `local` 或 `ssh`
+
+### AI 节点模式
+
+- `AI_NODE_SSH_TARGET` 生效后，AI 节点模式为 `ssh`（远端 SSH 纳管）
+- 控制面在本地渲染 `config-ai-node.json`，再通过 SSH 上传到 `AI_NODE_CONFIG_PATH`
+- 控制面周期性探测 `AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT` 的可达性
+- AI 节点复用普通数据面同一套 REALITY 参数，无需单独配置
+- 详见 [ai-node-deployment.md](ai-node-deployment.md)
 
 完整变量模板见：
 

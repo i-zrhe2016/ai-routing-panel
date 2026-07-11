@@ -35,8 +35,11 @@ export const CoreMixin = {
       this.summary = dashboard.summary || {};
       this.subscription = dashboard.subscription || {};
       this.dataPlaneStatus = dashboard.meta?.data_plane_status || {};
+      this.aiNodeStatus = dashboard.meta?.ai_node_status || {};
       this.aiRoutingStatus = dashboard.meta?.ai_routing_status || {};
       this.dnsFailoverStatus = dashboard.meta?.dns_failover_status || {};
+      this.nodes = dashboard.meta?.nodes || [];
+      this.trafficRouting = dashboard.meta?.traffic_routing || {};
       this.flash = dashboard.flash || { message: "", level: "info" };
       this.ports = (dashboard.ports || []).map((port) => this.preparePort(port));
       this.commerceSummary = dashboard.commerce?.summary || {};
@@ -157,6 +160,20 @@ export const CoreMixin = {
       } catch (_error) {
         this.setFlash("浏览器未允许复制，请手动复制。", "error");
       }
+    },
+
+    aiNodeStatusLabel() {
+      const s = this.aiNodeStatus || {};
+      if (!s.configured) return "未纳管";
+      if (s.reachable) return "运行中";
+      return "不可达";
+    },
+
+    async restartAiNode() {
+      await this.runAction("restart-ai-node", async () => {
+        const data = await this.requestJson("/api/ai-node/restart", { method: "POST" });
+        this.applyResponse(data);
+      });
     },
   },
 };

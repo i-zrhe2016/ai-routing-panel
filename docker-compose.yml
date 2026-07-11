@@ -36,6 +36,14 @@ services:
       # 容器内 docker CLI(20.10/API1.41) 比宿主 daemon(最低API1.44)旧，强制协商版本，否则 docker inspect 失败导致数据面被误判为未运行
       DOCKER_API_VERSION: "${DOCKER_API_VERSION:-1.44}"
       DATAPLANE_PROBE_HOST: "${DATAPLANE_PROBE_HOST:-127.0.0.1}"
+      AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
+      AI_NODE_SSH_OPTIONS: "${AI_NODE_SSH_OPTIONS:-}"
+      AI_NODE_CONTAINER_NAME: "${AI_NODE_CONTAINER_NAME:-xray-ai-node}"
+      AI_NODE_RESTART_COMMAND: "${AI_NODE_RESTART_COMMAND:-}"
+      AI_NODE_CONFIG_PATH: "${AI_NODE_CONFIG_PATH:-/etc/xray/config.json}"
+      AI_NODE_PROBE_HOST: "${AI_NODE_PROBE_HOST:-}"
+      AI_NODE_XRAY_BIN: "${AI_NODE_XRAY_BIN:-/usr/local/bin/xray}"
+      AI_NODE_DOCKER_BIN: "${AI_NODE_DOCKER_BIN:-docker}"
       DNS_FAILOVER_ENABLED: "${DNS_FAILOVER_ENABLED:-0}"
       DNS_FAILOVER_INTERVAL: "${DNS_FAILOVER_INTERVAL:-15}"
       DNS_FAILOVER_TIMEOUT: "${DNS_FAILOVER_TIMEOUT:-3}"
@@ -193,3 +201,23 @@ services:
       - /root/.ssh:/root/.ssh:ro
       - /root/.codex:/host-codex-home:ro
       - /root/.nvm/versions/node:/host-node-versions:ro
+  xray-ai-node:
+    profiles: ["ai-node"]
+    image: ghcr.io/xtls/xray-core:26.5.3
+    container_name: xray-ai-node
+    user: "0:0"
+    restart: unless-stopped
+    network_mode: host
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    command: ["run", "-c", "/etc/xray/config.json"]
+    volumes:
+      - ./app/xray/runtime/config-ai-node.json:/etc/xray/config.json:ro
+      - ./app/xray/logs:/var/log/xray
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/xray", "run", "-test", "-config", "/etc/xray/config.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

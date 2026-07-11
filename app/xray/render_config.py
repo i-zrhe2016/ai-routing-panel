@@ -317,6 +317,24 @@ def build_server_config(
     return merge_dynamic_routing(config, dynamic_payload)
 
 
+def build_ai_node_config(values: dict[str, str]) -> dict:
+    """Build a minimal VLESS+REALITY config for the AI node.
+
+    The AI node reuses the data-plane REALITY parameters (same UUID, keys, SNI,
+    dest) so the same subscription connects. It exits with ``freedom`` directly,
+    never carries dynamic routing, panel ports, QUIC block, or stats API.
+    """
+    return {
+        "log": {
+            "loglevel": values["XRAY_LOGLEVEL"],
+            "access": "/var/log/xray/access.log",
+            "error": "/var/log/xray/error.log",
+        },
+        "inbounds": [build_reality_inbound(values, int(values["XRAY_LISTEN_PORT"]))],
+        "outbounds": [{"protocol": "freedom", "tag": "direct"}],
+    }
+
+
 def resolve_public_port(values: dict[str, str]) -> int:
     public_port_value = values.get("XRAY_PUBLIC_PORT", "").strip()
     if public_port_value:
@@ -416,6 +434,11 @@ def main() -> int:
         default="",
         help="vless:// URL the backup node relays every connection to (e.g. nat.qq.pw).",
     )
+    parser.add_argument(
+        "--ai-node-config-out",
+        default="",
+        help="Also render a minimal AI node config (freedom direct exit, same REALITY params).",
+    )
     args = parser.parse_args()
 
     env_path = Path(args.env_file)
@@ -430,11 +453,12 @@ def main() -> int:
         panel_ports = load_panel_ports(Path(args.panel_ports_file))
         backup_config_out = str(args.backup_config_out or "").strip()
         backup_upstream_url = str(args.backup_upstream_url or "").strip()
-        if backup_config_out and not backup_upstream_url:
-            raise ValueError("--backup-config-out requires --backup-upstream-url")
         relay_outbound = (
-            build_backup_relay_outbound(backup_upstream_url) if backup_config_out else None
+            build_backup_relay_outbound(backup_upstream_url)
+            if backup_config_out and backup_upstream_url
+            else None
         )
+        ai_node_config_out = str(args.ai_node_config_out or "").strip()
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -443,13 +467,16 @@ def main() -> int:
     write_json(Path(args.client_out), build_client_config(values))
 
     if backup_config_out:
-        # The backup node relays everything to the upstream, so it skips the AI
-        # dynamic routing (which would otherwise re-add a direct-exit branch) and
-        # forwards all traffic through the single relay outbound.
+        # The backup node skips AI dynamic routing (which would re-add a
+        # direct-exit branch). When a relay upstream URL is provided it forwards
+        # all traffic to that upstream; when absent it exits via freedom direct.
         write_json(
             Path(backup_config_out),
             build_server_config(values, None, panel_ports, relay_outbound=relay_outbound),
         )
+
+    if ai_node_config_out:
+        write_json(Path(ai_node_config_out), build_ai_node_config(values))
 
     share_path = Path(args.share_out)
     share_path.parent.mkdir(parents=True, exist_ok=True)

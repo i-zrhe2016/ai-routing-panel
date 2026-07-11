@@ -3,9 +3,12 @@ import sqlite3
 import subprocess
 import sys
 import time
-
+from urllib.parse import urlencode
 
 from ..config import (
+    AI_NODE_CONFIG_OUT,
+    AI_NODE_PROBE_HOST,
+    AI_NODE_SSH_TARGET,
     CONTROL_PLANE_BACKUP_UPSTREAM_URL,
     CONTROL_PLANE_BACKUP_XRAY_ENABLED,
     DATAPLANE_CONFIG_PATH,
@@ -35,6 +38,7 @@ from ..helpers import (
     utc_iso_now,
     utc_now,
 )
+from ..xray.envfile import load_env_file
 
 
 
@@ -521,16 +525,30 @@ class CoreService:
             "--panel-ports-file",
             str(XRAY_PANEL_PORTS_PATH),
         ]
-        # When the control-plane backup Xray is enabled with a relay upstream,
-        # also render config-backup.json next to config.json so the backup
-        # container forwards failover traffic to that upstream (e.g. nat.qq.pw).
-        if CONTROL_PLANE_BACKUP_XRAY_ENABLED and CONTROL_PLANE_BACKUP_UPSTREAM_URL:
+        # When the control-plane backup Xray is enabled, also render
+        # config-backup.json. The backup operates in dual mode:
+        # - relay mode: forwards to CONTROL_PLANE_BACKUP_UPSTREAM_URL (or the
+        #   auto-derived AI node URL when AI node is reachable)
+        # - direct mode: freedom direct exit (when AI node is not reachable and
+        #   no explicit upstream URL is configured)
+        if CONTROL_PLANE_BACKUP_XRAY_ENABLED:
             backup_config_path = XRAY_CONFIG_PATH.parent / "config-backup.json"
+            backup_upstream_url = self._panel.resolve_backup_upstream_url()
             command += [
                 "--backup-config-out",
                 str(backup_config_path),
-                "--backup-upstream-url",
-                CONTROL_PLANE_BACKUP_UPSTREAM_URL,
+            ]
+            if backup_upstream_url:
+                command += [
+                    "--backup-upstream-url",
+                    backup_upstream_url,
+                ]
+        # When the AI node is managed via SSH, also render config-ai-node.json
+        # so the control plane can push it to the remote AI node.
+        if AI_NODE_SSH_TARGET:
+            command += [
+                "--ai-node-config-out",
+                str(AI_NODE_CONFIG_OUT),
             ]
         self._panel.run_command(command, "Xray 配置渲染失败")
     def sync_data_plane_dynamic_routing(self):
@@ -548,10 +566,134 @@ class CoreService:
         self._panel.data_plane.test_config()
     def restart_data_plane(self):
         return self._panel.data_plane.restart()
+    def ai_node_status(self):
+        if self._panel.ai_node is None:
+            return {
+                "role": "ai_node",
+                "label": "AI 节点",
+                "configured": False,
+                "reachable": False,
+                "xray_running": None,
+                "management_target": "",
+                "supports_restart": False,
+                "supports_sync": False,
+                "last_error": "",
+            }
+        return self._panel.ai_node.status_summary()
+    def ai_node_running(self):
+        if self._panel.ai_node is None:
+            return False
+        try:
+            return bool(self._panel.ai_node.is_running())
+        except Exception:
+            return False
+    def sync_ai_node_config(self):
+        if self._panel.ai_node is None:
+            return []
+        return self._panel.ai_node.sync_generated_files(validate_config=True)
+    def restart_ai_node_or_raise(self):
+        if self._panel.ai_node is None:
+            raise ValidationError("AI 节点未配置（AI_NODE_SSH_TARGET 为空）。")
+        if not self._panel.ai_node.supports_restart():
+            raise ValidationError("AI 节点未配置可用的重启方式。")
+        restarted = self._panel.ai_node.restart()
+        if not restarted:
+            raise ValidationError("AI 节点不可重启。")
+        return self._panel.ai_node.status_summary()
     def data_plane_configured(self):
         return self._panel.data_plane.is_configured()
     def data_plane_running(self):
         return self._panel.data_plane.is_running()
+    def ai_node_reachable(self):
+        return self._panel.ai_node_running()
+    def resolve_backup_upstream_url(self):
+        """Determine the backup Xray's upstream URL based on AI node reachability.
+
+        Priority:
+        1. Explicit CONTROL_PLANE_BACKUP_UPSTREAM_URL env var (always wins)
+        2. When AI node is managed and reachable, auto-derive a vless:// URL
+           from the xray .env REALITY params + AI node's public host:port
+        3. Empty string → backup uses freedom direct (dual-mode fallback)
+        """
+        if CONTROL_PLANE_BACKUP_UPSTREAM_URL:
+            return CONTROL_PLANE_BACKUP_UPSTREAM_URL
+        if not AI_NODE_SSH_TARGET:
+            return ""
+        if not self._panel.ai_node_running():
+            return ""
+        return self._panel.derive_ai_node_share_url()
+    def derive_ai_node_share_url(self):
+        """Build a vless:// share URL targeting the AI node from xray .env values."""
+        try:
+            values = load_env_file(XRAY_ENV_FILE_PATH)
+        except Exception:
+            return ""
+        required = [
+            "XRAY_CLIENT_UUID",
+            "XRAY_FLOW",
+            "XRAY_REALITY_PUBLIC_KEY",
+            "XRAY_REALITY_SHORT_ID",
+            "XRAY_SERVER_NAME",
+            "XRAY_FINGERPRINT",
+        ]
+        if any(not values.get(key) for key in required):
+            return ""
+        host = AI_NODE_PROBE_HOST
+        if not host:
+            return ""
+        port = values.get("XRAY_PUBLIC_PORT") or values.get("XRAY_LISTEN_PORT", "443")
+        params = urlencode({
+            "encryption": "none",
+            "flow": values["XRAY_FLOW"],
+            "security": "reality",
+            "sni": values["XRAY_SERVER_NAME"],
+            "fp": values["XRAY_FINGERPRINT"],
+            "pbk": values["XRAY_REALITY_PUBLIC_KEY"],
+            "sid": values["XRAY_REALITY_SHORT_ID"],
+            "type": "tcp",
+            "headerType": "none",
+        })
+        return f"vless://{values['XRAY_CLIENT_UUID']}@{host}:{port}?{params}#ai-node"
+    def backup_xray_mode(self):
+        """Return the current backup Xray mode: 'relay', 'direct', or 'disabled'."""
+        if not CONTROL_PLANE_BACKUP_XRAY_ENABLED:
+            return "disabled"
+        url = self._panel.resolve_backup_upstream_url()
+        return "relay" if url else "direct"
+    def sync_backup_xray_mode(self):
+        """Re-render backup config and restart the backup container when the
+        AI node reachability changed since the last render.
+
+        Called from the maintenance loop; safe to no-op when the backup Xray
+        is disabled or the AI node is not managed.
+        """
+        if not CONTROL_PLANE_BACKUP_XRAY_ENABLED:
+            return False
+        if not AI_NODE_SSH_TARGET:
+            return False
+        current_mode = self._panel.backup_xray_mode()
+        previous_mode = getattr(self._panel, "_last_backup_mode", None)
+        self._panel._last_backup_mode = current_mode
+        if previous_mode is not None and previous_mode == current_mode:
+            return False
+        self._panel.render_xray_config()
+        self._panel.restart_backup_xray()
+        return True
+    def restart_backup_xray(self):
+        """Restart the local backup Xray container so it picks up the new config."""
+        if not CONTROL_PLANE_BACKUP_XRAY_ENABLED:
+            return False
+        try:
+            completed = subprocess.run(
+                ["docker", "restart", "xray-reality-backup"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            return completed.returncode == 0
+        except Exception:
+            return False
     def read_xray_traffic_stats(self):
         if not self._panel.data_plane_running():
             return {}
@@ -612,6 +754,8 @@ class CoreService:
     def maintenance_loop(self):
         last_probe_at = 0.0
         last_dns_failover_at = 0.0
+        last_backup_mode_at = 0.0
+        backup_mode_interval = max(PROBE_INTERVAL, 60)
         while not self._panel.stop_event.wait(MAINTENANCE_INTERVAL):
             try:
                 self._panel.sync_traffic_state()
@@ -626,6 +770,9 @@ class CoreService:
                 ):
                     self._panel.run_dns_failover_check()
                     last_dns_failover_at = now_monotonic
+                if now_monotonic - last_backup_mode_at >= backup_mode_interval:
+                    self._panel.sync_backup_xray_mode()
+                    last_backup_mode_at = now_monotonic
             except Exception:
                 continue
     def stop(self):

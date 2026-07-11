@@ -1,6 +1,6 @@
 # xray-routing-panel
 
-`xray-routing-panel` 是一个面向开发者和运维的 Xray REALITY 控制面，用来统一管理单一数据面上的监听端口、租户订阅、流量配额、AI 路由产物，以及基于 Cloudflare 的 DNS 故障切换。
+`xray-routing-panel` 是一个面向开发者和运维的 Xray REALITY 控制面，用来统一管理普通数据面和 AI 节点上的监听端口、租户订阅、流量配额、AI 路由产物，以及基于 Cloudflare 的 DNS 故障切换。
 
 ## 核心能力
 
@@ -16,21 +16,33 @@
 
 ## 当前架构
 
-- `xray-routing-panel`
+- `xray-routing-panel`（控制面）
   - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`、`/checkout`）以及探针/AI 仪表盘
   - 前端为独立的 Vite 工程（`frontend/`），构建出 `app/static/admin/*` 与 `app/static/portal/*`
   - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
-  - 渲染、校验、同步并重启单一 `data_plane`
+  - 通过 SSH 纳管两个远端节点：
+    - **普通数据面**：渲染、校验、同步并重启唯一 `data_plane`
+    - **AI 节点**：渲染、推送并重启 `ai_node`（接收数据面转发的 AI 流量，freedom 直出）
   - 维护 `dns_failover_state` / `dns_failover_history`
-- `xray-reality-local` 或外部数据面
+- 普通数据面（`xray-reality-local` 或远端数据面）
   - 实际承载 `VLESS + REALITY` 流量
   - 数据面模式由 `docker`、`local`、`ssh`、`unmanaged` 四类自动判定
-- `xray-reality-backup`
-  - 可选的控制面备用 Xray
-  - 复用同一份 REALITY 配置，在 DNS 切换后接管入口流量
+  - 运行 `ai_domain_manager`，生成 `dynamic-routing.json` 将 AI 域名流量转发到 AI 节点
+- AI 节点（远端独立机器）
+  - 运行 VLESS + REALITY Xray，监听 `AI_UPSTREAM_PORT`，接收数据面转发的 AI 流量
+  - freedom 直出，不做域名分类、不运行 `ai_domain_manager`
+  - 复用普通数据面同一套 REALITY 参数
+  - 详见 [docs/ai-node-deployment.md](docs/ai-node-deployment.md)
+- `xray-reality-backup`（控制面备用 Xray）
+  - 可选的控制面备用 Xray，双模式运行：
+    - **relay 模式**（AI 节点正常时）：将所有流量转发到 AI 节点
+    - **直出模式**（AI 节点也故障时）：freedom 直出
+  - 在 DNS 切换后接管入口流量
+  - 详见 [docs/dns-failover.md](docs/dns-failover.md)
 - `xray-ai-domain-manager`
   - 读取 `app/xray/logs/access.log`
   - 输出 `dynamic-routing.json`、小时域名报表和 `ai_domains` 聚合
+  - AI 上游不可达时自动回退（删除 `dynamic-routing.json`，流量回退数据面直出）
 - `xray-routing-panel-db-backup`
   - 负责 `panel.db` 定时备份，并在启用时触发上传链路
 - `db-backup-uploader`
@@ -38,11 +50,12 @@
 
 首页当前聚合展示：
 
+- 三节点状态（普通数据面、AI 节点、控制面备用）和当前流量导向
 - `data_plane_status`
 - `ai_routing_status`
 - `dns_failover_status`
 
-AI 不再建模成独立节点，且 AI 状态不参与任何 DNS 故障切换判断。
+AI 节点作为独立受管节点纳管。AI 节点故障不涉及 DNS 切换，由 `ai_domain_manager` 自动回退。数据面故障时 DNS 切到控制面备用，根据 AI 节点健康度自动选择 relay 或直出模式。
 
 ## 快速开始
 
@@ -149,18 +162,31 @@ docker compose --profile backup-xray up -d xray-reality-backup
 - 控制面会先在本地渲染，再通过 SSH 上传产物
 - 如果控制面和数据面分离，`DATAPLANE_PROBE_HOST` 应改成远端入口 IP 或域名，而不是 `127.0.0.1`
 
+### AI 节点
+
+AI 节点是远端独立机器上的 VLESS + REALITY Xray，接收数据面转发的 AI 流量并 freedom 直出。详见 [docs/ai-node-deployment.md](docs/ai-node-deployment.md)。
+
+至少配置：
+
+- `AI_NODE_SSH_TARGET`
+- `AI_NODE_SSH_OPTIONS`
+- `AI_NODE_CONFIG_PATH`
+- `AI_NODE_PROBE_HOST`
+- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）
+
 ### 控制面备用 Xray
 
-适合主数据面在远端、控制面本机作为备用接管节点的场景。
+适合主数据面在远端、控制面本机作为备用接管节点的场景。双模式运行：AI 节点正常时 relay 到 AI 节点，AI 节点也故障时 freedom 直出。详见 [docs/dns-failover.md](docs/dns-failover.md)。
 
 - 启用 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1`
-- 启动 `xray-reality-backup`
+- 启动 `xray-reality-backup`：`docker compose --profile backup-xray up -d xray-reality-backup`
 - 如需自动推导备用 IP，可留空 `DNS_FAILOVER_BACKUP_CONTENT`
+- `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 在 AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生
 
 重要限制：
 
 - `xray-reality-local` 和 `xray-reality-backup` 如果绑定同一端口，不能在同一台机器上同时接管同一个入口
-- 常见用法是“主数据面在远端，控制面本机只作为备用”
+- 常见用法是"主数据面在远端，控制面本机只作为备用"
 
 ## DNS 故障切换快速配置
 
@@ -244,7 +270,9 @@ docker compose run --rm xray-routing-panel-db-backup \
 - `PUT /api/ports/<port_id>`: 更新端口配置
 - `POST /api/plans` / `PUT /api/plans/<id>`: 套餐增改
 - `GET /api/orders` / `POST /api/orders/<id>/{fulfill,reject,cancel}`: 订单审核与开通
-- `POST /api/data-plane/restart`: 重启唯一数据面
+- `POST /api/data-plane/restart`: 重启数据面
+- `GET /api/ai-node/status`: 获取 AI 节点状态
+- `POST /api/ai-node/restart`: 重启 AI 节点
 - `GET /api/dns-failover`: 获取 DNS 故障切换状态
 - `POST /api/dns-failover/check`: 立即执行一次 DNS 检测
 - `POST /api/dns-failover/switch`: 手动切主备
@@ -277,7 +305,9 @@ docker compose run --rm xray-routing-panel-db-backup \
 - `DNS_FAILOVER_*` / `CF_*`
   - Cloudflare DNS 故障切换和自动回切
 - `CONTROL_PLANE_BACKUP_XRAY_ENABLED`
-  - 是否启用“控制面本机公网 IP + 备用 Xray”自动备用模式
+  - 是否启用"控制面本机公网 IP + 备用 Xray"自动备用模式（relay / 直出双模式）
+- `AI_NODE_*`
+  - AI 节点 SSH 纳管参数，详见 [docs/ai-node-deployment.md](docs/ai-node-deployment.md)
 - `DB_BACKUP_UPLOADER_*`
   - 数据库备份上传组件配置
 - `app/xray/.env`
@@ -290,10 +320,11 @@ docker compose run --rm xray-routing-panel-db-backup \
 后端（`app/` 已包化，`app/panel.py` 为入口，导出 `app`/`state`/`main`）：
 
 - [app/web/](app/web/): app factory（`create_app`）+ 按域分的视图模块（`admin_views`、`admin_api`、`customer_api`、`customer_views`、`portal_views`、`tenant_views`、`subscription_views`、`health`）与共享 `core.py`（presenter、auth 守卫、`@route` 收集器）
-- [app/state/](app/state/): `PanelState` facade，组合 7 个域 service（`CoreService`、`PortsService`、`TrafficService`、`ProbesService`、`DnsFailoverService`、`AiRoutingService`、`CommerceService`）——控制逻辑、维护循环、统计同步、探针、DNS 故障切换、商业化
+- [app/state/](app/state/): `PanelState` facade，组合域 service（`CoreService`、`PortsService`、`TrafficService`、`ProbesService`、`DnsFailoverService`、`AiRoutingService`、`CommerceService`、`DiagnosticsService`）——控制逻辑、维护循环、统计同步、探针、DNS 故障切换、商业化。持有 `data_plane` 和 `ai_node` 两个受管节点控制器
 - [app/config/](app/config/) / [app/auth/](app/auth/): 配置常量/解析器、三套会话（管理员/租户/客户）与 CSRF
 - [app/dns_failover.py](app/dns_failover.py): Cloudflare API 客户端与切换策略
-- [app/xray/render_config.py](app/xray/render_config.py): 渲染 Xray 服务端和客户端产物
+- [app/xray/render_config.py](app/xray/render_config.py): 渲染 Xray 服务端和客户端产物（普通数据面、AI 节点、控制面备用）
+- [app/xray/node_control.py](app/xray/node_control.py): `DataPlaneController` / `ManagedNodeController`——受管节点控制器（SSH 推送、重启、探测），统一用于普通数据面和 AI 节点
 - [app/xray/ai_domain_manager.py](app/xray/ai_domain_manager.py): AI 域名分类、动态路由、报表
 
 前端与运维：
@@ -325,6 +356,8 @@ npm test          # Vitest
 - [docs/configuration.md](docs/configuration.md): 根 `.env`、`app/xray/.env` 和 DNS failover 配置说明
 - [docs/api.md](docs/api.md): Web/API 路径、请求字段和返回体
 - [docs/operations.md](docs/operations.md): 健康检查、统计、探针、DNS 切换和排障
+- [docs/ai-node-deployment.md](docs/ai-node-deployment.md): AI 节点部署与纳管
+- [docs/dns-failover.md](docs/dns-failover.md): DNS 故障切换完整机制
 - [docs/ai-routing.md](docs/ai-routing.md): AI 路由链路、上游选择和 MCP 工具
 - [docs/kubernetes.md](docs/kubernetes.md): K3s 分阶段部署说明
 

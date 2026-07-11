@@ -2,6 +2,16 @@ import threading
 
 
 from ..config import (
+    AI_NODE_CONFIG_OUT,
+    AI_NODE_CONFIG_PATH,
+    AI_NODE_CONTAINER_NAME,
+    AI_NODE_DOCKER_BIN,
+    AI_NODE_PROBE_HOST,
+    AI_NODE_RESTART_COMMAND,
+    AI_NODE_SSH_BIN,
+    AI_NODE_SSH_OPTIONS,
+    AI_NODE_SSH_TARGET,
+    AI_NODE_XRAY_BIN,
     CF_API_TOKEN,
     CF_DNS_RECORD_ID,
     CF_DNS_RECORD_NAME,
@@ -124,6 +134,22 @@ class PanelState:
                 upstream_port=DEFAULT_UPSTREAM_PORT,
             )
         )
+        self.ai_node = DataPlaneController(
+            DataPlaneConfig(
+                role="ai_node",
+                label="AI 节点",
+                ssh_target=AI_NODE_SSH_TARGET,
+                ssh_bin=AI_NODE_SSH_BIN,
+                ssh_options=AI_NODE_SSH_OPTIONS,
+                xray_bin=AI_NODE_XRAY_BIN,
+                docker_bin=AI_NODE_DOCKER_BIN,
+                container_name=AI_NODE_CONTAINER_NAME,
+                restart_command=AI_NODE_RESTART_COMMAND,
+                config_path=AI_NODE_CONFIG_PATH,
+                source_config_path=AI_NODE_CONFIG_OUT,
+                upstream_host=AI_NODE_PROBE_HOST,
+            )
+        ) if AI_NODE_SSH_TARGET else None
         self.dns_failover_manager = DnsFailoverManager(
             DnsFailoverConfig(
                 enabled=DNS_FAILOVER_ENABLED,

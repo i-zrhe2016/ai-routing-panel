@@ -49,7 +49,7 @@ export default {
     <div class="a-card">
       <div class="a-card-head">
         <p class="eyebrow">STATUS</p>
-        <h3>系统状态</h3>
+        <h3>节点状态</h3>
       </div>
       <div class="a-tiles">
         <div class="a-tile">
@@ -57,7 +57,14 @@ export default {
           <strong :class="panel.dataPlaneStatus.xray_running ? 'ok' : 'bad'">
             {{ panel.dataPlaneRunningLabel(panel.dataPlaneStatus) }}
           </strong>
-          <small>唯一受管数据面的运行状态</small>
+          <small>{{ panel.dataPlaneStatus.management_target || "数据面未配置" }}</small>
+        </div>
+        <div class="a-tile">
+          <span>AI 节点状态</span>
+          <strong :class="panel.aiNodeStatus ? (panel.aiNodeStatus.reachable ? 'ok' : 'bad') : 'warn'">
+            {{ panel.aiNodeStatusLabel() }}
+          </strong>
+          <small>{{ (panel.aiNodeStatus && panel.aiNodeStatus.management_target) || "AI 节点未纳管" }}</small>
         </div>
         <div class="a-tile">
           <span>AI 路由状态</span>
@@ -72,6 +79,11 @@ export default {
             {{ panel.dnsFailoverSummary(panel.dnsFailoverStatus) }}
           </strong>
           <small>{{ panel.dnsFailoverStatus.record_content || panel.dnsFailoverStatus.config_error || "等待首次同步" }}</small>
+        </div>
+        <div class="a-tile">
+          <span>流量导向</span>
+          <strong class="warn">{{ panel.trafficRouting ? panel.trafficRouting.label : "—" }}</strong>
+          <small>{{ panel.trafficRouting ? panel.trafficRouting.scenario : "" }}</small>
         </div>
         <div class="a-tile">
           <span>已停用端口</span>

@@ -205,6 +205,7 @@ class DnsFailoverService:
             "backup_label": config.backup_label,
             "control_plane_backup_xray_enabled": bool(CONTROL_PLANE_BACKUP_XRAY_ENABLED),
             "control_plane_backup_xray_label": "控制面备用 Xray",
+            "backup_xray_mode": self._panel.backup_xray_mode() if hasattr(self._panel, "backup_xray_mode") else "disabled",
             "fast_propagation_note": "已使用低 TTL；非代理记录建议保持 60 秒以尽快生效。",
             "peak_window": peak_window,
         }

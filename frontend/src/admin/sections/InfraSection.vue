@@ -8,6 +8,12 @@ export default {
     dns() {
       return this.panel.dnsFailoverStatus || {};
     },
+    aiNode() {
+      return this.panel.aiNodeStatus || {};
+    },
+    trafficRouting() {
+      return this.panel.trafficRouting || {};
+    },
     peak() {
       return this.dns.peak_window || {};
     },
@@ -138,6 +144,75 @@ export default {
       </div>
     </div>
 
+    <!-- Traffic routing flow -->
+    <div class="a-card">
+      <div class="a-card-head">
+        <p class="eyebrow">TRAFFIC ROUTING</p>
+        <h3>流量导向</h3>
+        <p>根据各节点状态自动决定流量路径，客户端 DNS 指向决定入口节点。</p>
+      </div>
+      <div class="traffic-flow">
+        <div class="flow-step" :class="{ active: trafficRouting.path === 'normal_ai' || trafficRouting.path === 'normal_fallback' || trafficRouting.path === 'normal_direct' }">
+          <span class="flow-label">客户端</span>
+          <small>DNS → 数据面</small>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step" :class="{ active: trafficRouting.path === 'normal_ai' }">
+          <span class="flow-label">AI 节点</span>
+          <small>AI 域名 → freedom 直出</small>
+        </div>
+        <div class="flow-arrow" :class="{ dim: trafficRouting.path !== 'normal_ai' }">→</div>
+        <div class="flow-step" :class="{ active: trafficRouting.path !== 'normal_ai' }">
+          <span class="flow-label">数据面直出</span>
+          <small>普通域名 / AI 回退</small>
+        </div>
+      </div>
+      <div class="traffic-scenario">
+        <strong>{{ trafficRouting.label || "—" }}</strong>
+        <small>{{ trafficRouting.scenario || "" }}</small>
+      </div>
+    </div>
+
+    <!-- AI node -->
+    <div class="a-card">
+      <div class="a-card-head">
+        <p class="eyebrow">AI NODE</p>
+        <h3>AI 节点</h3>
+        <p>远端独立 Xray，SSH 纳管，复用数据面 REALITY 参数，freedom 直出。</p>
+      </div>
+      <div class="a-tiles">
+        <div class="a-tile">
+          <span>{{ aiNode.label || "AI 节点" }}</span>
+          <strong :class="aiNode.reachable ? 'ok' : (aiNode.configured ? 'bad' : 'warn')">
+            {{ panel.aiNodeStatusLabel() }}
+          </strong>
+          <small>{{ aiNode.management_target || "未纳管（AI_NODE_SSH_TARGET 未设置）" }}</small>
+        </div>
+        <div class="a-tile">
+          <span>配置路径</span>
+          <strong>{{ aiNode.config_path || "—" }}</strong>
+          <small>{{ aiNode.supports_sync ? "支持 SSH 推送" : "不支持配置推送" }}</small>
+        </div>
+        <div class="a-tile">
+          <span>重启能力</span>
+          <strong :class="aiNode.supports_restart ? 'ok' : 'warn'">
+            {{ aiNode.supports_restart ? "支持" : "不支持" }}
+          </strong>
+        </div>
+      </div>
+      <div class="a-actions">
+        <button
+          v-if="aiNode.configured && aiNode.supports_restart"
+          class="a-btn secondary"
+          type="button"
+          :disabled="panel.isBusy('restart-ai-node')"
+          @click="panel.restartAiNode"
+        >
+          {{ panel.isBusy("restart-ai-node") ? "重启中..." : "重启 AI 节点" }}
+        </button>
+      </div>
+    </div>
+
     <!-- Data plane + AI -->
     <div class="a-card">
       <div class="a-card-head">
@@ -258,6 +333,69 @@ export default {
 <style scoped>
 .a-tile.peak-active {
   box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.5);
+}
+
+.traffic-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
+.flow-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: var(--r-md, 8px);
+  background: rgba(148, 163, 184, 0.06);
+  opacity: 0.45;
+  transition: opacity 0.2s;
+}
+
+.flow-step.active {
+  opacity: 1;
+  border-color: var(--c-primary, #1a73e8);
+  background: rgba(26, 115, 232, 0.06);
+}
+
+.flow-step .flow-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.flow-step small {
+  font-size: 12px;
+  color: var(--c-text-muted, #64748b);
+}
+
+.flow-arrow {
+  font-size: 20px;
+  color: var(--c-text-muted, #94a3b8);
+}
+
+.flow-arrow.dim {
+  opacity: 0.3;
+}
+
+.traffic-scenario {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  margin-top: 8px;
+}
+
+.traffic-scenario strong {
+  font-size: 15px;
+}
+
+.traffic-scenario small {
+  font-size: 13px;
+  color: var(--c-text-muted, #64748b);
 }
 
 .diag {

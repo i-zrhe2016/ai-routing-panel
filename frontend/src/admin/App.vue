@@ -132,6 +132,11 @@ export default {
             <small>{{ dataPlaneStatus.management_target || "当前未配置数据面" }}</small>
           </div>
           <div class="sider-card">
+            <span>AI 节点状态</span>
+            <strong>{{ aiNodeStatusLabel() }}</strong>
+            <small>{{ (aiNodeStatus && aiNodeStatus.management_target) || "AI 节点未纳管" }}</small>
+          </div>
+          <div class="sider-card">
             <span>面板地址</span>
             <strong>{{ meta.panel_address || "—" }}</strong>
             <small>{{ (meta.timezone_label || "") + " · Xray Direct" }}</small>

@@ -2,7 +2,7 @@
 
 ## 主链路
 
-AI 路由由 `xray-ai-domain-manager` 驱动，默认流程如下：
+AI 路由由 `xray-ai-domain-manager` 驱动（运行在普通数据面上），默认流程如下：
 
 1. 从 `app/xray/logs/access.log` 读取最近一小时访问域名
 2. 先应用内建 AI 域名规则
@@ -10,6 +10,8 @@ AI 路由由 `xray-ai-domain-manager` 驱动，默认流程如下：
 4. 如 `codex` 不可用，再回退到 OpenAI 兼容接口
 5. 生成动态路由、小时报表和数据库聚合结果
 6. 路由变化时重新渲染并重启数据面
+
+AI 域名流量最终通过 `dynamic-routing.json` 中的 freedom redirect 转发到 AI 节点（远端独立 Xray），由 AI 节点 freedom 直出。AI 节点不可达时自动回退到数据面直出，详见下方"AI 上游选择"和 [ai-node-deployment.md](ai-node-deployment.md)。
 
 ## 输入与输出
 
@@ -29,7 +31,7 @@ AI 路由由 `xray-ai-domain-manager` 驱动，默认流程如下：
 
 ## AI 上游选择
 
-常见配置方式有两种：
+AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 - 主上游 + 追加备用：
   - `AI_UPSTREAM_HOST`
@@ -42,13 +44,20 @@ AI 路由由 `xray-ai-domain-manager` 驱动，默认流程如下：
 
 - 使用 `AI_UPSTREAM_FALLBACK_URL`
 
+当 AI 节点被控制面纳管（`AI_NODE_SSH_TARGET` 已配置）时，`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 应指向 AI 节点公网入口，控制面会自动派生 `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 供 DNS 故障切换 relay 模式使用。
+
 管理器会按顺序做 TCP 探测，首个不可达时切换到下一个可达上游。
 
 如果所有 AI 上游都不可达：
 
 - 不再下发 `ai_proxy` 动态路由
-- 已命中的 AI 域名会回退到主链路流量
+- 删除 `dynamic-routing.json`（`ai_domain_manager.py:1675`）
+- 已命中的 AI 域名会回退到主链路流量（数据面 freedom 直出）
 - 报表中的 `route_status` 会标记为 `fallback_to_primary`
+- 回退判断由 `should_fallback_to_primary_route()`（`ai_domain_manager.py:1183`）完成
+- **此回退不涉及 DNS 切换**
+
+AI 节点恢复后，下一轮探测到可达，重新生成 `dynamic-routing.json`，AI 流量恢复转发到 AI 节点。
 
 ## 代理模板
 
