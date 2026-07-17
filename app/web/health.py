@@ -1,18 +1,24 @@
 from flask import jsonify
 
-from ..config import PANEL_HEALTH_REQUIRES_XRAY
+from ..config import CONTROL_PLANE_BACKUP_XRAY_ENABLED, PANEL_HEALTH_REQUIRES_XRAY
 from .core import route, state
 
 
 @route("/healthz", methods=["GET"])
 def healthz():
-    state.sync_traffic_state()
-    data_plane_running = state.data_plane_running()
-    ai_node_running = state.ai_node_running()
-    healthy = data_plane_running if PANEL_HEALTH_REQUIRES_XRAY else True
+    dns_status = state.dns_failover_status()
+    backup_active = bool(
+        CONTROL_PLANE_BACKUP_XRAY_ENABLED
+        and dns_status.get("enabled")
+        and dns_status.get("current_target") == "backup"
+    )
+    data_plane_running = False if backup_active else state.data_plane_running()
+    ai_node_running = None if backup_active else state.ai_node_running()
+    healthy = (data_plane_running or backup_active) if PANEL_HEALTH_REQUIRES_XRAY else True
     status_code = 200 if healthy else 500
     return jsonify({
         "ok": healthy,
         "data_plane_running": data_plane_running,
         "ai_node_running": ai_node_running,
+        "dns_failover_active": backup_active,
     }), status_code

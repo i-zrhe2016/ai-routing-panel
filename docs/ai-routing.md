@@ -128,3 +128,13 @@ docker compose --profile xray logs -f xray-ai-domain-manager
 cat app/xray/reports/hourly-domains/latest.txt
 sed -n '1,220p' app/xray/reports/hourly-domains/latest.json
 ```
+
+## 源码与运行目录
+
+`app/xray/` 是 AI 路由和 Xray 配置子系统的代码目录，文档统一维护在本目录。常用入口如下：
+
+- `render_config.py`：渲染 `config.json`、`client-test.json` 和分享链接
+- `ai_domain_manager.py`：域名分类、动态路由、小时报表
+- `google_search_mcp.py`：辅助归类用 MCP server
+- `runtime/`：渲染产物和运行时缓存
+- `reports/`：小时域名报告

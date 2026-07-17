@@ -57,6 +57,10 @@ DATAPLANE_SSH_OPTIONS = parse_shell_words_env(
     os.environ.get("DATAPLANE_SSH_OPTIONS", ""),
     "DATAPLANE_SSH_OPTIONS",
 )
+DATAPLANE_REMOTE_COMMAND_TIMEOUT = parse_positive_env_float(
+    os.environ.get("DATAPLANE_REMOTE_COMMAND_TIMEOUT", "8"),
+    "DATAPLANE_REMOTE_COMMAND_TIMEOUT",
+)
 DATAPLANE_API_SERVER = os.environ.get("DATAPLANE_API_SERVER", XRAY_API_SERVER).strip() or XRAY_API_SERVER
 DATAPLANE_XRAY_BIN = os.environ.get("DATAPLANE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
 DATAPLANE_LOCAL_BIN = os.environ.get("DATAPLANE_LOCAL_BIN", "").strip()

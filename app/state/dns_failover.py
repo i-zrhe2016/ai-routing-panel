@@ -243,10 +243,13 @@ class DnsFailoverService:
         backup_content = str(config.backup_content or "").strip()
         error = ""
         if not primary_content:
-            try:
-                primary_content = self._panel.data_plane.resolve_public_ip(timeout_seconds=max(config.timeout, 3.0))
-            except Exception as exc:
-                error = f"主数据面公网 IP 自动获取失败: {exc}"
+            if self._panel.data_plane.is_remote:
+                error = "远端数据面启用 DNS 故障切换时，必须设置 DNS_FAILOVER_PRIMARY_CONTENT。"
+            else:
+                try:
+                    primary_content = self._panel.data_plane.resolve_public_ip(timeout_seconds=max(config.timeout, 3.0))
+                except Exception as exc:
+                    error = f"主数据面公网 IP 自动获取失败: {exc}"
         if not backup_content and not error and CONTROL_PLANE_BACKUP_XRAY_ENABLED:
             try:
                 backup_content = resolve_public_ip(timeout=max(config.timeout, 3.0))

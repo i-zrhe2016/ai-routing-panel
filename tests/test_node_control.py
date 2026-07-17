@@ -1,11 +1,13 @@
 import importlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest import mock
 
 from app.xray.node_control import DataPlaneConfig, DataPlaneController
 
@@ -80,6 +82,23 @@ class NodeControlTest(unittest.TestCase):
 
         self.assertEqual(calls, [True])
 
+    def test_remote_command_timeout_is_reported(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                remote_command_timeout=0.5,
+            )
+        )
+
+        with mock.patch(
+            "app.xray.node_control.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["ssh"], 0.5),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "命令执行超时"):
+                controller._run_remote(["true"], "数据面命令失败")
+
     def test_restart_data_plane_returns_summary(self):
         os.environ["DATAPLANE_SSH_TARGET"] = "root@data-plane"
         state_module = load_state_module(self.root)
@@ -93,6 +112,38 @@ class NodeControlTest(unittest.TestCase):
 
         self.assertEqual(summary["role"], "data_plane")
         self.assertEqual(summary["label"], "数据面")
+
+    def test_backup_restart_failure_aborts_port_artifact_commit(self):
+        os.environ["CONTROL_PLANE_BACKUP_XRAY_ENABLED"] = "1"
+        state_module = load_state_module(self.root)
+        state = state_module.PanelState()
+        panel_ports_path = self.root / "xray" / "runtime" / "panel-ports.json"
+        config_path = self.root / "xray" / "runtime" / "config.json"
+        backup_config_path = self.root / "xray" / "runtime" / "config-backup.json"
+        previous_panel_ports = panel_ports_path.read_text(encoding="utf-8")
+        previous_config = config_path.read_text(encoding="utf-8")
+        previous_backup_config = '{"version":"previous-backup"}\n'
+        backup_config_path.write_text(previous_backup_config, encoding="utf-8")
+
+        state.render_xray_config = lambda: (
+            config_path.write_text('{"version":"new-primary"}\n', encoding="utf-8"),
+            backup_config_path.write_text('{"version":"new-backup"}\n', encoding="utf-8"),
+        )
+        state.xray_config_test = lambda: None
+        state.restart_backup_xray = lambda: False
+
+        with state.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            with self.assertRaisesRegex(RuntimeError, "备用 Xray 重载失败"):
+                try:
+                    state.persist_and_reload(conn, reload_xray=False)
+                except Exception:
+                    conn.rollback()
+                    raise
+
+        self.assertEqual(panel_ports_path.read_text(encoding="utf-8"), previous_panel_ports)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), previous_config)
+        self.assertEqual(backup_config_path.read_text(encoding="utf-8"), previous_backup_config)
 
     def test_remote_sync_keeps_json_suffix_for_temp_config(self):
         source_config = self.root / "config.json"

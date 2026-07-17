@@ -1,4 +1,5 @@
 import json
+import logging
 import sqlite3
 import subprocess
 import sys
@@ -40,6 +41,8 @@ from ..helpers import (
 )
 from ..xray.envfile import load_env_file
 
+
+LOGGER = logging.getLogger(__name__)
 
 
 class CoreService:
@@ -455,11 +458,20 @@ class CoreService:
     def persist_and_reload(self, conn, reload_xray):
         previous_panel_ports = XRAY_PANEL_PORTS_PATH.read_text(encoding="utf-8") if XRAY_PANEL_PORTS_PATH.exists() else None
         previous_config = XRAY_CONFIG_PATH.read_text(encoding="utf-8") if XRAY_CONFIG_PATH.exists() else None
+        backup_config_path = XRAY_CONFIG_PATH.parent / "config-backup.json"
+        previous_backup_config = (
+            backup_config_path.read_text(encoding="utf-8") if backup_config_path.exists() else None
+        )
         panel_ports_payload = self._panel.render_panel_ports_payload(conn)
         self._panel.write_json_file(XRAY_PANEL_PORTS_PATH, panel_ports_payload)
+        backup_restarted = False
         try:
             self._panel.render_xray_config()
             self._panel.xray_config_test()
+            if CONTROL_PLANE_BACKUP_XRAY_ENABLED:
+                if not self._panel.restart_backup_xray():
+                    raise RuntimeError("控制面备用 Xray 重载失败，端口变更未提交。")
+                backup_restarted = True
             if reload_xray:
                 self._panel.restart_data_plane()
         except Exception:
@@ -471,6 +483,16 @@ class CoreService:
                 XRAY_CONFIG_PATH.unlink(missing_ok=True)
             else:
                 XRAY_CONFIG_PATH.write_text(previous_config, encoding="utf-8")
+            if previous_backup_config is None:
+                backup_config_path.unlink(missing_ok=True)
+            else:
+                backup_config_path.write_text(previous_backup_config, encoding="utf-8")
+            if backup_restarted:
+                try:
+                    if not self._panel.restart_backup_xray():
+                        LOGGER.error("控制面备用 Xray 回滚重载失败，运行实例可能仍使用新端口配置")
+                except Exception:
+                    LOGGER.exception("控制面备用 Xray 回滚重载失败")
             if self._panel.data_plane.supports_sync():
                 try:
                     self._panel.data_plane.sync_generated_files(validate_config=True)
@@ -503,12 +525,22 @@ class CoreService:
         with self._panel.connect() as conn:
             self._panel.write_json_file(XRAY_PANEL_PORTS_PATH, self._panel.render_panel_ports_payload(conn))
         self._panel.render_xray_config()
-        self._panel.xray_config_test()
+        try:
+            self._panel.xray_config_test()
+        except RuntimeError:
+            if not self._panel.data_plane.is_remote:
+                raise
+            LOGGER.exception("数据面不可达，跳过启动阶段的远程配置校验；控制面继续启动")
     def write_json_file(self, path, payload):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     def render_xray_config(self):
-        self._panel.sync_data_plane_dynamic_routing()
+        try:
+            self._panel.sync_data_plane_dynamic_routing()
+        except RuntimeError:
+            if not self._panel.data_plane.is_remote:
+                raise
+            LOGGER.exception("数据面动态路由读取失败，继续使用控制面最近一次本地产物")
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
         command = [
             sys.executable,
@@ -753,7 +785,6 @@ class CoreService:
         raise RuntimeError(f"{error_prefix}: {detail}")
     def maintenance_loop(self):
         last_probe_at = 0.0
-        last_dns_failover_at = 0.0
         last_backup_mode_at = 0.0
         backup_mode_interval = max(PROBE_INTERVAL, 60)
         while not self._panel.stop_event.wait(MAINTENANCE_INTERVAL):
@@ -764,17 +795,29 @@ class CoreService:
                 if PROBE_ENABLED and now_monotonic - last_probe_at >= PROBE_INTERVAL:
                     self._panel.run_upstream_probes()
                     last_probe_at = now_monotonic
-                if (
-                    self._panel.dns_failover_manager.config.enabled
-                    and now_monotonic - last_dns_failover_at >= self._panel.dns_failover_manager.config.interval
-                ):
-                    self._panel.run_dns_failover_check()
-                    last_dns_failover_at = now_monotonic
                 if now_monotonic - last_backup_mode_at >= backup_mode_interval:
                     self._panel.sync_backup_xray_mode()
                     last_backup_mode_at = now_monotonic
             except Exception:
+                LOGGER.exception("维护循环执行失败")
                 continue
+
+    def dns_failover_loop(self):
+        """Run DNS failover independently from data-plane maintenance tasks.
+
+        Data-plane SSH, log synchronization, and stats collection may block or
+        fail when the primary node is down. DNS failover must remain alive in
+        exactly that situation, so it has its own loop and failure boundary.
+        """
+        while not self._panel.stop_event.is_set():
+            try:
+                if self._panel.dns_failover_manager.config.enabled:
+                    self._panel.run_dns_failover_check()
+            except Exception:
+                LOGGER.exception("DNS 故障切换检测失败")
+            interval = max(1, self._panel.dns_failover_manager.config.interval)
+            if self._panel.stop_event.wait(interval):
+                return
     def stop(self):
         if self._panel.stop_event.is_set():
             return

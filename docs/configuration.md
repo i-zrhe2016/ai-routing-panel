@@ -19,7 +19,8 @@
 | `GRAFANA_OBSERVABILITY_UID` | 「监控」标签内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
 | `DATAPLANE_SSH_TARGET` | 远端数据面 SSH 目标，例如 `root@node-a` |
-| `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析 |
+| `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；远端生产环境建议包含 `-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1` |
+| `DATAPLANE_REMOTE_COMMAND_TIMEOUT` | 单次远程 SSH/Docker 命令的控制面超时，默认 `8` 秒；避免数据面失联拖住控制面任务 |
 | `DATAPLANE_API_SERVER` | 数据面 Xray API 地址，默认 `127.0.0.1:10085` |
 | `DATAPLANE_CONFIG_PATH` | 远端或本地数据面使用的 `config.json` 路径 |
 | `DATAPLANE_DYNAMIC_ROUTING_PATH` | 远端 `dynamic-routing.json` 路径 |
@@ -76,7 +77,7 @@
 | `CF_DNS_RECORD_NAME` | 记录名，例如 `edge.example.com` |
 | `CF_DNS_RECORD_PROXIED` | 是否保持 Cloudflare 代理 |
 | `CF_DNS_RECORD_TTL` | 记录 TTL；非代理记录建议 `60` 以尽快生效 |
-| `DNS_FAILOVER_PRIMARY_CONTENT` | 主数据面入口 IP 或 CNAME；留空时自动获取数据面公网 IP |
+| `DNS_FAILOVER_PRIMARY_CONTENT` | 主数据面入口 IP 或 CNAME；远端数据面模式必须显式填写，本地模式可留空自动获取 |
 | `CONTROL_PLANE_BACKUP_XRAY_ENABLED` | 是否启用"控制面本机公网 IP + 备用 Xray"自动备用模式（relay / 直出双模式） |
 | `CONTROL_PLANE_BACKUP_UPSTREAM_URL` | relay 模式的 vless:// 上游 URL；AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生 |
 | `DNS_FAILOVER_BACKUP_CONTENT` | 控制面备用节点 IP 或 CNAME；留空时自动获取控制面本机公网 IP |
@@ -89,9 +90,11 @@
 
 - 当前只支持通过 `CF_DNS_RECORD_ID` 更新单条记录
 - 自动切换只看 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
+- DNS 故障切换运行在独立 worker 中，不依赖数据面日志、Xray API、流量统计或配置同步
+- 数据面远程命令受 `DATAPLANE_REMOTE_COMMAND_TIMEOUT` 限制；SSH 连接参数仍建议通过 `DATAPLANE_SSH_OPTIONS` 配置连接超时和 keepalive
 - AI 节点故障不触发 DNS 切换，由 `ai_domain_manager` 自动回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
 - 若启用高峰窗口，窗口内会把备用/专用节点视为首选目标；窗口外恢复主节点优先
-- 如果 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP
+- 如果是本地数据面且 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP；远端数据面必须显式填写，避免数据面失联时 DNS worker 依赖数据面 SSH
 - 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 且 `DNS_FAILOVER_BACKUP_CONTENT` 留空，控制面会自动获取本机公网 IP，适合作为控制面备用 Xray 的 DNS 指向
 - 如果 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，则必须显式填写 `DNS_FAILOVER_BACKUP_CONTENT`
 - 对 REALITY 这类直连流量，想让 IP 更快生效，优先把 `CF_DNS_RECORD_TTL` 设为 `60`

@@ -644,8 +644,18 @@ def handle_shutdown(signum, _frame):
 
 def main():
     state.bootstrap()
-    worker = threading.Thread(target=state.maintenance_loop, daemon=True)
-    worker.start()
+    maintenance_worker = threading.Thread(
+        target=state.maintenance_loop,
+        name="panel-maintenance",
+        daemon=True,
+    )
+    dns_failover_worker = threading.Thread(
+        target=state.dns_failover_loop,
+        name="dns-failover",
+        daemon=True,
+    )
+    maintenance_worker.start()
+    dns_failover_worker.start()
     atexit.register(state.stop)
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)

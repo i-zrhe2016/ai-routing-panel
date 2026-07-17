@@ -64,6 +64,28 @@ scrape_configs:
 
 > 前置项：要看**数据面（DMIT `64.186.224.96`）**的系统资源，需在该机部署一份 node_exporter，并在 `monitoring/prometheus/prometheus.yml` 取消 `job_name: node` 下 DMIT target 的注释后 reload；否则「监控」里的主机指标只反映面板主机。
 
+### 监控栈启停
+
+监控栈由 `monitoring/docker-compose.monitoring.yml` 定义，包括 node_exporter、Prometheus
+和 Grafana；Prometheus 配置及 Grafana provisioning/dashboard 也全部位于 `monitoring/`。
+
+```bash
+cd monitoring
+docker compose -f docker-compose.monitoring.yml up -d
+docker compose -f docker-compose.monitoring.yml ps
+docker compose -f docker-compose.monitoring.yml down  # 保留数据卷
+```
+
+修改 `prometheus.yml` 后可热加载：
+
+```bash
+curl -X POST http://127.0.0.1:9090/-/reload
+```
+
+访问入口：Grafana 默认是 `:3000`，Prometheus 是 `:9090`。Grafana 管理员密码来自
+`monitoring/.env`。开启匿名只读后，能访问 `:3000` 的用户可以读取全部图表；`:9090`
+和 node_exporter 的 `:9100` 默认也没有认证，必须使用云防火墙或主机防火墙限制可信来源。
+
 ## 流量与连接统计
 
 当前统计链路拆成两部分：
@@ -125,6 +147,7 @@ scrape_configs:
 当 `DNS_FAILOVER_ENABLED=1` 且配置完整时，面板会后台周期性执行以下规则：
 
 - 只探测 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
+- DNS 故障切换探测运行在独立 worker 中，不会被数据面 SSH、日志同步或流量统计阻塞
 - 连续失败达到 `DNS_FAILOVER_FAILURE_THRESHOLD` 时，把单条 Cloudflare DNS 记录切到备用目标
 - 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD` 时，自动回切到主数据面
 - 如果启用了高峰窗口，窗口内会把备用/专用节点视为首选目标，窗口外恢复主节点优先
@@ -143,6 +166,18 @@ scrape_configs:
 
 - 首页 "DNS 故障切换" 卡片
 - `POST /api/dns-failover/check`
+
+### 数据面故障时的应急切换
+
+自动切换异常或需要立即恢复业务时，按以下顺序操作：
+
+1. 从外部网络确认控制面备用入口 `DNS_FAILOVER_BACKUP_CONTENT:DNS_FAILOVER_PROBE_PORT` 可达。
+2. 在首页「DNS 故障切换」卡片中将目标手动切到 `backup`，或在 Cloudflare DNS 中把 `CF_DNS_RECORD_NAME` 指向 `DNS_FAILOVER_BACKUP_CONTENT`。
+3. 确认 Cloudflare 记录已更新，并等待记录 TTL 生效。
+4. 检查控制面备用 Xray 的 relay / direct 模式和客户端连接。
+5. 数据面恢复后，不要立即手动回切；先确认 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT` 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD`，再让系统自动回切。
+
+如果数据库中的 `last_probe_checked_at` 长时间不更新，而控制面 HTTP 服务仍然可用，优先检查 DNS failover worker、控制面日志和远程 SSH 超时配置。此时不要只重启控制面或单纯调低失败阈值。
 - `POST /api/dns-failover/switch`
 
 生效速度建议：
@@ -236,6 +271,8 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 - 数据面是否在运行
 - `DATAPLANE_API_SERVER` 是否可访问
 - 如果当前只需要管理 UI，是否已经把 `PANEL_HEALTH_REQUIRES_XRAY=0`
+
+当 DNS 已切到启用的控制面备用 Xray 时，`/healthz` 会把控制面接管状态视为健康；健康检查不会执行流量日志同步，避免主数据面失联时阻塞健康接口。
 
 ### 数据面无法重启
 

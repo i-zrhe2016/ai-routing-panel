@@ -4,6 +4,8 @@
 
 当普通数据面故障时，控制面通过 Cloudflare API 自动将 DNS 记录切到控制面本机，由控制面备用 Xray 接管流量。控制面备用 Xray 有两种工作模式：
 
+本机制保证的是普通数据面或 AI 节点的单点故障，以及控制面在线时的“普通数据面 + AI 节点”组合故障；控制面和普通数据面同时故障不在当前两节点架构的保证范围内，详见 [fault-tolerance.md](fault-tolerance.md)。
+
 - **relay 模式**（AI 节点正常时）：将所有流量转发到 AI 节点，由 AI 节点 freedom 直出
 - **直出模式**（AI 节点也故障时）：控制面备用 Xray 直接 freedom 出站
 
@@ -66,7 +68,7 @@ DNS 切到控制面 IP，控制面探测到 AI 节点不可达，自动将备用
 | `DNS_FAILOVER_RECOVERY_THRESHOLD` | `2` | 否 | 连续成功多少次回切主数据面 |
 | `DNS_FAILOVER_PROBE_HOST` | — | 是 | 数据面公网 TCP 探测目标（域名或 IP）|
 | `DNS_FAILOVER_PROBE_PORT` | — | 是 | 数据面公网 TCP 探测端口 |
-| `DNS_FAILOVER_PRIMARY_CONTENT` | — | 否 | 主数据面入口 IP 或 CNAME；留空时自动获取数据面公网 IP |
+| `DNS_FAILOVER_PRIMARY_CONTENT` | — | 远端模式必填 | 主数据面入口 IP 或 CNAME；本地模式留空时自动获取数据面公网 IP |
 | `DNS_FAILOVER_BACKUP_CONTENT` | — | 否 | 控制面备用节点 IP 或 CNAME；留空时自动获取控制面本机公网 IP |
 | `DNS_FAILOVER_BACKUP_LABEL` | `控制面备用Xray` | 否 | 面板展示用备用节点名称 |
 
@@ -102,7 +104,7 @@ DNS 切到控制面 IP，控制面探测到 AI 节点不可达，自动将备用
 
 ### 探测逻辑
 
-控制面在 `maintenance_loop` 中周期性执行 `run_dns_failover_check()`（`app/state/dns_failover.py:320`），对 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT` 做 TCP 连通性探测：
+控制面在独立的 DNS failover worker 中周期性执行 `run_dns_failover_check()`（`app/state/dns_failover.py:320`），对 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT` 做 TCP 连通性探测。该 worker 不依赖数据面日志同步、流量统计、Xray API 或配置同步，因此主数据面完全失联时仍可以执行切换：
 
 ```python
 # app/dns_failover.py:147
@@ -144,7 +146,8 @@ def probe_once(self):
 
 `resolve_dns_failover_contents()`（`state/dns_failover.py:239`）负责解析 primary 和 backup 的 IP：
 
-- `DNS_FAILOVER_PRIMARY_CONTENT` 留空 → 调用 `data_plane.resolve_public_ip()` 获取数据面公网 IP
+- 本地数据面且 `DNS_FAILOVER_PRIMARY_CONTENT` 留空 → 调用 `data_plane.resolve_public_ip()` 获取数据面公网 IP
+- 远端数据面必须显式设置 `DNS_FAILOVER_PRIMARY_CONTENT`；DNS worker 不会通过 SSH 查询失联的数据面
 - `DNS_FAILOVER_BACKUP_CONTENT` 留空 + `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` → 调用 `resolve_public_ip()` 获取控制面本机公网 IP
 - `DNS_FAILOVER_BACKUP_CONTENT` 留空 + `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0` → 报错，必须显式填写
 
@@ -197,10 +200,10 @@ relay outbound 由 `build_backup_relay_outbound()`（`app/xray/render_config.py:
 
 ### 自动模式切换
 
-目标态下，`maintenance_loop` 的 DNS failover 检测循环中增加 AI 节点可达性探测：
+目标态下，DNS failover worker 的每次检测中增加 AI 节点可达性探测：
 
 ```
-每次 DNS failover 检测:
+每次 DNS failover 检测：
   1. 探测数据面 DNS_FAILOVER_PROBE_HOST:PORT
   2. 探测 AI 节点 AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT
   3. 如果当前在 backup 模式:

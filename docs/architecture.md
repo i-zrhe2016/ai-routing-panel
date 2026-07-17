@@ -2,7 +2,7 @@
 
 ## 总览
 
-控制面通过 SSH 纳管两个远端节点：
+控制面通过 SSH 纳管两个远端节点；用户代理流量的正常路径不依赖控制面在线：
 
 - **普通数据面**：承载 `VLESS + REALITY` 流量，运行 `ai_domain_manager`
 - **AI 节点**：接收数据面转发的 AI 域名流量，freedom 直出
@@ -16,6 +16,8 @@
 
 首页展示三节点状态（普通数据面、AI 节点、控制面备用）和当前流量导向路径，以及 AI 路由状态和 DNS 故障切换状态。
 如果启用了 DNS 故障切换，首页还会额外展示当前 DNS 指向、最近探测结果和最近一次切换状态。
+
+三节点单点故障的正式边界见 [fault-tolerance.md](fault-tolerance.md)。控制面故障时，已有客户端的普通代理流量应继续走普通数据面；控制面管理页面、订阅和自动运维不属于数据面可用性保证范围。
 
 ## 组件职责
 
@@ -104,7 +106,7 @@ AI 节点通常使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为
 6. 普通数据面加载 `config.json` 并通过 Xray API 提供 `statsquery`。
 7. `xray-ai-domain-manager` 从 `access.log` 读取域名，输出 AI 路由产物。AI 域名流量通过 `dynamic-routing.json` 转发到 AI 节点。
 8. AI 节点不可达时，`ai_domain_manager` 删除 `dynamic-routing.json`，AI 流量回退数据面 freedom 直出。
-9. DNS 故障切换后台任务对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录。
+9. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
 10. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
 11. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，并在启用时调用 `db-backup-uploader` 上传最新备份。
 12. 首页读取三节点状态、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。

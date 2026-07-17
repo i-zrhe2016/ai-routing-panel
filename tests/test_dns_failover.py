@@ -2,6 +2,7 @@ import importlib
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -200,6 +201,95 @@ class DnsFailoverTest(unittest.TestCase):
 
         self.assertEqual(switch_calls, [])
         self.assertEqual(state.dns_failover_status()["current_target"], "backup")
+
+    def test_dns_failover_can_fail_over_again_after_recovery(self):
+        state, _state_module = self.build_state()
+        self.seed_record(state, "1.1.1.1")
+        probe_results = iter(
+            [
+                {"ok": False, "error": "first outage"},
+                {"ok": False, "error": "first outage"},
+                {"ok": True, "error": ""},
+                {"ok": True, "error": ""},
+                {"ok": False, "error": "second outage"},
+                {"ok": False, "error": "second outage"},
+            ]
+        )
+        switch_calls = []
+        current_record = {"content": "1.1.1.1"}
+
+        state.dns_failover_manager.probe_once = lambda: next(probe_results)
+        state.dns_failover_manager.get_record = lambda: {
+            "content": current_record["content"],
+            "ttl": 60,
+            "proxied": False,
+        }
+
+        def sync_target(target, primary_content=None, backup_content=None):
+            switch_calls.append(target)
+            current_record["content"] = "1.1.1.1" if target == "primary" else "2.2.2.2"
+            return {
+                "content": current_record["content"],
+                "ttl": 60,
+                "proxied": False,
+            }
+
+        state.dns_failover_manager.sync_target = sync_target
+
+        results = [state.run_dns_failover_check() for _ in range(6)]
+
+        self.assertEqual(switch_calls, ["backup", "primary", "backup"])
+        self.assertEqual(results[-1]["current_target"], "backup")
+        self.assertEqual(results[-1]["last_switch_reason"], "auto_failover")
+
+    def test_explicit_failover_contents_do_not_query_data_plane_ip(self):
+        state, _state_module = self.build_state()
+        state.data_plane.resolve_public_ip = lambda timeout_seconds=5.0: self.fail(
+            "DNS failover must not query the data plane when contents are explicit"
+        )
+
+        status = state.dns_failover_status()
+
+        self.assertTrue(status["configured"])
+
+    def test_remote_failover_requires_explicit_primary_content(self):
+        state, _state_module = self.build_state(
+            {
+                "DATAPLANE_SSH_TARGET": "root@data-plane",
+                "DNS_FAILOVER_PRIMARY_CONTENT": "",
+            }
+        )
+        state.data_plane.resolve_public_ip = lambda timeout_seconds=5.0: self.fail(
+            "remote failover must not resolve primary IP through the data plane"
+        )
+
+        status = state.dns_failover_status()
+
+        self.assertFalse(status["configured"])
+        self.assertIn("DNS_FAILOVER_PRIMARY_CONTENT", status["config_error"])
+
+    def test_dns_worker_runs_when_maintenance_task_blocks(self):
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_INTERVAL": "1",
+                "MAINTENANCE_INTERVAL": "1",
+            }
+        )
+        worker_ran = threading.Event()
+
+        state.sync_traffic_state = lambda: threading.Event().wait(3)
+        state.run_dns_failover_check = lambda: worker_ran.set()
+
+        maintenance_thread = threading.Thread(target=state.maintenance_loop, daemon=True)
+        failover_thread = threading.Thread(target=state.dns_failover_loop, daemon=True)
+        maintenance_thread.start()
+        failover_thread.start()
+
+        self.assertTrue(worker_ran.wait(2))
+
+        state.stop_event.set()
+        maintenance_thread.join(timeout=1)
+        failover_thread.join(timeout=1)
 
     def test_dns_failover_recovers_to_primary_after_threshold(self):
         state, _state_module = self.build_state()

@@ -18,6 +18,8 @@
 | `k8s/phase2` | 第二阶段 | 增加 `xray` 和 `xray-reloader`，但不迁 AI 管理器 |
 | `k8s/` | 目标态 | 完整链路，包括 `panel`、`xray`、`xray-ai-domain-manager` 和备份 |
 
+清单目录只保留 YAML、Kustomize 和示例配置；阶段说明与部署操作以本文为唯一来源。
+
 ## 第一阶段：`k8s/panel-only`
 
 特点：

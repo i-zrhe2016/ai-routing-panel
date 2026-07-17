@@ -318,6 +318,7 @@ class DataPlaneConfig:
     ssh_target: str = ""
     ssh_bin: str = "ssh"
     ssh_options: tuple[str, ...] = ()
+    remote_command_timeout: float = 8.0
     config_path: str = ""
     dynamic_routing_path: str = ""
     ai_report_path: str = ""
@@ -406,20 +407,26 @@ class DataPlaneController:
         return ""
 
     def _run_subprocess(self, command, error_prefix, timeout=None, input_text=None):
-        completed = subprocess.run(
-            command,
-            input=input_text,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                input=input_text,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            limit = f"{timeout:g} 秒" if timeout is not None else "配置的超时时间"
+            raise RuntimeError(f"{error_prefix}: 命令执行超时（{limit}）。") from exc
         if completed.returncode == 0:
             return completed
         detail = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
         raise RuntimeError(f"{error_prefix}: {detail}")
 
     def _run_remote(self, args, error_prefix, timeout=None, input_text=None):
+        if timeout is None:
+            timeout = self.config.remote_command_timeout
         remote_command = join_shell_args(args)
         command = [
             self.config.ssh_bin,
@@ -454,21 +461,11 @@ class DataPlaneController:
         command = [self.config.docker_bin, "container", "inspect", self.config.container_name]
         try:
             if self.mode == "ssh":
-                completed = subprocess.run(
-                    [
-                        self.config.ssh_bin,
-                        *self.config.ssh_options,
-                        self.config.ssh_target,
-                        join_shell_args(command),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                return completed.returncode == 0
-            completed = subprocess.run(command, capture_output=True, text=True, check=False)
-            return completed.returncode == 0
-        except OSError:
+                self._run_remote(command, f"{self.config.label} 容器检查失败")
+                return True
+            self._run_subprocess(command, f"{self.config.label} 容器检查失败")
+            return True
+        except (OSError, RuntimeError):
             return False
 
     def _docker_running(self):
@@ -483,21 +480,11 @@ class DataPlaneController:
         ]
         try:
             if self.mode == "ssh":
-                completed = subprocess.run(
-                    [
-                        self.config.ssh_bin,
-                        *self.config.ssh_options,
-                        self.config.ssh_target,
-                        join_shell_args(command),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                completed = self._run_remote(command, f"{self.config.label} 容器状态检查失败")
             else:
-                completed = subprocess.run(command, capture_output=True, text=True, check=False)
+                completed = self._run_subprocess(command, f"{self.config.label} 容器状态检查失败")
             return completed.returncode == 0 and completed.stdout.strip().lower() == "true"
-        except OSError:
+        except (OSError, RuntimeError):
             return False
 
     def _socket_running_locally(self, timeout_seconds=1):
@@ -520,28 +507,20 @@ class DataPlaneController:
             if endpoint is None:
                 return False
             try:
-                completed = subprocess.run(
+                completed = self._run_remote(
                     [
-                        self.config.ssh_bin,
-                        *self.config.ssh_options,
-                        self.config.ssh_target,
-                        join_shell_args(
-                            [
-                                "python3",
-                                "-c",
-                                REMOTE_SOCKET_CHECK_SCRIPT,
-                                endpoint[0],
-                                str(endpoint[1]),
-                                str(timeout_seconds),
-                            ]
-                        ),
+                        "python3",
+                        "-c",
+                        REMOTE_SOCKET_CHECK_SCRIPT,
+                        endpoint[0],
+                        str(endpoint[1]),
+                        str(timeout_seconds),
                     ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
+                    f"{self.config.label} 运行状态检查失败",
+                    timeout=max(self.config.remote_command_timeout, float(timeout_seconds) + 1),
                 )
                 return completed.returncode == 0
-            except OSError:
+            except (OSError, RuntimeError):
                 return False
         if self.config.upstream_host and self.config.upstream_port:
             try:

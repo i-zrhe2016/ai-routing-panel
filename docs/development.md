@@ -187,3 +187,26 @@ npm test        # Vitest 组件/单元测试
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests -q
 ```
+
+## Landing 页面字体资源
+
+Landing 页 `.display` 标题使用自托管的 Noto Serif CJK SC 子集。字体源文件位于
+`frontend/src/landing/public/fonts/noto-serif-sc-subset.woff2`，字符清单位于
+`frontend/src/landing/fonts/headlines.txt`；Vite 构建时会复制到
+`app/static/landing/fonts/`。
+
+修改 Landing 页中使用衬线字体的标题后，如果新增字符不在子集中，先把字符加入
+`headlines.txt`，再执行：
+
+```bash
+pip install fonttools brotli
+pyftsubset /usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc \
+  --font-number=0 \
+  --text-file=frontend/src/landing/fonts/headlines.txt \
+  --layout-features='*' \
+  --flavor=woff2 \
+  --output-file=frontend/src/landing/public/fonts/noto-serif-sc-subset.woff2
+```
+
+`--font-number=0` 选择 TTC 中的 SC 字体。如果遗漏字符，浏览器会回退到系统衬线字体，
+页面仍可读，但不会使用预期的自托管字体。

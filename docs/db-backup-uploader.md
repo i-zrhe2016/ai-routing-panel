@@ -1,6 +1,50 @@
-# npm-uploader
+# 数据库备份上传组件
 
-把大文件先加密，再切成多个分片，并将每个分片封装成独立的 npm 包发布；之后可以从本地分片目录或 npm registry 拉回这些包，重新合并并解密出原文件。
+`db-backup-uploader` 是仓库内负责数据库备份归档的独立组件。它基于上游
+`npm-uploader` 改造，职责固定为接收 `panel.db` 备份、使用 `AES-256-GCM` 加密、切片、
+发布为 npm 包，并支持从本地分片或 npm registry 恢复原文件。
+
+## 在本项目中的使用
+
+自动模式由 `xray-routing-panel-db-backup` 容器中的 cron 每天触发：
+
+1. `scripts/backup_db.py` 生成新的 `.db` 备份。
+2. `scripts/run_db_backup_cycle.py` 调用本组件上传该备份。
+
+也可以手动执行：
+
+```bash
+docker compose run --rm xray-routing-panel-db-backup \
+  python3 /app/scripts/run_db_backup_cycle.py
+```
+
+仅测试上传链路而不真实发布：
+
+```bash
+docker compose run --rm \
+  -e DB_BACKUP_UPLOADER_ENABLED=1 \
+  -e DB_BACKUP_UPLOADER_DRY_RUN=1 \
+  -e DB_BACKUP_UPLOADER_PASSWORD=test-password \
+  xray-routing-panel-db-backup \
+  python3 /app/scripts/run_db_backup_cycle.py
+```
+
+项目运行时的默认目录：
+
+- 输入备份：由 `scripts/run_db_backup_cycle.py` 指定单个文件路径
+- 分片目录：`/db-backup-uploader-data/shards`
+- 恢复目录：`/db-backup-uploader-data/restored`
+- 上传记录：`/db-backup-uploader-data/upload-records.json`
+
+关键配置为 `DB_BACKUP_UPLOADER_ENABLED`、`DB_BACKUP_UPLOADER_PASSWORD`、
+`DB_BACKUP_UPLOADER_SCOPE`、`DB_BACKUP_UPLOADER_PACKAGE_VERSION`、
+`DB_BACKUP_UPLOADER_DRY_RUN` 和 `DB_BACKUP_UPLOADER_NPMRC_PATH`。真实发布通常需要在
+`data/db-backup-uploader/.npmrc` 中放置 npm 认证配置。
+
+源码：[`components/db-backup-uploader/shard-upload.js`](../components/db-backup-uploader/shard-upload.js)、
+[`components/db-backup-uploader/shard-restore.js`](../components/db-backup-uploader/shard-restore.js)。
+
+下面是组件自身的分片、发布和恢复说明。
 
 这个仓库当前只有两个核心脚本：
 
