@@ -351,6 +351,6 @@ npm test          # Vitest
 
 ## 文档导航
 
-- [README.md](README.md): 目录总览
+- [根目录 README](../README.md)：仓库根目录入口
 - [panel-migration.md](panel-migration.md): 面板迁移
 - [fault-tolerance.md](fault-tolerance.md): 三节点故障容错边界
