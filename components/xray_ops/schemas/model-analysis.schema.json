@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Xray operations model analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "executive_summary",
+    "node_explanations",
+    "probable_causes",
+    "recommended_actions",
+    "uncertainties"
+  ],
+  "properties": {
+    "executive_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "node_explanations": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node_role", "explanation", "evidence_ids"],
+        "properties": {
+          "node_role": {
+            "type": "string",
+            "enum": ["normal_data_plane", "ai_data_plane"]
+          },
+          "explanation": {"type": "string", "maxLength": 2000},
+          "evidence_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 50
+          }
+        }
+      }
+    },
+    "probable_causes": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node_role", "cause", "evidence_ids", "confidence"],
+        "properties": {
+          "node_role": {
+            "type": "string",
+            "enum": ["normal_data_plane", "ai_data_plane"]
+          },
+          "cause": {"type": "string", "maxLength": 1000},
+          "evidence_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 50
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          }
+        }
+      }
+    },
+    "recommended_actions": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node_role", "action", "priority", "evidence_ids"],
+        "properties": {
+          "node_role": {
+            "type": "string",
+            "enum": ["normal_data_plane", "ai_data_plane"]
+          },
+          "action": {"type": "string", "maxLength": 1000},
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 50
+          }
+        }
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node_role", "description", "evidence_ids"],
+        "properties": {
+          "node_role": {
+            "type": "string",
+            "enum": ["normal_data_plane", "ai_data_plane"]
+          },
+          "description": {"type": "string", "maxLength": 1000},
+          "evidence_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 50
+          }
+        }
+      }
+    }
+  }
+}

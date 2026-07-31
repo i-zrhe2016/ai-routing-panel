@@ -1,0 +1,20 @@
+groups:
+  - name: xray-exporter-availability
+    rules:
+      - alert: XrayExporterTargetDown
+        expr: up{job=~"data-plane-(node|cadvisor)"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Data-plane exporter is unreachable"
+          description: "{{ $labels.job }} for {{ $labels.node_role }} ({{ $labels.host }}) has been down for more than 5 minutes."
+
+      - alert: XrayExporterScrapeMissing
+        expr: absent_over_time(up{job=~"data-plane-(node|cadvisor)"}[5m])
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Data-plane exporter scrape series is missing"
+          description: "Prometheus has no exporter availability samples in the last 5 minutes."

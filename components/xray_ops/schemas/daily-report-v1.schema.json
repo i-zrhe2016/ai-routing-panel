@@ -1,0 +1,449 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Xray operations daily report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "rules_version",
+    "rule_parameters",
+    "prompt_version",
+    "model_output_schema_version",
+    "report_date",
+    "timezone",
+    "window_start",
+    "window_end",
+    "generated_at",
+    "generation_mode",
+    "overall_status",
+    "nodes",
+    "incidents",
+    "evidence",
+    "collection_health",
+    "model_analysis",
+    "generation_health"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "rules_version": {"type": "string", "minLength": 1},
+    "rule_parameters": {"$ref": "#/$defs/rule_parameters"},
+    "prompt_version": {"type": ["string", "null"]},
+    "model_output_schema_version": {"type": ["string", "null"]},
+    "report_date": {"type": "string", "format": "date"},
+    "timezone": {"const": "Asia/Shanghai"},
+    "window_start": {"type": "string", "format": "date-time"},
+    "window_end": {"type": "string", "format": "date-time"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "generation_mode": {"enum": ["codex", "rules_only"]},
+    "overall_status": {"$ref": "#/$defs/status"},
+    "nodes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/node"}
+    },
+    "incidents": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/incident"}
+    },
+    "evidence": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "collection_health": {"$ref": "#/$defs/collection_health"},
+    "model_analysis": {
+      "oneOf": [
+        {"$ref": "model-analysis.schema.json"},
+        {"type": "null"}
+      ]
+    },
+    "generation_health": {"$ref": "#/$defs/generation_health"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"generation_mode": {"const": "codex"}},
+        "required": ["generation_mode"]
+      },
+      "then": {
+        "properties": {
+          "prompt_version": {"type": "string", "minLength": 1},
+          "model_output_schema_version": {"type": "string", "minLength": 1},
+          "model_analysis": {"$ref": "model-analysis.schema.json"}
+        }
+      },
+      "else": {
+        "properties": {
+          "prompt_version": {"type": "null"},
+          "model_output_schema_version": {"type": "null"},
+          "model_analysis": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "rule_parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traffic_gap_seconds",
+        "correlation_window_seconds",
+        "service_sample_interval_seconds",
+        "service_down_min_samples",
+        "telemetry_min_coverage_ratio",
+        "resource_duration_seconds",
+        "cpu_pressure_percent",
+        "memory_available_pressure_ratio",
+        "root_disk_pressure_ratio"
+      ],
+      "properties": {
+        "traffic_gap_seconds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normal_data_plane", "ai_data_plane"],
+          "properties": {
+            "normal_data_plane": {"type": "integer", "minimum": 1},
+            "ai_data_plane": {"type": "integer", "minimum": 1}
+          }
+        },
+        "correlation_window_seconds": {"type": "integer", "minimum": 0},
+        "service_sample_interval_seconds": {"type": "integer", "minimum": 1},
+        "service_down_min_samples": {"type": "integer", "minimum": 1},
+        "telemetry_min_coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "resource_duration_seconds": {"type": "integer", "minimum": 1},
+        "cpu_pressure_percent": {"type": "number", "minimum": 0, "maximum": 100},
+        "memory_available_pressure_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "root_disk_pressure_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "status": {
+      "enum": ["normal", "suspected", "fault", "unknown"]
+    },
+    "node_role": {
+      "enum": ["normal_data_plane", "ai_data_plane"]
+    },
+    "interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "ended_at", "duration_seconds", "samples"],
+      "properties": {
+        "started_at": {"type": "string", "format": "date-time"},
+        "ended_at": {"type": "string", "format": "date-time"},
+        "duration_seconds": {"type": "integer", "minimum": 0},
+        "samples": {"type": "integer", "minimum": 1}
+      }
+    },
+    "rule_match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "evidence_ids"],
+      "properties": {
+        "rule_id": {"type": "string", "pattern": "^OPS-[FSUI][0-9]{3}$"},
+        "evidence_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "started_at": {"type": "string", "format": "date-time"},
+        "ended_at": {"type": "string", "format": "date-time"},
+        "duration_seconds": {"type": "integer", "minimum": 0},
+        "samples": {"type": "integer", "minimum": 1}
+      }
+    },
+    "resource_breach": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "threshold", "started_at", "ended_at", "duration_seconds", "samples"],
+      "properties": {
+        "resource": {"enum": ["cpu", "memory", "root_disk"]},
+        "threshold": {"type": "number"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "ended_at": {"type": "string", "format": "date-time"},
+        "duration_seconds": {"type": "integer", "minimum": 0},
+        "samples": {"type": "integer", "minimum": 1}
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_role",
+        "status",
+        "service",
+        "traffic",
+        "telemetry",
+        "resources",
+        "matched_rules"
+      ],
+      "properties": {
+        "node_role": {"$ref": "#/$defs/node_role"},
+        "status": {"$ref": "#/$defs/status"},
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coverage_ratio",
+            "prometheus_coverage_ratio",
+            "target_coverage_ratio",
+            "downtime_intervals",
+            "restart_events"
+          ],
+          "properties": {
+            "coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+            "prometheus_coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+            "target_coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+            "downtime_intervals": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/interval"}
+            },
+            "restart_events": {"type": "integer", "minimum": 0}
+          }
+        },
+        "traffic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "coverage_ratio", "demand_increases"],
+          "properties": {
+            "status": {"enum": ["demand_observed", "no_observed_demand", "unknown"]},
+            "coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+            "demand_increases": {"type": "integer", "minimum": 0}
+          }
+        },
+        "telemetry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["coverage_ratio", "missing_sources", "recorded_gaps"],
+          "properties": {
+            "coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+            "missing_sources": {
+              "type": "array",
+              "items": {"type": "string"},
+              "uniqueItems": true
+            },
+            "recorded_gaps": {"type": "integer", "minimum": 0}
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["threshold_breaches"],
+          "properties": {
+            "threshold_breaches": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/resource_breach"}
+            }
+          }
+        },
+        "matched_rules": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/rule_match"}
+        }
+      }
+    },
+    "incident": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incident_id",
+        "node_role",
+        "kind",
+        "status",
+        "started_at",
+        "ended_at",
+        "rule_ids",
+        "evidence_ids",
+        "missing_sources",
+        "facts"
+      ],
+      "properties": {
+        "incident_id": {"type": "string", "minLength": 1},
+        "node_role": {"$ref": "#/$defs/node_role"},
+        "kind": {"type": "string", "minLength": 1},
+        "status": {"$ref": "#/$defs/status"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "ended_at": {"type": "string", "format": "date-time"},
+        "rule_ids": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^OPS-[FSUI][0-9]{3}$"},
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "missing_sources": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "facts": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "node_role",
+        "source",
+        "observed_at",
+        "evidence_type",
+        "summary",
+        "attributes",
+        "source_quality"
+      ],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "node_role": {"$ref": "#/$defs/node_role"},
+        "source": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "evidence_type": {"type": "string", "minLength": 1},
+        "summary": {"type": "string"},
+        "attributes": {"type": "object"},
+        "source_quality": {"enum": ["complete", "partial", "unknown"]}
+      }
+    },
+    "source_health": {
+      "type": "object",
+      "required": ["source", "configured", "success", "error_class"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "configured": {"type": "boolean"},
+        "success": {"type": "boolean"},
+        "error_class": {"type": "string"},
+        "detail": {"type": "string"},
+        "records": {"type": "integer", "minimum": 0},
+        "series": {"type": "integer", "minimum": 0},
+        "files": {"type": "integer", "minimum": 0},
+        "invalid_files": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "collection_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_role", "source", "started_at", "ended_at", "error_class"],
+      "properties": {
+        "node_role": {"$ref": "#/$defs/node_role"},
+        "source": {"type": "string"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "ended_at": {"type": "string", "format": "date-time"},
+        "error_class": {"type": "string"}
+      }
+    },
+    "collection_health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overall_coverage_ratio", "node_coverage", "sources", "gaps"],
+      "properties": {
+        "overall_coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "node_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normal_data_plane", "ai_data_plane"],
+          "properties": {
+            "normal_data_plane": {"type": "number", "minimum": 0, "maximum": 1},
+            "ai_data_plane": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/source_health"}
+        },
+        "gaps": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/collection_gap"}
+        }
+      }
+    },
+    "generation_health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rules",
+        "codex",
+        "codex_attempts",
+        "codex_error_class",
+        "codex_input",
+        "codex_usage",
+        "json_schema",
+        "markdown",
+        "atomic_write"
+      ],
+      "properties": {
+        "rules": {"const": "success"},
+        "codex": {"enum": ["success", "failed", "skipped"]},
+        "codex_attempts": {"type": "integer", "minimum": 0, "maximum": 2},
+        "codex_error_class": {"type": "string"},
+        "codex_input": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["prompt_version", "schema_version", "byte_cap", "evidence_available", "evidence_selected", "evidence_truncated", "input_bytes"],
+              "properties": {
+                "prompt_version": {"type": "string"},
+                "schema_version": {"type": "string"},
+                "byte_cap": {"type": "integer", "minimum": 1},
+                "evidence_available": {"type": "integer", "minimum": 0},
+                "evidence_selected": {"type": "integer", "minimum": 0},
+                "evidence_truncated": {"type": "boolean"},
+                "input_bytes": {"type": "integer", "minimum": 1}
+              }
+            }
+          ]
+        },
+        "codex_usage": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "provider", "model", "attempts", "tokens", "estimated_price"],
+              "properties": {
+                "status": {"const": "available"},
+                "provider": {"type": "string"},
+                "model": {"type": "string"},
+                "attempts": {"type": "integer", "minimum": 1, "maximum": 2},
+                "tokens": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["total_tokens"],
+                  "properties": {
+                    "input_tokens": {"type": "integer", "minimum": 0},
+                    "cached_input_tokens": {"type": "integer", "minimum": 0},
+                    "cache_write_input_tokens": {"type": "integer", "minimum": 0},
+                    "output_tokens": {"type": "integer", "minimum": 0},
+                    "reasoning_output_tokens": {"type": "integer", "minimum": 0},
+                    "total_tokens": {"type": "integer", "minimum": 0}
+                  }
+                },
+                "estimated_price": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["status", "currency", "amount", "reason"],
+                  "properties": {
+                    "status": {"const": "unavailable"},
+                    "currency": {"const": "USD"},
+                    "amount": {"type": "null"},
+                    "reason": {"const": "pricing_not_configured"}
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "json_schema": {"const": "valid"},
+        "markdown": {"const": "success"},
+        "atomic_write": {"const": "success"}
+      }
+    }
+  }
+}

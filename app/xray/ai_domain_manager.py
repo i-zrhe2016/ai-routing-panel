@@ -30,6 +30,14 @@ PLACEHOLDER_RE = re.compile(r"__([A-Z0-9_]+)__")
 UPSTREAM_LIST_SEPARATOR_RE = re.compile(r"[\n,;]+")
 UNSET_PROXY_PROTOCOL = "replace_me"
 FORCED_AI_ROUTE_DOMAIN_SUFFIXES = (
+    # Keep Gemini's authenticated web session and API calls on the same AI
+    # egress. Routing only gemini.google.com is insufficient because the web
+    # app also talks to Google's auth and Generative Language endpoints.
+    "accounts.google.com",
+    "gemini.google.com",
+    "gemini.gstatic.com",
+    "generativelanguage.googleapis.com",
+    "scholar.google.com",
     "anthropic.com",
     "api.ip.sb",
     "api.ipify.org",
@@ -1252,6 +1260,9 @@ def apply_default_proxy_sockopt(outbounds):
         merged = dict(existing)
         for key, value in default_sockopt.items():
             merged.setdefault(key, value)
+        # Keep the AI relay connection on IPv4 even when the data plane is
+        # dual-stack. The AI node intentionally has no IPv6 egress.
+        merged.setdefault("domainStrategy", "UseIPv4")
         stream_settings["sockopt"] = merged
 
 
@@ -1262,7 +1273,10 @@ def build_default_proxy_payload(ai_target):
                 "tag": "ai_proxy",
                 "protocol": "freedom",
                 "settings": {
-                    "domainStrategy": "AsIs",
+                    # The AI node is IPv4-only by design. Resolve the relay
+                    # endpoint over IPv4 so a dual-stack data plane cannot
+                    # create a second egress path before reaching the AI node.
+                    "domainStrategy": "UseIPv4",
                     "redirect": join_host_port(ai_target["upstream_host"], ai_target["upstream_port"]),
                     "proxyProtocol": 0,
                     "finalRules": [{"action": "allow"}],
@@ -1552,6 +1566,7 @@ def build_data_plane_controller(args):
             ssh_bin=args.data_plane_ssh_bin,
             ssh_options=tuple(args.data_plane_ssh_options),
             config_path=args.data_plane_config_path,
+            source_config_path=args.config_out,
             upstream_host=upstream_host,
             upstream_port=upstream_port,
         )
@@ -1703,8 +1718,11 @@ def run_once(args):
     current_config = args.config_out.read_text(encoding="utf-8") if args.config_out.is_file() else ""
     config_changed = current_config != previous_config
     if config_changed:
-        if data_plane_controller.is_configured() and data_plane_controller.supports_restart():
-            data_plane_controller.restart()
+        if data_plane_controller.is_configured():
+            if data_plane_controller.supports_sync():
+                data_plane_controller.sync_generated_files(validate_config=True)
+            if data_plane_controller.supports_restart():
+                data_plane_controller.restart()
         elif args.restart_command:
             restart_xray_command(args.restart_command, args.docker_timeout_seconds)
         elif args.restart_container_name:

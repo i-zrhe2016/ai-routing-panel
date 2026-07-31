@@ -2,8 +2,10 @@ global:
   scrape_interval: 30s
   evaluation_interval: 30s
 
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
-  # Panel business/liveness/xray metrics (token-gated /metrics on the host).
   - job_name: xray-panel
     metrics_path: /metrics
     scheme: http
@@ -16,16 +18,37 @@ scrape_configs:
           role: control_plane
           host: panel
 
-  # Host system metrics (CPU/mem/disk/network) via node_exporter on this box.
-  - job_name: node
+  - job_name: control-plane-node
     static_configs:
       - targets: ["host.docker.internal:9100"]
         labels:
           host: panel
+          role: control_plane
           provider: digitalocean
-    # The DMIT data-plane node_exporter can be added here once deployed:
-    #   - targets: ["64.186.224.96:9100"]
-    #     labels: { host: dataplane, provider: dmit }
+
+  - job_name: data-plane-node
+    static_configs:
+      - targets: ["64.186.224.96:19100"]
+        labels:
+          host: normal-data-plane
+          node_role: normal_data_plane
+      - targets: ["nat.qq.pw:19100"]
+        labels:
+          host: ai-data-plane
+          node_role: ai_data_plane
+
+  - job_name: data-plane-cadvisor
+    static_configs:
+      - targets: ["64.186.224.96:18081"]
+        labels:
+          host: normal-data-plane
+          node_role: normal_data_plane
+          xray_container: xray-reality-local
+      - targets: ["nat.qq.pw:18081"]
+        labels:
+          host: ai-data-plane
+          node_role: ai_data_plane
+          xray_container: xray
 
   - job_name: prometheus
     static_configs:

@@ -1,11 +1,13 @@
 __pycache__/
 *.py[cod]
 .env
+.env.ops-reporting
 
 .venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+*.egg-info/
 
 # Built SPA bundles — produced by `npm run build` (and the Docker frontend-builder
 # stage). Not committed; run the build for local non-Docker serving.

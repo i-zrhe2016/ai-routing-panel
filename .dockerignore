@@ -1,17 +1,31 @@
 data
-logs
 backups
-__pycache__
-app/__pycache__
-app/static/.DS_Store
+logs
+**/__pycache__
+**/*.py[cod]
+
+# Local configuration, credentials, and agent instructions never enter a build
+# context. Tracked examples are not required by either Dockerfile.
+.git
+.gitignore
+AGENTS.md
+.venv
+.pytest_cache
+.ruff_cache
+**/.env
+**/.env.*
+**/codex-home
+monitoring/prometheus/secrets
+docker-compose.override.yml
+*.egg-info
 
 # Built SPA bundles are produced by the frontend-builder stage, not copied from
 # the build context.
+app/static/.DS_Store
 app/static/admin
 app/static/portal
 app/static/landing
 
-# Keep the build context small.
-.git
-.venv
+# Keep local frontend dependencies out of both application and ops builds.
 frontend/node_modules
+node_modules

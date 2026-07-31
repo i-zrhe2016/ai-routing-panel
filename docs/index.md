@@ -14,7 +14,8 @@
 8. [fault-tolerance.md](fault-tolerance.md)：控制面、普通数据面、AI 节点的单点故障边界和验收矩阵。
 9. [ai-routing.md](ai-routing.md) / [kubernetes.md](kubernetes.md)：按需阅读 AI 路由和 K3s 部署。
 10. [panel-migration.md](panel-migration.md) / [db-backup-uploader.md](db-backup-uploader.md)：迁移和备份恢复。
-11. [PORT443_PER_USER_MIGRATION.md](PORT443_PER_USER_MIGRATION.md)：Reality `dest` 修复和生产验证记录（历史技术记录）。
+11. [ops-reporting/index.md](ops-reporting/index.md)：Prometheus-only 节点运维日报、部署边界和验收回滚。
+12. [PORT443_PER_USER_MIGRATION.md](PORT443_PER_USER_MIGRATION.md)：Reality `dest` 修复和生产验证记录（历史技术记录）。
 
 ## 快速索引
 
@@ -31,4 +32,5 @@
 - [kubernetes.md](kubernetes.md)
 - [panel-migration.md](panel-migration.md)
 - [db-backup-uploader.md](db-backup-uploader.md)
+- [ops-reporting/index.md](ops-reporting/index.md)
 - [PORT443_PER_USER_MIGRATION.md](PORT443_PER_USER_MIGRATION.md)

@@ -1,0 +1,82 @@
+name: xray-ops-reporting
+
+x-service-hardening: &service-hardening
+  restart: unless-stopped
+  network_mode: host
+  read_only: true
+  init: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  xray-ops-daily-reporter:
+    <<: *service-hardening
+    build:
+      context: .
+      dockerfile: components/xray_ops/Dockerfile
+      target: reporter
+      args:
+        CODEX_CLI_VERSION: "${OPS_CODEX_CLI_VERSION:-0.145.0}"
+    image: xray-ops-daily-reporter:local
+    container_name: xray-ops-daily-reporter
+    command: ["serve"]
+    stop_grace_period: 390s
+    mem_limit: 512m
+    environment:
+      OPS_DB_PATH: /data/xray-ops/ops.db
+      OPS_REPORT_DIR: /data/xray-ops/reports
+      OPS_REPORT_LOCK_PATH: /data/xray-ops/reporter.lock
+      OPS_REPORT_RETENTION_DAYS: "90"
+      OPS_REPORT_SCHEDULER_INTERVAL_SECONDS: "60"
+      OPS_PROMETHEUS_URL: "${OPS_PROMETHEUS_URL:-http://127.0.0.1:9090}"
+      OPS_PROMETHEUS_TIMEOUT_SECONDS: "10"
+      OPS_AI_ROUTING_REPORT_DIR: /inputs/ai-routing
+      OPS_FORCE_RULES_ONLY: "${OPS_FORCE_RULES_ONLY:-0}"
+      OPS_CODEX_SOURCE_HOME: /host-codex-home
+      OPS_CODEX_HOME: /data/xray-ops/codex-home
+      OPS_CODEX_WORKDIR: /tmp/xray-ops-codex
+      OPS_CODEX_TIMEOUT_SECONDS: "180"
+      OPS_CODEX_MAX_ATTEMPTS: "2"
+      OPS_CODEX_MAX_INPUT_BYTES: "65536"
+      OPS_CODEX_RETRY_BACKOFF_SECONDS: "1"
+      OPS_CODEX_MODEL: "${OPS_CODEX_MODEL:-}"
+      OPS_CODEX_MODEL_PROVIDER: "${OPS_CODEX_MODEL_PROVIDER:-}"
+      OPS_CODEX_PROVIDER_BASE_URL: "${OPS_CODEX_PROVIDER_BASE_URL:-}"
+      OPS_CODEX_PROVIDER_WIRE_API: "${OPS_CODEX_PROVIDER_WIRE_API:-responses}"
+      OPS_CODEX_PROVIDER_REQUIRES_OPENAI_AUTH: "${OPS_CODEX_PROVIDER_REQUIRES_OPENAI_AUTH:-1}"
+    volumes:
+      - type: bind
+        source: "${OPS_DATA_DIR:-./data/xray-ops}"
+        target: /data/xray-ops
+      - type: bind
+        source: "${OPS_AI_ROUTING_REPORT_HOST_DIR:-./app/xray/reports/hourly-domains}"
+        target: /inputs/ai-routing
+        read_only: true
+      - type: bind
+        source: "${OPS_CODEX_AUTH_SEED_HOST_PATH:?set OPS_CODEX_AUTH_SEED_HOST_PATH}"
+        target: /host-codex-home/auth.json
+        read_only: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-m",
+          "components.xray_ops.reporter",
+          "healthcheck",
+          "--max-age-seconds",
+          "600",
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 420s

@@ -23,6 +23,29 @@ class _FakeHttpResponse:
 
 
 class AiDomainManagerTest(unittest.TestCase):
+    def test_gemini_session_domains_are_forced_to_ai_route(self):
+        for domain in (
+            "gemini.google.com",
+            "chat.gemini.google.com",
+            "accounts.google.com",
+            "generativelanguage.googleapis.com",
+            "scholar.google.com",
+        ):
+            self.assertTrue(ai_domain_manager.matches_forced_ai_route_domain(domain))
+
+    def test_default_ai_redirect_uses_ipv4(self):
+        payload, reason = ai_domain_manager.render_proxy_template(
+            Path("/does/not/exist"),
+            {
+                "upstream_host": "nat.qq.pw",
+                "upstream_port": 27166,
+            },
+            None,
+        )
+
+        self.assertEqual(reason, "builtin_freedom_redirect")
+        self.assertEqual(payload["outbounds"][0]["settings"]["domainStrategy"], "UseIPv4")
+
     def test_resolve_openai_endpoint_defaults_to_responses_for_remote(self):
         endpoint, api_style = ai_domain_manager.resolve_openai_endpoint("https://api.openai.com")
         self.assertEqual(endpoint, "https://api.openai.com/v1/responses")

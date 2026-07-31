@@ -117,6 +117,7 @@ class NodeControlTest(unittest.TestCase):
         os.environ["CONTROL_PLANE_BACKUP_XRAY_ENABLED"] = "1"
         state_module = load_state_module(self.root)
         state = state_module.PanelState()
+        state.init_db()
         panel_ports_path = self.root / "xray" / "runtime" / "panel-ports.json"
         config_path = self.root / "xray" / "runtime" / "config.json"
         backup_config_path = self.root / "xray" / "runtime" / "config-backup.json"

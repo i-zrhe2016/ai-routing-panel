@@ -1,0 +1,51 @@
+version: "2.4"
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: xray-node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "${EXPORTER_BIND_ADDRESS:-0.0.0.0}:${NODE_EXPORTER_PORT:-19100}:9100"
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 96m
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: xray-cadvisor
+    restart: unless-stopped
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=30s
+      - --max_housekeeping_interval=35s
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    ports:
+      - "${EXPORTER_BIND_ADDRESS:-0.0.0.0}:${CADVISOR_PORT:-18081}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m

@@ -256,6 +256,7 @@ npm test
 - [容错说明](docs/fault-tolerance.md)
 - [Kubernetes 部署](docs/kubernetes.md)
 - [面板迁移](docs/panel-migration.md)
+- [Prometheus-only 运维分析](docs/ops-reporting/index.md)
 - [数据库备份上传](docs/db-backup-uploader.md)
 
 ## 安全与运维提示
