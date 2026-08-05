@@ -3,7 +3,11 @@
 left to right direction
 skinparam backgroundColor #FFFFFF
 skinparam componentStyle rectangle
-skinparam ArrowColor #374151
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.2
+skinparam defaultFontName Arial
 skinparam defaultTextAlignment center
 
 title Xray Routing Panel - Production Architecture

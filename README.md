@@ -19,33 +19,9 @@
 
 ## 架构概览
 
-```text
-                         配置编排、状态和运维决策
-                                  │
-                                  ▼
-                    ┌──────────────────────────┐
-                    │       xray-routing-panel │
-                    │       控制面              │
-                    │  Flask API + 管理/订阅门户 │
-                    └──────────┬───────────────┘
-                               │ SSH / 配置同步
-              ┌────────────────┴────────────────┐
-              ▼                                 ▼
-  ┌────────────────────────┐       ┌────────────────────────┐
-  │ 普通数据面              │       │ AI 节点                 │
-  │ VLESS + REALITY         │──────▶│ VLESS + REALITY         │
-  │ 端口租户和流量承载       │ AI 路由│ AI 流量 freedom 直出     │
-  └───────────┬────────────┘       └────────────────────────┘
-              │ 公网探测
-              ▼
-       Cloudflare DNS 故障切换
-              │
-              ▼
-  ┌────────────────────────┐
-  │ 控制面备用 Xray         │
-  │ relay / freedom 双模式  │
-  └────────────────────────┘
-```
+![Xray Routing Panel production architecture](docs/diagrams/system-architecture.svg)
+
+[PlantUML source](docs/diagrams/system-architecture.puml) · [Detailed architecture](docs/architecture.md)
 
 组件职责如下：
 

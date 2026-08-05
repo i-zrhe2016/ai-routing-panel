@@ -5,7 +5,7 @@
 ## 建议阅读顺序
 
 1. [project-overview.md](project-overview.md)：项目能力、架构摘要和快速开始。
-2. [architecture.md](architecture.md)：先通过 PlantUML 总体架构图理解控制面、数据面和 AI 节点的边界。
+2. [architecture.md](architecture.md)：先通过与 README 共享的 PlantUML 总体架构图理解控制面、数据面和 AI 节点的边界。
 3. [development.md](development.md)：本地启动、调试和常用命令。
 4. [configuration.md](configuration.md)：根 `.env` 与 `app/xray/.env` 的配置方式。
 5. [api.md](api.md) / [operations.md](operations.md)：接口细节、健康检查、探针、统计链路。

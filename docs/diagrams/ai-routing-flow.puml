@@ -1,7 +1,11 @@
 @startuml
 !theme plain
 skinparam backgroundColor #FFFFFF
-skinparam ArrowColor #374151
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.2
+skinparam defaultFontName Arial
 skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
 
