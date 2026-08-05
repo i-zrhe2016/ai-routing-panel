@@ -4,6 +4,10 @@
 
 控制面通过 SSH 纳管两个远端节点；用户代理流量的正常路径不依赖控制面在线：
 
+![生产架构图](diagrams/system-architecture.svg)
+
+[查看 PlantUML 源文件](diagrams/system-architecture.puml)
+
 - **普通数据面**：承载 `VLESS + REALITY` 流量，运行 `ai_domain_manager`
 - **AI 节点**：接收数据面转发的 AI 域名流量，freedom 直出
 
@@ -19,19 +23,11 @@
 
 三节点单点故障的正式边界见 [fault-tolerance.md](fault-tolerance.md)。控制面故障时，已有客户端的普通代理流量应继续走普通数据面；控制面管理页面、订阅和自动运维不属于数据面可用性保证范围。
 
-## 已实现扩展：每日节点运维分析（待部署验收）
+## 已部署扩展：Prometheus-only 每日节点运维分析
 
-仓库已经实现一个每日节点运维分析子系统：控制面上的两个原子化微服务分别完成只读
-证据采集和每日日报生成，并复用 Prometheus 与 `codex exec`。确定性规则负责故障
-定性，模型只解释已经冻结的证据和结论。该子系统不进入用户流量路径，也不把控制面
-代码部署到普通数据面或 AI 数据面。
+生产环境已部署 Prometheus、Grafana 和 `xray-ops-daily-reporter`。普通数据面由 Prometheus 直接抓取 exporter；AI 数据面位于 NAT 后，由控制面的专用 SSH 回环隧道转发 exporter HTTP。Reporter 只查询 Prometheus HTTP API，以确定性规则生成 JSON/Markdown 影子报告，并仅在 SQLite 保存 `report_runs` 审计。
 
-实现代码、独立 Compose、自动化测试、目标边界、服务接口、故障规则、报告契约和
-分阶段部署门禁见[每日节点运维分析](ops-reporting/index.md)，日常问题见
-[故障排查手册](ops-reporting/troubleshooting.md)。Collector 独占 SSH 凭据，Reporter 独占
-Codex 认证种子和私有 HOME；二者只共享 ops 数据目录。Reporter 发送给模型的是再次脱敏、
-按字节上限裁剪的冻结规则上下文，不是整日原始日志。当前代码尚未部署到生产，也未完成
-连续日报和生产证据对照，因此不得把“代码已实现”解读为“生产能力已启用”。
+该子系统不进入用户流量路径。旧 SSH/raw-log Collector 已从生产删除，Reporter 不挂载 SSH 凭据、不执行远程命令，也不读取 Xray、Docker 或 systemd 原始日志。当前仍为 `rules_only` 影子模式，正式验收边界见[每日节点运维分析](ops-reporting/index.md)，日常问题见[故障排查手册](ops-reporting/troubleshooting.md)。
 
 ## 组件职责
 

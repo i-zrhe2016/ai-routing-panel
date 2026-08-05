@@ -1,0 +1,38 @@
+@startuml
+!theme plain
+left to right direction
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam ArrowColor #374151
+
+title Replacement for the Retired Log Collector
+
+node "Data Planes" as nodes #ECFDF5 {
+  component "node-exporter" as nodeExporter
+  component "cAdvisor" as cadvisor
+}
+
+node "Control Plane" as control #EFF6FF {
+  component "Prometheus" as prometheus #FEE2E2
+  component "Daily Reporter\ndeterministic rules" as reporter #DCFCE7
+  folder "JSON / Markdown reports" as reports #FEF3C7
+}
+
+nodeExporter --> prometheus : metrics only
+cadvisor --> prometheus : metrics only
+prometheus --> reporter : HTTP API
+reporter --> reports
+
+component "SSH log collector" as oldCollector #FECACA
+oldCollector -[hidden]-> prometheus
+note bottom of oldCollector
+  Retired and removed.
+  No Xray, Docker, or systemd raw logs are collected.
+end note
+
+note bottom of nodes
+  AI exporter transport may use a dedicated control-plane SSH tunnel.
+  The reporter itself has no SSH access.
+end note
+
+@enduml

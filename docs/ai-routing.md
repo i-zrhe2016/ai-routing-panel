@@ -4,6 +4,10 @@
 
 AI 路由由 `xray-ai-domain-manager` 驱动（运行在普通数据面上），默认流程如下：
 
+![AI 域名路由与回退流程](diagrams/ai-routing-flow.svg)
+
+[查看 PlantUML 源文件](diagrams/ai-routing-flow.puml)
+
 1. 从 `app/xray/logs/access.log` 读取最近一小时访问域名
 2. 先应用内建 AI 域名规则
 3. 对未知域名优先调用本机 `codex`

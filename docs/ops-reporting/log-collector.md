@@ -4,16 +4,13 @@
 > 权威范围：旧 `xray-ops-log-collector` 的生命周期状态
 > 最后核验日期：2026-07-31
 
-`xray-ops-log-collector` 已从运行 Compose 中移除。当前架构不通过 SSH 连接数据面，不读取或保存 Xray、Docker、systemd 原始日志，也不再生成日志游标、raw events、五分钟日志 rollup 或采集缺口记录。
+`xray-ops-log-collector` 已从运行 Compose 和生产容器中移除。Reporter 不通过 SSH 连接数据面，不读取或保存 Xray、Docker、systemd 原始日志，也不再写入日志游标、raw events、五分钟日志 rollup 或采集缺口记录。AI exporter 的指标传输可以使用控制面的专用 SSH 回环隧道，但该隧道不属于 Reporter，也不承载日志或远程命令。
 
 替代链路：
 
-```mermaid
-flowchart LR
-    E[node_exporter / cAdvisor] --> P[Prometheus]
-    P --> R[Daily Reporter]
-    R --> J[确定性规则与日报]
-```
+![旧日志 Collector 的替代链路](diagrams/collector-replacement.svg)
+
+[查看 PlantUML 源文件](diagrams/collector-replacement.puml)
 
 - Exporter 部署：[exporter-deployment.md](exporter-deployment.md)
 - Prometheus 数据源：[prometheus-targets.md](prometheus-targets.md)

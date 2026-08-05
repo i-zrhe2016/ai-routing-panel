@@ -15,14 +15,9 @@
 - SQLite 不保存遥测、日志或规则证据，只保留报告运行审计与历史报告归档索引。
 - 规则只能判断指标能够证明的运行、可达性、流量连续性和资源风险，不能推断日志级根因。
 
-```mermaid
-flowchart LR
-    N[普通数据面 exporter] -->|受限抓取| P[Prometheus]
-    A[AI 数据面 exporter] -->|受限抓取| P
-    P -->|HTTP API| R[日报器与确定性规则]
-    R --> J[JSON / Markdown 报告]
-    R --> S[(SQLite\n运行审计与历史索引)]
-```
+![Prometheus-only 监控与日报架构](diagrams/monitoring-reporting.svg)
+
+[查看 PlantUML 源文件](diagrams/monitoring-reporting.puml)
 
 ## 模块导航
 
