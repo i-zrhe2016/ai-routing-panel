@@ -1,0 +1,51 @@
+@startuml
+!theme plain
+left to right direction
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.2
+skinparam defaultFontName Arial
+skinparam defaultTextAlignment center
+
+title Exporter Network Isolation
+
+actor "Untrusted Internet Client" as publicClient
+
+node "Control Plane" as control #EFF6FF {
+  component "Prometheus\nloopback API only" as prometheus #FEE2E2
+  component "AI Exporter SSH Tunnel\nloopback forwards only" as tunnel #E0E7FF
+}
+
+node "Normal Data Plane" as normal #ECFDF5 {
+  component "Host Firewall" as normalFirewall #FEF3C7
+  component "node-exporter" as normalNode #F8FAFC
+  component "cAdvisor" as normalCadvisor #F8FAFC
+}
+
+node "AI Data Plane behind NAT" as ai #FFF7ED {
+  component "No Public Exporter Mapping" as natBoundary #FEF3C7
+  component "node-exporter" as aiNode #F8FAFC
+  component "cAdvisor" as aiCadvisor #F8FAFC
+}
+
+publicClient -[#DC2626,dashed]-> normalFirewall : denied
+publicClient -[#DC2626,dashed]-> natBoundary : no route
+prometheus --> normalFirewall : restricted scrape
+normalFirewall --> normalNode
+normalFirewall --> normalCadvisor
+tunnel --> aiNode : SSH-forwarded HTTP
+tunnel --> aiCadvisor : SSH-forwarded HTTP
+prometheus --> tunnel : 127.0.0.1 only
+
+legend right
+  |= Color |= Meaning |
+  |<#DCFCE7> | Data plane boundary |
+  |<#EFF6FF> | Control plane boundary |
+  |<#FEF3C7> | Network enforcement |
+  |<#FEE2E2> | Metrics storage/query |
+endlegend
+
+@enduml

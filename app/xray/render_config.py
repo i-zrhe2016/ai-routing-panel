@@ -324,13 +324,10 @@ def build_ai_node_config(values: dict[str, str]) -> dict:
     dest) so the same subscription connects. It exits with ``freedom`` directly,
     never carries dynamic routing, panel ports, QUIC block, or stats API.
     """
+    listen_port = int(values.get("AI_UPSTREAM_PORT", "").strip() or values["XRAY_LISTEN_PORT"])
     return {
-        "log": {
-            "loglevel": values["XRAY_LOGLEVEL"],
-            "access": "/var/log/xray/access.log",
-            "error": "/var/log/xray/error.log",
-        },
-        "inbounds": [build_reality_inbound(values, int(values["XRAY_LISTEN_PORT"]))],
+        "log": {"loglevel": values["XRAY_LOGLEVEL"]},
+        "inbounds": [build_reality_inbound(values, listen_port)],
         "outbounds": [{"protocol": "freedom", "tag": "direct"}],
     }
 

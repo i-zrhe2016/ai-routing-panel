@@ -12,11 +12,9 @@ function prefersReducedMotion() {
   );
 }
 
-// Activate every element marked with the `reveal` class: it starts hidden and
-// gets `is-in` once it scrolls into view (once). Stagger via data-reveal-delay
-// (ms). Child components mount before the parent's onMounted, so calling this
-// from the root App on mount catches all of them. Returns the observer so the
-// caller can disconnect on teardown.
+// Activate every element marked with the `reveal` class. Content remains visible
+// until a working observer opts the document into animation, so a missing or
+// delayed script never hides substantive page content.
 export function initReveal(root) {
   const scope = root || (typeof document !== "undefined" ? document : null);
   if (!scope) return null;
@@ -25,6 +23,8 @@ export function initReveal(root) {
     els.forEach((el) => el.classList.add("is-in"));
     return null;
   }
+  const documentElement = scope.documentElement || scope.ownerDocument?.documentElement;
+  documentElement?.classList.add("reveal-enabled");
   const io = new IntersectionObserver(
     (entries, obs) => {
       for (const entry of entries) {
@@ -38,7 +38,12 @@ export function initReveal(root) {
     { threshold: 0.12, rootMargin: "0px 0px -8% 0px" },
   );
   els.forEach((el) => io.observe(el));
-  return io;
+  return {
+    disconnect() {
+      io.disconnect();
+      documentElement?.classList.remove("reveal-enabled");
+    },
+  };
 }
 
 // Count a number up from 0 to `target` once the host element is visible.

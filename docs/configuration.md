@@ -46,19 +46,22 @@
 
 | 变量 | 说明 |
 | --- | --- |
-| `AI_NODE_SSH_TARGET` | AI 节点 SSH 目标，例如 `root@ai-node.example.com` |
-| `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析 |
-| `AI_NODE_CONTAINER_NAME` | AI 节点上 Xray 容器名（容器部署时填写） |
+| `AI_NODE_SSH_TARGET` | AI 节点 SSH 目标，例如 `root@nat.qq.pw` |
+| `AI_NODE_SSH_BIN` | SSH 可执行文件或密码文件包装器，例如 `/app/scripts/ai-node-ssh` |
+| `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；必须启用严格主机校验 |
+| `AI_NODE_SSH_PASSWORD_FILE` | 密码包装器读取的容器内只读密码文件路径；不得把密码写入环境变量 |
+| `AI_NODE_CONTAINER_NAME` | AI 节点上 Xray 容器名；生产当前为 `xray` |
 | `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
-| `AI_NODE_CONFIG_PATH` | AI 节点上 `config.json` 路径 |
-| `AI_NODE_API_SERVER` | AI 节点 Xray API 地址（默认同 `XRAY_API_SERVER`） |
+| `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |
+| `AI_NODE_API_SERVER` | SSH 模式下远端 Socket 存活检查地址；生产当前为 `127.0.0.1:27166` |
 | `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标 IP 或域名 |
 
 说明：
 
-- AI 节点复用普通数据面同一套 REALITY 参数，无需单独配置
-- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）是数据面 `dynamic-routing.json` 的 redirect 目标，必须指向 AI 节点公网入口
-- 详见 [ai-node-deployment.md](ai-node-deployment.md)
+- AI 节点使用独立 REALITY 凭据，不能复用或由普通数据面的 `XRAY_*` 参数覆盖
+- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）定义主数据面 VLESS outbound 的目标，生产为 `nat.qq.pw:27166`
+- 当前生产保持 `AI_NODE_CONFIG_PATH=`，关闭配置上传但保留 SSH 状态检查和容器重启
+- 详见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)和 [AI 节点独立凭据](ai-node-credentials.md)
 
 ## DNS 故障切换变量
 
@@ -79,7 +82,7 @@
 | `CF_DNS_RECORD_TTL` | 记录 TTL；非代理记录建议 `60` 以尽快生效 |
 | `DNS_FAILOVER_PRIMARY_CONTENT` | 主数据面入口 IP 或 CNAME；远端数据面模式必须显式填写，本地模式可留空自动获取 |
 | `CONTROL_PLANE_BACKUP_XRAY_ENABLED` | 是否启用"控制面本机公网 IP + 备用 Xray"自动备用模式（relay / 直出双模式） |
-| `CONTROL_PLANE_BACKUP_UPSTREAM_URL` | relay 模式的 vless:// 上游 URL；AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生 |
+| `CONTROL_PLANE_BACKUP_UPSTREAM_URL` | relay 模式的完整 `vless://` 上游 URL；必须受保护并与 AI 节点独立 inbound 凭据完整匹配，不得从普通数据面 `XRAY_*` 盲目派生 |
 | `DNS_FAILOVER_BACKUP_CONTENT` | 控制面备用节点 IP 或 CNAME；留空时自动获取控制面本机公网 IP |
 | `DNS_FAILOVER_BACKUP_LABEL` | 首页展示用备用节点名称 |
 | `DNS_FAILOVER_PEAK_ENABLED` | 是否启用“高峰窗口优先专用节点” |
@@ -164,8 +167,9 @@
 - `AI_UPSTREAM_FALLBACKS` 在主上游后追加多个备用上游
 - `AI_UPSTREAMS` 直接覆盖完整优先级列表
 - `AI_UPSTREAM_FALLBACK_URL` 适合备用上游使用不同 UUID / `pbk` / `sid` / `sni`
+- 主 AI 上游同样可能使用独立凭据；动态 VLESS outbound 必须与 AI inbound 完整匹配，不能从普通数据面 `XRAY_*` 盲目派生
 - 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
-- 当 AI 节点被纳管（`AI_NODE_SSH_TARGET` 已配置）时，`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 应指向 AI 节点公网入口，同时控制面会自动派生 `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 供 DNS 故障切换 relay 模式使用
+- `AI_NODE_SSH_TARGET` 只启用 SSH 纳管；它不证明凭据匹配，也不应自动派生独立 AI 节点的 relay URL
 
 ### 域名分类器
 
@@ -202,10 +206,10 @@
 ### AI 节点模式
 
 - `AI_NODE_SSH_TARGET` 生效后，AI 节点模式为 `ssh`（远端 SSH 纳管）
-- 控制面在本地渲染 `config-ai-node.json`，再通过 SSH 上传到 `AI_NODE_CONFIG_PATH`
-- 控制面周期性探测 `AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT` 的可达性
-- AI 节点复用普通数据面同一套 REALITY 参数，无需单独配置
-- 详见 [ai-node-deployment.md](ai-node-deployment.md)
+- `AI_NODE_CONFIG_PATH` 非空时控制面才具备上传 `config-ai-node.json` 的能力；生产当前显式留空以禁止上传
+- `AI_NODE_API_SERVER` 用于远端 Socket 状态检查；当前最小 AI 配置不启用 Stats API
+- AI 节点使用独立 REALITY 凭据，字段契约见 [AI 节点独立凭据](ai-node-credentials.md)
+- 详见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)
 
 完整变量模板见：
 

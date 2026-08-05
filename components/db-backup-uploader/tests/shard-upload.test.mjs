@@ -5,11 +5,64 @@ process.env.DRY_RUN = '1';
 
 const moduleUrl = new URL(`../shard-upload.js?test=${Date.now()}`, import.meta.url).href;
 const {
+  buildPublishArgs,
+  buildUnpublishArgs,
   buildUploadRecordUpdate,
   collectVersionedPackages,
-  createEmptyRecord
+  createEmptyRecord,
+  findPackageVersionConflicts,
+  mapWithConcurrency
 } = await import(moduleUrl);
 
+test('npm publish and unpublish commands use the configured registry', () => {
+  const publishArgs = buildPublishArgs();
+  const unpublishArgs = buildUnpublishArgs('@scope/backup-shard-0', '1.2.3');
+
+  assert.deepEqual(publishArgs.slice(0, 3), [
+    'publish',
+    '--registry',
+    'https://registry.npmjs.org'
+  ]);
+  assert.deepEqual(unpublishArgs.slice(0, 4), [
+    'unpublish',
+    '@scope/backup-shard-0@1.2.3',
+    '--registry',
+    'https://registry.npmjs.org'
+  ]);
+});
+
+test('findPackageVersionConflicts detects immutable npm versions', () => {
+  const previous = {
+    chunks: [
+      {
+        upload: {
+          packageName: '@scope/backup-shard-0',
+          version: '1.2.3'
+        }
+      }
+    ]
+  };
+  const packages = [
+    { packageName: '@scope/backup-shard-0', version: '1.2.3' },
+    { packageName: '@scope/backup-shard-1', version: '1.2.4' }
+  ];
+
+  assert.deepEqual(findPackageVersionConflicts(previous, packages), [packages[0]]);
+});
+
+test('mapWithConcurrency exposes successful results when another item fails', async () => {
+  await assert.rejects(
+    mapWithConcurrency([0, 1, 2], 1, async (item) => {
+      if (item === 1) throw new Error('publish failed');
+      return { item };
+    }),
+    (error) => {
+      assert.match(error.message, /publish failed/);
+      assert.deepEqual(error.results, [{ item: 0 }, { item: 2 }]);
+      return true;
+    }
+  );
+});
 test('buildUploadRecordUpdate keeps only latest snapshot', () => {
   const record = createEmptyRecord();
   record.artifacts['xray-routing-panel-db-backup'] = {

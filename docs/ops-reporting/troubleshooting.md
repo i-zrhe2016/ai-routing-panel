@@ -6,9 +6,15 @@
 
 依次检查 Prometheus `/targets` 的错误、DNS/路由、exporter 进程、监听地址、TLS/认证和防火墙来源限制。不得临时向公网放开指标端口；使用与 Prometheus 相同的授权源验证。
 
+## AI Targets 为 down
+
+AI node-exporter 和 cAdvisor 通过控制面回环 SSH 隧道抓取。先检查 `xray-ai-exporter-tunnel.service` 是否 active，以及 `127.0.0.1:19101`、`127.0.0.1:18082` 是否监听；再检查 SSH 管理端口、严格主机密钥校验和远端 exporter 容器。不得把本地转发地址改成 `0.0.0.0`，也不得为排障开放公网 exporter 端口。隧道异常只影响 AI 遥测，不应修改或重启 AI Xray 业务配置。
+
 ## 报告为 unknown
 
 检查必需 labels、重复序列、抓取间隔、时钟同步、Prometheus 保留窗口和查询步长。缺失样本不能用零填充。修复数据源后重跑同一窗口，并保留失败运行审计。
+
+如果报告窗口早于 Prometheus 上线时间，覆盖率为 0% 和状态 `unknown` 是预期结果，不能据此判定业务故障，也不能通过重跑补出不存在的历史样本。应等待一个完整采集窗口后生成新的影子报告。
 
 ## 指标与业务感知冲突
 

@@ -19,33 +19,9 @@
 
 ## 架构概览
 
-```text
-                         配置编排、状态和运维决策
-                                  │
-                                  ▼
-                    ┌──────────────────────────┐
-                    │       xray-routing-panel │
-                    │       控制面              │
-                    │  Flask API + 管理/订阅门户 │
-                    └──────────┬───────────────┘
-                               │ SSH / 配置同步
-              ┌────────────────┴────────────────┐
-              ▼                                 ▼
-  ┌────────────────────────┐       ┌────────────────────────┐
-  │ 普通数据面              │       │ AI 节点                 │
-  │ VLESS + REALITY         │──────▶│ VLESS + REALITY         │
-  │ 端口租户和流量承载       │ AI 路由│ AI 流量 freedom 直出     │
-  └───────────┬────────────┘       └────────────────────────┘
-              │ 公网探测
-              ▼
-       Cloudflare DNS 故障切换
-              │
-              ▼
-  ┌────────────────────────┐
-  │ 控制面备用 Xray         │
-  │ relay / freedom 双模式  │
-  └────────────────────────┘
-```
+![Xray Routing Panel production architecture](docs/diagrams/system-architecture.svg)
+
+[PlantUML source](docs/diagrams/system-architecture.puml) · [Detailed architecture](docs/architecture.md)
 
 组件职责如下：
 
@@ -164,15 +140,9 @@ DATAPLANE_PROBE_HOST=data-plane.example.com
 
 ### 独立 AI 节点
 
-AI 节点是独立受管的 Xray 节点，接收普通数据面转发的 AI 流量并直接出站。至少需要配置：
+AI 节点是独立受管的 Xray 节点，使用独立于普通数据面的 REALITY 凭据，接收普通数据面转发的 AI 流量并直接出站。SSH 状态检查和重启可独立使用；生产当前禁用自动配置上传以保护独立凭据。
 
-```env
-AI_NODE_SSH_TARGET=root@ai-node.example.com
-AI_NODE_CONFIG_PATH=/path/to/ai-config.json
-AI_NODE_PROBE_HOST=ai-node.example.com
-```
-
-AI 节点不运行 `ai_domain_manager`，也不保存控制面业务数据。详见 [AI 节点部署](docs/ai-node-deployment.md) 和 [AI 路由](docs/ai-routing.md)。
+详细配置、凭据字段和排障流程分别见 [AI 节点部署与 SSH 纳管](docs/ai-node-deployment.md)、[AI 节点独立凭据](docs/ai-node-credentials.md)、[AI 路由](docs/ai-routing.md)和 [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md)。
 
 ### DNS 故障切换
 
@@ -250,7 +220,9 @@ npm test
 - [开发与启动](docs/development.md)
 - [API 文档](docs/api.md)
 - [运维说明](docs/operations.md)
-- [AI 节点部署](docs/ai-node-deployment.md)
+- [AI 节点部署与 SSH 纳管](docs/ai-node-deployment.md)
+- [AI 节点独立凭据](docs/ai-node-credentials.md)
+- [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md)
 - [AI 路由](docs/ai-routing.md)
 - [DNS 故障切换](docs/dns-failover.md)
 - [容错说明](docs/fault-tolerance.md)

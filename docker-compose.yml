@@ -38,10 +38,13 @@ services:
       DOCKER_API_VERSION: "${DOCKER_API_VERSION:-1.44}"
       DATAPLANE_PROBE_HOST: "${DATAPLANE_PROBE_HOST:-127.0.0.1}"
       AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
+      AI_NODE_SSH_BIN: "${AI_NODE_SSH_BIN:-ssh}"
       AI_NODE_SSH_OPTIONS: "${AI_NODE_SSH_OPTIONS:-}"
+      AI_NODE_SSH_PASSWORD_FILE: "${AI_NODE_SSH_PASSWORD_FILE:-}"
       AI_NODE_CONTAINER_NAME: "${AI_NODE_CONTAINER_NAME:-xray-ai-node}"
       AI_NODE_RESTART_COMMAND: "${AI_NODE_RESTART_COMMAND:-}"
-      AI_NODE_CONFIG_PATH: "${AI_NODE_CONFIG_PATH:-/etc/xray/config.json}"
+      AI_NODE_CONFIG_PATH: "${AI_NODE_CONFIG_PATH-/etc/xray/config.json}"
+      AI_NODE_API_SERVER: "${AI_NODE_API_SERVER:-127.0.0.1:10085}"
       AI_NODE_PROBE_HOST: "${AI_NODE_PROBE_HOST:-}"
       AI_NODE_XRAY_BIN: "${AI_NODE_XRAY_BIN:-/usr/local/bin/xray}"
       AI_NODE_DOCKER_BIN: "${AI_NODE_DOCKER_BIN:-docker}"
@@ -79,6 +82,10 @@ services:
     volumes:
       - ./data:/data
       - ./app/xray:/app/xray
+      - /root/key:/run/secrets/dataplane_ssh_key:ro
+      - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+      - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
+      - /root/.ssh/ai_node_password:/run/secrets/ai_node_ssh_password:ro
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/healthz', timeout=3).read()"]

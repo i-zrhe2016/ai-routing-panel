@@ -4,6 +4,10 @@
 
 控制面通过 SSH 纳管两个远端节点；用户代理流量的正常路径不依赖控制面在线：
 
+![生产架构图](diagrams/system-architecture.svg)
+
+[查看 PlantUML 源文件](diagrams/system-architecture.puml)
+
 - **普通数据面**：承载 `VLESS + REALITY` 流量，运行 `ai_domain_manager`
 - **AI 节点**：接收数据面转发的 AI 域名流量，freedom 直出
 
@@ -19,19 +23,11 @@
 
 三节点单点故障的正式边界见 [fault-tolerance.md](fault-tolerance.md)。控制面故障时，已有客户端的普通代理流量应继续走普通数据面；控制面管理页面、订阅和自动运维不属于数据面可用性保证范围。
 
-## 已实现扩展：每日节点运维分析（待部署验收）
+## 已部署扩展：Prometheus-only 每日节点运维分析
 
-仓库已经实现一个每日节点运维分析子系统：控制面上的两个原子化微服务分别完成只读
-证据采集和每日日报生成，并复用 Prometheus 与 `codex exec`。确定性规则负责故障
-定性，模型只解释已经冻结的证据和结论。该子系统不进入用户流量路径，也不把控制面
-代码部署到普通数据面或 AI 数据面。
+生产环境已部署 Prometheus、Grafana 和 `xray-ops-daily-reporter`。普通数据面由 Prometheus 直接抓取 exporter；AI 数据面位于 NAT 后，由控制面的专用 SSH 回环隧道转发 exporter HTTP。Reporter 只查询 Prometheus HTTP API，以确定性规则生成 JSON/Markdown 影子报告，并仅在 SQLite 保存 `report_runs` 审计。
 
-实现代码、独立 Compose、自动化测试、目标边界、服务接口、故障规则、报告契约和
-分阶段部署门禁见[每日节点运维分析](ops-reporting/index.md)，日常问题见
-[故障排查手册](ops-reporting/troubleshooting.md)。Collector 独占 SSH 凭据，Reporter 独占
-Codex 认证种子和私有 HOME；二者只共享 ops 数据目录。Reporter 发送给模型的是再次脱敏、
-按字节上限裁剪的冻结规则上下文，不是整日原始日志。当前代码尚未部署到生产，也未完成
-连续日报和生产证据对照，因此不得把“代码已实现”解读为“生产能力已启用”。
+该子系统不进入用户流量路径。旧 SSH/raw-log Collector 已从生产删除，Reporter 不挂载 SSH 凭据、不执行远程命令，也不读取 Xray、Docker 或 systemd 原始日志。当前仍为 `rules_only` 影子模式，正式验收边界见[每日节点运维分析](ops-reporting/index.md)，日常问题见[故障排查手册](ops-reporting/troubleshooting.md)。
 
 ## 组件职责
 
@@ -45,7 +41,7 @@ Codex 认证种子和私有 HOME；二者只共享 ops 数据目录。Reporter �
 - 根据数据库内容生成 `app/xray/runtime/panel-ports.json`
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `config-backup.json`（控制面备用）
 - 对普通数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
-- 对 AI 节点做配置渲染、推送、校验、重启和可达性探测
+- 对 AI 节点做 SSH 状态检查和容器重启；配置上传能力由 `AI_NODE_CONFIG_PATH` 单独控制，生产当前保持关闭
 - 以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）；管理后台「监控」标签把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
 
 ### 普通数据面
@@ -59,11 +55,11 @@ Codex 认证种子和私有 HOME；二者只共享 ops 数据目录。Reporter �
 ### AI 节点
 
 - 远端独立机器上的 VLESS + REALITY Xray
-- 监听 `AI_UPSTREAM_PORT`，接收来自普通数据面 `dynamic-routing.json` freedom redirect 转发的 AI 域名流量
+- 监听 `AI_UPSTREAM_PORT`，通过 VLESS + REALITY 接收普通数据面 `ai_proxy` outbound 转发的 AI 域名流量
 - freedom 直出，不做域名分类、不运行 `ai_domain_manager`、无 panel-ports、无 access.log 采集
-- 复用普通数据面同一套 REALITY 参数（私钥、公钥、shortId、UUID、SNI、dest）
-- 控制面通过 SSH 纳管配置生命周期（渲染 → 推送 → 校验 → 重启）和可达性监控
-- 详见 [ai-node-deployment.md](ai-node-deployment.md)
+- 使用独立于普通数据面的 REALITY 凭据；两端隧道字段必须按 [AI 节点独立凭据](ai-node-credentials.md) 保持匹配
+- 控制面通过 SSH 做可达性监控和容器重启；生产当前以空 `AI_NODE_CONFIG_PATH` 禁止自动上传配置
+- 部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，故障处理见 [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)
 
 ### 控制面备用 Xray
 
@@ -116,7 +112,7 @@ AI 节点通常使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为
 2. `panel.db` 持久化端口、租户、流量和 AI 聚合数据。
 3. `panel-ports.json` 记录当前有效监听端口。
 4. `render_config.py` 合并 `app/xray/.env`、`panel-ports.json` 和可选 `dynamic-routing.json`，生成 `config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `client-test.json`。
-5. 控制面通过 SSH 将 `config.json` 推送到普通数据面，将 `config-ai-node.json` 推送到 AI 节点。
+5. 控制面通过 SSH 将 `config.json` 推送到普通数据面；AI 节点配置同步由 `AI_NODE_CONFIG_PATH` 独立控制，生产当前禁用自动上传。
 6. 普通数据面加载 `config.json` 并通过 Xray API 提供 `statsquery`。
 7. `xray-ai-domain-manager` 从 `access.log` 读取域名，输出 AI 路由产物。AI 域名流量通过 `dynamic-routing.json` 转发到 AI 节点。
 8. AI 节点不可达时，`ai_domain_manager` 删除 `dynamic-routing.json`，AI 流量回退数据面 freedom 直出。

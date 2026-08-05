@@ -47,5 +47,13 @@ AGENTS.md
 # stray env backups
 .env.bak*
 *.env.bak*
+.env.backup-*
 monitoring/.env
 monitoring/prometheus/secrets/
+monitoring/*.backup-*
+monitoring/prometheus/*.backup-*
+
+# Local Claude/runtime state and project-private instructions
+.claude/
+CLAUDE.md
+.vite/

@@ -18,12 +18,24 @@ exporter 使用非 root 专用账号、只读文件系统和最小 capability。
 
 exporter 优先监听管理网地址。没有管理网时，防火墙只允许 Prometheus 主机 IP 到指标端口，并显式拒绝其他来源；不得使用 `0.0.0.0/0` 放行。
 
-```text
-Internet ──X──> exporter:metrics
-Prometheus 固定源 IP ──allow──> exporter:metrics
-```
+![Exporter network isolation](diagrams/exporter-network-isolation.svg)
+
+[查看 PlantUML 源文件](diagrams/exporter-network-isolation.puml)
 
 验收时从 Prometheus 主机确认可抓取，再从非授权主机确认连接被拒绝。云安全组与主机防火墙必须同时检查；如果经过反向代理，应启用 TLS/认证且仍限制来源。
+
+## AI 数据面 NAT 部署
+
+AI 数据面没有可直达的 exporter 公网端口。控制面使用 `xray-ai-exporter-tunnel.service` 通过既有管理 SSH 连接转发指标：
+
+```text
+Prometheus → 127.0.0.1:19101 → AI node-exporter:9100
+Prometheus → 127.0.0.1:18082 → AI cAdvisor:8080
+```
+
+本地转发端口只能绑定 `127.0.0.1`，SSH 必须启用严格主机密钥校验、连接失败退出、keepalive 和自动重启。Prometheus 使用 host 网络读取回环端口，但自身仍只监听 `127.0.0.1:9090`。不得为了监控向公网新增 AI exporter NAT 映射，也不得修改 AI Xray 业务端口。
+
+隧道只转发 exporter HTTP。日报器不持有 SSH 凭据，也不通过该隧道执行命令；SSH 凭据仅由控制面的 systemd 隧道服务读取。
 
 ## 变更记录
 

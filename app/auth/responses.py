@@ -80,6 +80,7 @@ def render_login_page(next_target, form_username="", error_message="", status_co
             error_message=error_message,
             message=request.args.get("message", "").strip(),
             message_level=request.args.get("level", "info").strip() or "info",
+            csrf_token=ensure_csrf_token(),
         ),
             status_code,
     )

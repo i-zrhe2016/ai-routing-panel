@@ -219,23 +219,27 @@ class AiNodeConfigTest(unittest.TestCase):
     def test_ai_node_config_has_freedom_direct_only(self):
         from app.xray.render_config import build_ai_node_config
 
-        config = build_ai_node_config(self._values())
+        values = self._values()
+        values["AI_UPSTREAM_PORT"] = "27166"
+        config = build_ai_node_config(values)
 
         self.assertEqual(config["outbounds"], [{"protocol": "freedom", "tag": "direct"}])
         self.assertNotIn("routing", config)
         self.assertNotIn("api", config)
         self.assertNotIn("stats", config)
         self.assertNotIn("policy", config)
+        self.assertEqual(config["log"], {"loglevel": "warning"})
         self.assertEqual(len(config["inbounds"]), 1)
         self.assertEqual(config["inbounds"][0]["protocol"], "vless")
-        self.assertEqual(config["inbounds"][0]["port"], 443)
+        self.assertEqual(config["inbounds"][0]["port"], 27166)
 
     def test_ai_node_reuses_reality_params_from_data_plane(self):
         from app.xray.render_config import build_ai_node_config, build_reality_inbound
 
         values = self._values()
+        values["AI_UPSTREAM_PORT"] = "27166"
         config = build_ai_node_config(values)
-        expected_inbound = build_reality_inbound(values, 443)
+        expected_inbound = build_reality_inbound(values, 27166)
 
         self.assertEqual(config["inbounds"][0], expected_inbound)
 
