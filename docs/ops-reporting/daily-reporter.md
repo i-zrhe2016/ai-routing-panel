@@ -4,6 +4,8 @@
 
 日报器每天按 `Asia/Shanghai` 自然日查询 Prometheus HTTP API。它不访问 SSH，不读取原始日志，不部署 exporter，也不执行修复。
 
+截至 2026-08-05，生产日报器以 `OPS_FORCE_RULES_ONLY=1` 影子模式运行。首份 2026-08-04 报告因窗口早于 Prometheus 上线而为 `unknown`，仅用于验证缺口处理、审计和原子发布，不作为业务状态结论。
+
 ## 生成流程
 
 1. 验证 Prometheus 可用性、必需 labels 和 target 唯一性。

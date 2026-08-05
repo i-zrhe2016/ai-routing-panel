@@ -3,6 +3,7 @@ import naive from "naive-ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "../App.vue";
+import { sameOriginLoginUrl } from "../../mixins/core.js";
 
 // A dashboard payload shaped like build_dashboard_state(), enough to exercise
 // every section. preparePort/preparePlan/prepareOrder add the .form fields.
@@ -127,6 +128,21 @@ async function mountAdmin() {
   await wrapper.vm.$nextTick();
   return wrapper;
 }
+
+describe("sameOriginLoginUrl", () => {
+  const location = { origin: "https://panel.example.com" };
+
+  it("accepts local login destinations", () => {
+    expect(sameOriginLoginUrl("/login?next=%2F", location)).toBe(
+      "https://panel.example.com/login?next=%2F",
+    );
+  });
+
+  it("rejects cross-origin and malformed destinations", () => {
+    expect(sameOriginLoginUrl("https://attacker.example/phish", location)).toBe("/login");
+    expect(sameOriginLoginUrl("http://[invalid", location)).toBe("/login");
+  });
+});
 
 describe("AdminApp", () => {
   it("fetches the dashboard on mount and renders a port card", async () => {

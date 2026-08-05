@@ -25,6 +25,7 @@ RUN apt-get update \
         python3 \
         python3-pip \
         openssh-client \
+        sshpass \
         tar \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /data /app/xray/runtime /app/xray/logs

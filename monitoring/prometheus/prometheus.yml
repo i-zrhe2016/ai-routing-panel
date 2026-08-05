@@ -13,17 +13,25 @@ scrape_configs:
       type: Bearer
       credentials_file: /etc/prometheus/secrets/metrics_token
     static_configs:
-      - targets: ["host.docker.internal:18080"]
+      - targets: ["127.0.0.1:18080"]
         labels:
           role: control_plane
           host: panel
+          node_id: control-01
+          node_role: control_plane
+          environment: production
+          region: unknown
 
   - job_name: control-plane-node
     static_configs:
-      - targets: ["host.docker.internal:9100"]
+      - targets: ["127.0.0.1:9100"]
         labels:
           host: panel
+          node_id: control-01
           role: control_plane
+          node_role: control_plane
+          environment: production
+          region: unknown
           provider: digitalocean
 
   - job_name: data-plane-node
@@ -31,23 +39,35 @@ scrape_configs:
       - targets: ["64.186.224.96:19100"]
         labels:
           host: normal-data-plane
+          node_id: normal-01
           node_role: normal_data_plane
-      - targets: ["nat.qq.pw:19100"]
+          environment: production
+          region: unknown
+      - targets: ["127.0.0.1:19101"]
         labels:
           host: ai-data-plane
+          node_id: ai-01
           node_role: ai_data_plane
+          environment: production
+          region: unknown
 
   - job_name: data-plane-cadvisor
     static_configs:
       - targets: ["64.186.224.96:18081"]
         labels:
           host: normal-data-plane
+          node_id: normal-01
           node_role: normal_data_plane
+          environment: production
+          region: unknown
           xray_container: xray-reality-local
-      - targets: ["nat.qq.pw:18081"]
+      - targets: ["127.0.0.1:18082"]
         labels:
           host: ai-data-plane
+          node_id: ai-01
           node_role: ai_data_plane
+          environment: production
+          region: unknown
           xray_container: xray
 
   - job_name: prometheus

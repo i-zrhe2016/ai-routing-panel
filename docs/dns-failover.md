@@ -89,7 +89,7 @@ DNS 切到控制面 IP，控制面探测到 AI 节点不可达，自动将备用
 | 变量 | 默认值 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `CONTROL_PLANE_BACKUP_XRAY_ENABLED` | `0` | 否 | 是否启用"控制面本机公网 IP + 备用 Xray"自动备用模式 |
-| `CONTROL_PLANE_BACKUP_UPSTREAM_URL` | — | 否 | relay 模式的 vless:// 上游 URL；AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生 |
+| `CONTROL_PLANE_BACKUP_UPSTREAM_URL` | — | relay 模式必填 | 完整、受保护的 `vless://` 上游 URL；必须与 AI 节点独立 inbound 凭据完整匹配 |
 
 ### 高峰窗口变量
 
@@ -215,15 +215,18 @@ relay outbound 由 `build_backup_relay_outbound()`（`app/xray/render_config.py:
      a. 恢复 config-backup.json 为 relay 模式（供下次接管使用）
 ```
 
-### CONTROL_PLANE_BACKUP_UPSTREAM_URL 自动派生
+### `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 凭据边界
 
-当 AI 节点被纳管（`AI_NODE_SSH_TARGET` 已配置）时，`CONTROL_PLANE_BACKUP_UPSTREAM_URL` 可以从 AI 节点公网 IP + REALITY 参数自动派生：
+AI 节点使用独立 REALITY 凭据时，不能从普通数据面 `XRAY_*` 自动派生 relay URL。配置 `AI_NODE_SSH_TARGET` 只证明控制面可以纳管节点，不证明 UUID、公钥、Short ID、SNI 等隧道字段匹配。
 
-```
-vless://<XRAY_CLIENT_UUID>@<AI节点公网IP>:<AI_UPSTREAM_PORT>?encryption=none&security=reality&sni=<XRAY_SERVER_NAME>&fp=<XRAY_FINGERPRINT>&pbk=<XRAY_REALITY_PUBLIC_KEY>&sid=<XRAY_REALITY_SHORT_ID>&type=tcp&flow=<XRAY_FLOW>#ai-node
-```
+启用 relay 模式前必须：
 
-无需手动填写 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`。
+1. 从受保护的配置源提供完整 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`；
+2. 确认其字段与 AI 节点 inbound 完整匹配；
+3. 不在日志、文档或命令输出中显示 URL；
+4. 无法提供独立 AI 凭据时保持 relay 能力关闭，使用备用直出模式。
+
+字段契约和安全比较方法见 [AI 节点独立凭据](ai-node-credentials.md)。
 
 ### Docker Compose 用法
 
