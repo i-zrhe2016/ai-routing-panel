@@ -1,0 +1,52 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.2
+skinparam defaultFontName Arial
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+title AI Domain Routing and Fallback
+
+actor "Proxy Client" as client
+participant "Normal Data Plane Xray" as normal
+participant "Dynamic Routing Rules" as rules
+participant "AI Data Plane Xray" as ai
+participant "AI freedom egress" as egress
+participant "Normal freedom egress" as fallback
+
+client -> normal : VLESS + REALITY connection
+normal -> rules : classify destination
+
+alt destination is an AI domain and AI upstream is reachable
+  rules --> normal : use ai_proxy outbound
+  normal -> ai : VLESS + REALITY relay
+  ai -> egress : direct outbound request
+  egress --> ai : response
+  ai --> normal : relayed response
+else non-AI destination
+  rules --> normal : use normal freedom outbound
+  normal -> fallback : direct outbound request
+  fallback --> normal : response
+else AI upstream unavailable
+  rules --> normal : dynamic AI route removed
+  normal -> fallback : local freedom fallback
+  fallback --> normal : response
+end
+
+normal --> client : proxy response
+
+note over normal,rules
+  AI Domain Manager maintains the dynamic routing fragment.
+  Recovery restores the AI route on a later successful probe.
+end note
+
+note over normal,ai
+  Tunnel credentials are independent from normal data-plane credentials
+  and are intentionally omitted from this diagram.
+end note
+
+@enduml

@@ -12,7 +12,8 @@ services:
         hard: 65535
     environment:
       PANEL_PORT: "18080"
-      PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-http://your-node-or-domain:18080}"
+      PANEL_HOST: "127.0.0.1"
+      PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-https://xray.zrhe2016.cc}"
       DEFAULT_UPSTREAM_HOST: "127.0.0.1"
       DEFAULT_UPSTREAM_PORT: "443"
       SEED_LISTEN_PORT: "31098"
@@ -38,10 +39,13 @@ services:
       DOCKER_API_VERSION: "${DOCKER_API_VERSION:-1.44}"
       DATAPLANE_PROBE_HOST: "${DATAPLANE_PROBE_HOST:-127.0.0.1}"
       AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
+      AI_NODE_SSH_BIN: "${AI_NODE_SSH_BIN:-ssh}"
       AI_NODE_SSH_OPTIONS: "${AI_NODE_SSH_OPTIONS:-}"
+      AI_NODE_SSH_KEY_FILE: "${AI_NODE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
       AI_NODE_CONTAINER_NAME: "${AI_NODE_CONTAINER_NAME:-xray-ai-node}"
       AI_NODE_RESTART_COMMAND: "${AI_NODE_RESTART_COMMAND:-}"
-      AI_NODE_CONFIG_PATH: "${AI_NODE_CONFIG_PATH:-/etc/xray/config.json}"
+      AI_NODE_CONFIG_PATH: "${AI_NODE_CONFIG_PATH-/etc/xray/config.json}"
+      AI_NODE_API_SERVER: "${AI_NODE_API_SERVER:-127.0.0.1:10085}"
       AI_NODE_PROBE_HOST: "${AI_NODE_PROBE_HOST:-}"
       AI_NODE_XRAY_BIN: "${AI_NODE_XRAY_BIN:-/usr/local/bin/xray}"
       AI_NODE_DOCKER_BIN: "${AI_NODE_DOCKER_BIN:-docker}"
@@ -79,6 +83,9 @@ services:
     volumes:
       - ./data:/data
       - ./app/xray:/app/xray
+      - /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
+      - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+      - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/healthz', timeout=3).read()"]

@@ -59,6 +59,7 @@
           {% endif %}
 
           <form class="auth-form" method="post" action="{{ url_for('login') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="next" value="{{ next_target }}">
             <label>
               <span>账号</span>

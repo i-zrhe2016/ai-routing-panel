@@ -3,14 +3,14 @@
 ## 健康检查
 
 - 接口：`GET /healthz`
-- 返回体：`{"ok": <bool>, "data_plane_running": <bool>}`
+- 返回体：`{"ok": <bool>, "data_plane_running": <bool>, "ai_node_running": <bool>}`
 - 默认行为：要求数据面可用时才返回健康
 
 如果你只启动面板而不启动数据面：
 
 - 设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
 
-> 目标态下，健康检查返回体还将包含 `ai_node_running` 字段，反映 AI 节点可达性。
+`ai_node_running` 反映 AI 节点远端 Socket 可达性，不代表 REALITY 凭据匹配或实际 ChatGPT 请求成功。
 
 ## Prometheus 监控（`/metrics`）
 
@@ -193,7 +193,8 @@ curl -X POST http://127.0.0.1:9090/-/reload
 - 先把 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 写入根 `.env`
 - 控制面作为备用时，启动方式为：`docker compose --profile backup-xray up -d xray-reality-backup`
 - 如果控制面本机要接管流量，可把 `DNS_FAILOVER_BACKUP_CONTENT` 留空，让面板自动获取控制面本机公网 IP
-- `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 在 AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生
+- relay 模式只可使用与 AI 节点独立 inbound 完整匹配、受保护的 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`
+- 不得从普通数据面 `XRAY_*` 自动派生 relay URL；没有独立 AI 凭据时保持 relay 能力关闭
 - 如果不想启用这套本机备用模式，保持 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=0`，并手动填写 `DNS_FAILOVER_BACKUP_CONTENT`
 - 完整机制详见 [dns-failover.md](dns-failover.md)
 
@@ -239,11 +240,13 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 
 ### `ssh`（远端 SSH 纳管）
 
-- 控制面在本地渲染 `config-ai-node.json`，再通过 SSH 上传到 `AI_NODE_CONFIG_PATH`
-- 上传后执行 `xray run -test` 校验，通过后重启远端 Xray
-- 控制面周期性 TCP 探测 `AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT` 的可达性
-- API：`GET /api/ai-node/status`、`POST /api/ai-node/restart`
-- 详见 [ai-node-deployment.md](ai-node-deployment.md)
+- 使用密码文件包装器时，密码只从只读文件读取，不写入环境变量或命令行
+- `AI_NODE_SSH_OPTIONS` 必须启用严格主机校验并使用专用 `known_hosts`
+- `AI_NODE_API_SERVER` 用于远端 Socket 状态检查；当前生产检查 `127.0.0.1:27166`
+- `AI_NODE_CONFIG_PATH` 非空时才支持上传；生产当前显式留空，因此配置上传关闭
+- 即使上传关闭，`GET /api/ai-node/status` 和 `POST /api/ai-node/restart` 仍可用
+- AI 节点使用独立 REALITY 凭据，主数据面 outbound 必须与其 inbound 完整匹配
+- 部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，凭据见 [AI 节点独立凭据](ai-node-credentials.md)
 
 ### `docker`（本地测试）
 
@@ -286,11 +289,15 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 
 检查：
 
-- `AI_NODE_SSH_TARGET` 是否正确，SSH 是否免密
+- `AI_NODE_SSH_TARGET`、SSH 端口和专用 `known_hosts` 是否正确
+- 密码文件是否以只读方式挂载，包装器是否能读取它
+- `AI_NODE_API_SERVER` 指向的远端 Socket 是否监听
 - `AI_NODE_PROBE_HOST` 是否指向 AI 节点公网入口
-- `AI_UPSTREAM_HOST:PORT` 是否与 `AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT` 一致
+- `AI_UPSTREAM_HOST:AI_UPSTREAM_PORT` 是否是当前 AI 业务端点
 - `GET /api/ai-node/status` 返回的 `last_error` 字段
-- 详见 [ai-node-deployment.md](ai-node-deployment.md) 排障章节
+- 部署问题见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)
+
+如果端口可达但 ChatGPT/OpenAI 仍不能连接，不要重复上传配置；按 [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md) 比较主数据面 outbound 与 AI inbound 的凭据摘要，并核对 Docker 真实 bind source。
 
 ### AI 路由状态一直没有报告
 

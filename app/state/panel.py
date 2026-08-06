@@ -3,6 +3,7 @@ import threading
 
 from ..config import (
     AI_NODE_CONFIG_OUT,
+    AI_NODE_API_SERVER,
     AI_NODE_CONFIG_PATH,
     AI_NODE_CONTAINER_NAME,
     AI_NODE_DOCKER_BIN,
@@ -140,6 +141,7 @@ class PanelState:
             DataPlaneConfig(
                 role="ai_node",
                 label="AI 节点",
+                api_server=AI_NODE_API_SERVER,
                 ssh_target=AI_NODE_SSH_TARGET,
                 ssh_bin=AI_NODE_SSH_BIN,
                 ssh_options=AI_NODE_SSH_OPTIONS,

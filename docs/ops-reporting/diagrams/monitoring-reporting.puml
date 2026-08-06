@@ -1,0 +1,54 @@
+@startuml
+!theme plain
+left to right direction
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.2
+skinparam defaultFontName Arial
+
+title Prometheus-only Monitoring and Daily Reporting
+
+node "Control Plane" as control #EFF6FF {
+  component "Panel /metrics\nBearer protected" as panelMetrics #DBEAFE
+  component "Control node-exporter" as controlExporter #F3F4F6
+  component "xray-ai-exporter-tunnel.service" as sshTunnel #E0E7FF
+  component "Prometheus\n127.0.0.1:9090" as prometheus #FEE2E2
+  component "Grafana" as grafana #F3E8FF
+  component "Daily Reporter\nrules_only" as reporter #DCFCE7
+  folder "Atomic JSON / Markdown" as reportFiles #FEF3C7
+  database "SQLite\nreport_runs audit" as audit #E5E7EB
+}
+
+node "Normal Data Plane" as normal #ECFDF5 {
+  component "node-exporter" as normalNode
+  component "cAdvisor" as normalCadvisor
+}
+
+node "AI Data Plane behind NAT" as ai #FFF7ED {
+  component "node-exporter" as aiNode
+  component "cAdvisor" as aiCadvisor
+}
+
+panelMetrics --> prometheus : authenticated scrape
+controlExporter --> prometheus : host metrics
+normalNode --> prometheus : restricted scrape
+normalCadvisor --> prometheus : restricted scrape
+aiNode --> sshTunnel : SSH local forward
+aiCadvisor --> sshTunnel : SSH local forward
+sshTunnel --> prometheus : 127.0.0.1:19101 / 18082
+prometheus --> grafana : dashboards
+prometheus --> reporter : HTTP range queries
+reporter --> reportFiles
+reporter --> audit
+
+component "Legacy SSH/raw-log Collector" as legacy #FECACA
+legacy -[hidden]-> reporter
+note bottom of legacy
+  Removed from production.
+  No raw logs or remote commands enter the reporter.
+end note
+
+@enduml

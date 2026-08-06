@@ -385,6 +385,35 @@ async function createNpmPackage(
   };
 }
 
+function buildPublishArgs() {
+  const args = [
+    'publish',
+    '--registry',
+    NPM_REGISTRY,
+    '--access',
+    NPM_ACCESS,
+    '--tag',
+    NPM_TAG
+  ];
+  if (NPM_PUBLISH_OTP) {
+    args.push('--otp', NPM_PUBLISH_OTP);
+  }
+  return args;
+}
+
+function buildUnpublishArgs(packageName, version) {
+  const args = [
+    'unpublish',
+    `${packageName}@${version}`,
+    '--registry',
+    NPM_REGISTRY
+  ];
+  if (NPM_PUBLISH_OTP) {
+    args.push('--otp', NPM_PUBLISH_OTP);
+  }
+  return args;
+}
+
 async function publishPackage(chunkIndex, packageName, version, pkgDir) {
   const upload = {
     status: DRY_RUN ? 'dry-run' : 'published',
@@ -410,10 +439,7 @@ async function publishPackage(chunkIndex, packageName, version, pkgDir) {
   console.log(`正在发布 ${packageName}...`);
 
   try {
-    const publishArgs = ['publish', '--access', NPM_ACCESS, '--tag', NPM_TAG];
-    if (NPM_PUBLISH_OTP) {
-      publishArgs.push('--otp', NPM_PUBLISH_OTP);
-    }
+    const publishArgs = buildPublishArgs();
 
     const { stdout, stderr } = await execFileAsync(
       'npm',
@@ -537,11 +563,20 @@ function collectVersionedPackages(snapshot) {
   return items;
 }
 
+function findPackageVersionConflicts(previousLatest, packageInfos) {
+  const previous = new Set(
+    collectVersionedPackages(previousLatest).map(
+      ({ packageName, version }) => `${packageName}@${version}`
+    )
+  );
+
+  return packageInfos.filter(({ packageName, version }) =>
+    previous.has(`${packageName}@${version}`)
+  );
+}
+
 async function unpublishPreviousVersion({ packageName, version }) {
-  const unpublishArgs = ['unpublish', `${packageName}@${version}`];
-  if (NPM_PUBLISH_OTP) {
-    unpublishArgs.push('--otp', NPM_PUBLISH_OTP);
-  }
+  const unpublishArgs = buildUnpublishArgs(packageName, version);
 
   const { stdout, stderr } = await execFileAsync('npm', unpublishArgs, {
     timeout: PUBLISH_TIMEOUT_MS,
@@ -599,6 +634,31 @@ async function updateUploadRecord(filePath, manifest, manifestPath) {
   return update;
 }
 
+async function rollbackPublishedPackages(results) {
+  const warnings = [];
+  for (const result of results.filter(Boolean)) {
+    const item = {
+      packageName: result.upload.packageName,
+      version: result.upload.version
+    };
+    try {
+      console.log(`正在回滚 ${item.packageName}@${item.version}...`);
+      await unpublishPreviousVersion(item);
+      console.log(`↩ 已回滚: ${item.packageName}@${item.version}`);
+    } catch (error) {
+      const detail = [
+        error.stderr && error.stderr.toString().trim(),
+        error.stdout && error.stdout.toString().trim(),
+        error.message
+      ]
+        .filter(Boolean)
+        .join('\n');
+      warnings.push(`回滚失败 ${item.packageName}@${item.version}\n${detail}`);
+    }
+  }
+  return warnings;
+}
+
 async function mapWithConcurrency(items, concurrency, worker) {
   if (!items.length) return [];
 
@@ -627,7 +687,9 @@ async function mapWithConcurrency(items, concurrency, worker) {
   await Promise.all(Array.from({ length: workerCount }, runWorker));
 
   if (failures.length) {
-    throw new Error(failures.map((error) => error.message).join('\n\n'));
+    const error = new Error(failures.map((failure) => failure.message).join('\n\n'));
+    error.results = results.filter(Boolean);
+    throw error;
   }
 
   return results;
@@ -656,12 +718,34 @@ async function processFile(filePath, artifactNameOverride = '') {
     )
   );
 
-  const publishResults = await mapWithConcurrency(
-    packageInfos,
-    PUBLISH_CONCURRENCY,
-    ({ chunkIndex, packageName, pkgDir, version }) =>
-      publishPackage(chunkIndex, packageName, version, pkgDir)
-  );
+  const recordPath = path.resolve(UPLOAD_RECORD_FILE);
+  const record = await readUploadRecord(recordPath);
+  const previousLatest = record.artifacts[artifactName]?.latest || null;
+  const conflicts = findPackageVersionConflicts(previousLatest, packageInfos);
+  if (conflicts.length) {
+    const versions = conflicts
+      .map(({ packageName, version }) => `${packageName}@${version}`)
+      .join(', ');
+    throw new Error(
+      `上传版本已存在，拒绝覆盖不可变的 npm 包版本: ${versions}。请设置新的 NPM_PACKAGE_VERSION。`
+    );
+  }
+
+  let publishResults;
+  try {
+    publishResults = await mapWithConcurrency(
+      packageInfos,
+      PUBLISH_CONCURRENCY,
+      ({ chunkIndex, packageName, pkgDir, version }) =>
+        publishPackage(chunkIndex, packageName, version, pkgDir)
+    );
+  } catch (error) {
+    const rollbackWarnings = await rollbackPublishedPackages(error.results || []);
+    if (rollbackWarnings.length) {
+      error.message += `\n\n${rollbackWarnings.join('\n\n')}`;
+    }
+    throw error;
+  }
 
   for (const result of publishResults) {
     if (!result) continue;
@@ -734,9 +818,13 @@ if (IS_MAIN) {
 }
 
 export {
+  buildPublishArgs,
+  buildUnpublishArgs,
   buildUploadRecordUpdate,
   collectVersionedPackages,
   createEmptyRecord,
+  findPackageVersionConflicts,
+  mapWithConcurrency,
   prunePreviousUpload,
   readUploadRecord
 };

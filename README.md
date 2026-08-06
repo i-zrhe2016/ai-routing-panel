@@ -1,73 +1,42 @@
 # xray-routing-panel
 
-`xray-routing-panel` 是一个面向开发者和运维人员的 Xray REALITY 控制面，用于统一管理普通数据面、AI 节点和订阅业务。它将面板管理、节点配置同步、流量统计、AI 域名路由、DNS 故障切换和数据库备份组合成一个可部署的微服务系统。
+`xray-routing-panel` 是面向开发者和运维人员的 Xray REALITY 控制面，用于统一管理普通数据面、AI 数据面、订阅业务、流量观测、故障切换和数据库备份。
 
-项目的核心原则是控制面与数据面职责分离：控制面负责状态、配置编排和运维决策；数据面只负责承载代理流量和执行已下发的 Xray 配置。AI 节点是独立的受管数据面，不承载控制面逻辑。
+控制面负责状态、配置编排和运维决策；普通数据面只承载代理流量并执行下发配置；AI 数据面只接收 AI 路由流量并独立出站。详细介绍见[项目概览](docs/project-overview.md)。
 
-## 项目能做什么
+## 核心能力
 
-- 通过管理后台和 JSON API 管理监听端口、备注、到期时间、流量上限、租户凭据和订阅链接。
-- 提供订阅者门户，支持客户注册登录、浏览套餐、下单、上传支付凭证、人工审核、查看订阅和续费。
-- 根据数据库状态生成 `panel-ports.json`、`config.json` 等 Xray 运行配置，并校验后同步到目标节点。
-- 支持 Docker、本地二进制、SSH 远端和 unmanaged 等数据面运行模式。
-- 读取 Xray API 与 `access.log`，提供端口流量、连接速率、探针和节点健康状态。
-- 按小时分析访问域名，生成 AI 域名路由规则、报表和数据库聚合结果。
-- 将 AI 域名流量转发到独立 AI 节点；当 AI 节点不可达时自动回退到普通数据面直出。
-- 通过公网 TCP 探测和 Cloudflare DNS API 实现数据面故障切换，并支持自动回切。
-- 可选运行控制面备用 Xray：AI 节点正常时 relay 到 AI 节点，AI 节点也故障时切换为 freedom 直出。
-- 定时备份 `panel.db`，并可选通过备份上传组件进行加密、切片、发布和恢复。
+- 管理监听端口、租户凭据、套餐、订单、订阅、到期时间和流量上限。
+- 生成并校验 Xray 配置，通过本地、Docker 或 SSH 模式管理数据面。
+- 读取 Xray API 与访问日志，提供流量、连接速率、探针和节点健康状态。
+- 识别 AI 域名并将相关流量转发到独立 AI 数据面，故障时自动回退。
+- 通过 Cloudflare DNS API 实现普通数据面故障切换和自动回切。
+- 使用 Prometheus、Grafana、Node Exporter 和 cAdvisor 提供可观测性与日报。
+- 定时备份 `panel.db`，并可选执行加密、切片、发布和恢复。
 
 ## 架构概览
 
-```text
-                         配置编排、状态和运维决策
-                                  │
-                                  ▼
-                    ┌──────────────────────────┐
-                    │       xray-routing-panel │
-                    │       控制面              │
-                    │  Flask API + 管理/订阅门户 │
-                    └──────────┬───────────────┘
-                               │ SSH / 配置同步
-              ┌────────────────┴────────────────┐
-              ▼                                 ▼
-  ┌────────────────────────┐       ┌────────────────────────┐
-  │ 普通数据面              │       │ AI 节点                 │
-  │ VLESS + REALITY         │──────▶│ VLESS + REALITY         │
-  │ 端口租户和流量承载       │ AI 路由│ AI 流量 freedom 直出     │
-  └───────────┬────────────┘       └────────────────────────┘
-              │ 公网探测
-              ▼
-       Cloudflare DNS 故障切换
-              │
-              ▼
-  ┌────────────────────────┐
-  │ 控制面备用 Xray         │
-  │ relay / freedom 双模式  │
-  └────────────────────────┘
-```
+![Xray Routing Panel production architecture](docs/diagrams/system-architecture.svg)
 
-组件职责如下：
+[PlantUML 源文件](docs/diagrams/system-architecture.puml) · [详细架构](docs/architecture.md) · [三节点容错](docs/fault-tolerance.md)
 
-| 组件 | 职责 | 不负责的内容 |
-| --- | --- | --- |
-| `xray-routing-panel` | 管理用户、订单、订阅、节点状态、配置和故障切换 | 不承载普通代理流量 |
-| 普通数据面 | 承载 VLESS + REALITY 流量，执行下发的监听和路由配置 | 不运行控制面 API、后台或数据库 |
-| AI 节点 | 接收数据面转发的 AI 流量并 freedom 直出 | 不做域名分类，不运行控制面服务 |
-| `xray-ai-domain-manager` | 从访问日志生成 AI 域名路由产物和统计 | 不管理用户和订阅 |
-| `xray-reality-backup` | 数据面故障时在控制面提供备用入口 | 不替代控制面状态管理 |
-| `db-backup-uploader` | 加密、切片、发布和恢复数据库备份 | 不参与代理流量转发 |
-
-更完整的组件边界、数据流和运行产物见 [架构说明](docs/architecture.md)；故障边界见 [容错说明](docs/fault-tolerance.md)。
+| 组件 | 单一职责 |
+| --- | --- |
+| `xray-routing-panel` | 用户、订单、订阅、节点状态、配置编排和故障切换 |
+| 普通数据面 | 承载 VLESS + REALITY 流量并执行控制面下发的配置 |
+| AI 数据面 | 接收 AI 流量并独立出站，不执行域名分类或控制面逻辑 |
+| `xray-ai-domain-manager` | 从访问日志生成 AI 域名路由产物和统计 |
+| `xray-reality-backup` | 普通数据面故障时提供备用入口 |
+| `db-backup-uploader` | 加密、切片、发布和恢复数据库备份 |
 
 ## 快速开始
 
-### 运行环境
+### 环境要求
 
 - Docker Engine 和 Docker Compose v2
-- Python 3.10 或更高版本（本地非 Docker 运行时需要）
-- Node.js 20 或更高版本（单独进行前端开发时需要）
-- Xray REALITY 所需的域名、密钥和客户端 UUID
+- Python 3.10+（仅本地运行或开发需要）
+- Node.js 20+（仅前端开发需要）
+- Xray REALITY 所需域名、密钥和客户端 UUID
 
 ### 1. 生成 REALITY 参数
 
@@ -75,40 +44,18 @@
 ./app/xray/generate-secrets.sh
 ```
 
-### 2. 准备配置文件
-
-复制两个示例配置，并只在本地填写真实值：
+### 2. 准备配置
 
 ```bash
 cp .env.example .env
 cp app/xray/.env.example app/xray/.env
 ```
 
-`app/xray/.env` 至少需要确认以下 REALITY 参数：
-
-- `XRAY_PUBLIC_HOST`
-- `XRAY_CLIENT_UUID`
-- `XRAY_REALITY_PRIVATE_KEY`
-- `XRAY_REALITY_PUBLIC_KEY`
-- `XRAY_REALITY_SHORT_ID`
-- `XRAY_SERVER_NAME`
-- `XRAY_DEST`
-
-面板 `.env` 的常用配置包括：
-
-- `PANEL_PUBLIC_URL`
-- `PANEL_USERNAME` / `PANEL_PASSWORD`
-- `PANEL_SECRET_KEY`
-- `DATAPLANE_SSH_TARGET`
-- `DATAPLANE_PROBE_HOST`
-- `DNS_FAILOVER_ENABLED`
-- `DB_BACKUP_UPLOADER_ENABLED`
-
-完整变量说明见 [配置说明](docs/configuration.md)。`.env`、`app/xray/.env` 和任何包含私钥的文件都不应提交到 Git。
+在本地填写真实值，不要提交 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token 或数据库备份。变量说明见[配置说明](docs/configuration.md)。
 
 ### 3. 启动服务
 
-只启动控制面和数据库备份服务：
+仅启动控制面和数据库备份服务：
 
 ```bash
 docker compose up -d --build
@@ -126,79 +73,9 @@ docker compose --profile xray up -d --build
 docker compose --profile backup-xray up -d xray-reality-backup
 ```
 
-Docker 构建阶段会自动安装前端依赖并构建管理后台和订阅者门户。非 Docker 运行时需要先构建前端：
+更多模式和排障命令见[开发与启动](docs/development.md)和[运维与排障](docs/operations.md)。
 
-```bash
-cd frontend
-npm ci
-npm run build
-```
-
-更多启动方式和排查命令见 [开发与启动](docs/development.md) 和 [运维说明](docs/operations.md)。
-
-## 部署模式
-
-### 只运行控制面
-
-适合控制面独立运行、普通数据面部署在远端的场景：
-
-```bash
-docker compose up -d --build
-```
-
-如果控制面本机不运行 Xray，可设置 `PANEL_HEALTH_REQUIRES_XRAY=0`。
-
-### 远端普通数据面
-
-控制面在本地渲染和校验配置，再通过 SSH 将运行产物推送到远端数据面。至少需要配置：
-
-```env
-DATAPLANE_SSH_TARGET=root@data-plane.example.com
-DATAPLANE_CONFIG_PATH=/path/to/config.json
-DATAPLANE_PANEL_PORTS_PATH=/path/to/panel-ports.json
-DATAPLANE_ACCESS_LOG_PATH=/path/to/access.log
-DATAPLANE_PROBE_HOST=data-plane.example.com
-```
-
-远端数据面只接收配置和运行 Xray，不部署控制面 API、管理后台或面板数据库。具体拓扑和 SSH 参数见 [架构说明](docs/architecture.md)。
-
-### 独立 AI 节点
-
-AI 节点是独立受管的 Xray 节点，接收普通数据面转发的 AI 流量并直接出站。至少需要配置：
-
-```env
-AI_NODE_SSH_TARGET=root@ai-node.example.com
-AI_NODE_CONFIG_PATH=/path/to/ai-config.json
-AI_NODE_PROBE_HOST=ai-node.example.com
-```
-
-AI 节点不运行 `ai_domain_manager`，也不保存控制面业务数据。详见 [AI 节点部署](docs/ai-node-deployment.md) 和 [AI 路由](docs/ai-routing.md)。
-
-### DNS 故障切换
-
-启用 DNS 故障切换前，需要准备 Cloudflare API Token、Zone ID、DNS Record ID 和探测地址。最小配置示例：
-
-```env
-DNS_FAILOVER_ENABLED=1
-DNS_FAILOVER_INTERVAL=10
-DNS_FAILOVER_TIMEOUT=2
-DNS_FAILOVER_FAILURE_THRESHOLD=2
-DNS_FAILOVER_RECOVERY_THRESHOLD=2
-
-DNS_FAILOVER_PROBE_HOST=edge.example.com
-DNS_FAILOVER_PROBE_PORT=443
-
-CF_API_TOKEN=replace_me
-CF_ZONE_ID=replace_me
-CF_DNS_RECORD_ID=replace_me
-CF_DNS_RECORD_NAME=edge.example.com
-CF_DNS_RECORD_PROXIED=0
-CF_DNS_RECORD_TTL=60
-```
-
-如需由控制面本机接管入口，还要启用 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 并启动 `backup-xray` profile。完整状态机、relay/直出模式和回切条件见 [DNS 故障切换](docs/dns-failover.md)。
-
-## 默认访问地址
+### 默认访问地址
 
 | 功能 | 地址 |
 | --- | --- |
@@ -210,27 +87,33 @@ CF_DNS_RECORD_TTL=60
 | AI 域名面板 | `http://服务器IP:18080/ai-domain-dashboard` |
 | 健康检查 | `http://服务器IP:18080/healthz` |
 
-API、认证方式和健康检查字段见 [API 文档](docs/api.md)。
+页面、认证和 JSON API 见 [API 文档](docs/api.md)。
 
-## 开发与测试
+## 按场景阅读
 
-安装 Python 开发依赖：
+| 场景 | 首选文档 |
+| --- | --- |
+| 第一次了解项目 | [项目概览](docs/project-overview.md) → [架构说明](docs/architecture.md) → [配置说明](docs/configuration.md) |
+| 本地开发或启动控制面 | [开发与启动](docs/development.md) |
+| 管理远端普通数据面 | [架构说明](docs/architecture.md) → [SSH 密钥登录与轮换](docs/ssh-key-access.md) |
+| 部署独立 AI 数据面 | [AI 节点部署](docs/ai-node-deployment.md) → [AI 节点独立凭据](docs/ai-node-credentials.md) |
+| 排查 ChatGPT/OpenAI 路由 | [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) |
+| 配置故障切换 | [DNS 故障切换](docs/dns-failover.md) → [三节点容错](docs/fault-tolerance.md) |
+| 监控节点和生成日报 | [Prometheus-only 运维分析](docs/ops-reporting/index.md) |
+| 迁移或恢复 | [面板迁移](docs/panel-migration.md) → [数据库备份上传](docs/db-backup-uploader.md) |
+
+## 开发与验证
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[dev]'
-```
-
-运行测试和代码检查：
-
-```bash
 python -m pytest -q
 ruff check .
 black --check .
 ```
 
-前端开发和测试：
+前端开发：
 
 ```bash
 cd frontend
@@ -239,30 +122,67 @@ npm run dev
 npm test
 ```
 
-后端、前端、Docker 和远端节点的开发流程见 [开发与启动](docs/development.md)。提交代码前请同时检查配置边界：控制面代码不应被部署到数据面，数据面运行产物也不应反向承担控制面职责。
+完整流程见[开发与启动](docs/development.md)。
 
-## 文档导航
+## 完整文档导航
 
-- [文档首页](docs/index.md)
-- [项目概览](docs/project-overview.md)
-- [架构说明](docs/architecture.md)
-- [配置说明](docs/configuration.md)
-- [开发与启动](docs/development.md)
-- [API 文档](docs/api.md)
-- [运维说明](docs/operations.md)
-- [AI 节点部署](docs/ai-node-deployment.md)
-- [AI 路由](docs/ai-routing.md)
-- [DNS 故障切换](docs/dns-failover.md)
-- [容错说明](docs/fault-tolerance.md)
-- [Kubernetes 部署](docs/kubernetes.md)
-- [面板迁移](docs/panel-migration.md)
-- [Prometheus-only 运维分析](docs/ops-reporting/index.md)
-- [数据库备份上传](docs/db-backup-uploader.md)
+`docs/` 是详细文档的权威目录；[文档首页](docs/index.md)提供与本节一致的内部索引。
 
-## 安全与运维提示
+### 开始使用
 
-- 不要将 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token 或数据库备份提交到仓库。
-- 控制面与数据面应使用独立主机、独立部署目录和最小权限凭据。
-- 修改 Xray 配置后，应先渲染和校验，再同步到数据面，并确认健康检查和流量探针恢复正常。
-- 启用 DNS 故障切换前，先在测试域名上验证失败阈值、恢复阈值、TTL 和备用 Xray 端口。
-- 数据库备份上传属于可选能力，生产环境应单独验证恢复流程，而不只验证备份任务成功。
+- [文档首页](docs/index.md) — 阅读顺序和完整索引。
+- [项目概览](docs/project-overview.md) — 项目定位、核心能力、架构摘要和快速开始。
+- [架构说明](docs/architecture.md) — 控制面、普通数据面、AI 数据面、组件边界和数据流。
+- [配置说明](docs/configuration.md) — 根 `.env`、Xray 环境变量及各模块配置。
+- [开发与启动](docs/development.md) — 本地开发、Docker 启动、测试和调试。
+
+### 部署、凭据与迁移
+
+- [AI 节点部署与 SSH 纳管](docs/ai-node-deployment.md) — 独立 AI 数据面的部署和控制面纳管。
+- [AI 节点独立凭据](docs/ai-node-credentials.md) — AI inbound/outbound 凭据边界和轮换要求。
+- [Cloudflare Access 邮箱登录](docs/cloudflare-access-email-login.md) — 控制面 Email OTP 登录、Access 策略和源站边界。
+- [SSH 密钥登录与轮换](docs/ssh-key-access.md) — fleet 密钥、容器挂载、验证与回滚。
+- [K3s 部署](docs/kubernetes.md) — Kubernetes 分阶段部署结构和边界。
+- [面板迁移](docs/panel-migration.md) — 控制面数据、配置和服务迁移流程。
+
+### 运行、接口与故障处理
+
+- [运维与排障](docs/operations.md) — 健康检查、监控、备份和常见故障处理。
+- [API 与页面路径](docs/api.md) — 页面、认证、订阅接口和 JSON API。
+- [三节点故障容错](docs/fault-tolerance.md) — 控制面、普通数据面和 AI 数据面的故障边界。
+- [DNS 故障切换](docs/dns-failover.md) — 探测、Cloudflare DNS 切换、备用 Xray 和自动回切。
+- [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) — 客户端、入口、路由、AI 节点和出口的分层排查。
+
+### AI 路由与备份
+
+- [AI 路由](docs/ai-routing.md) — 域名分类、动态规则、AI 上游选择和故障回退。
+- [数据库备份上传](docs/db-backup-uploader.md) — 数据库备份的加密、切片、发布和恢复。
+
+### Prometheus-only 运维分析
+
+- [模块首页](docs/ops-reporting/index.md) — 模块边界、生产状态和子模块导航。
+- [Exporter 部署与网络隔离](docs/ops-reporting/exporter-deployment.md) — Node Exporter、cAdvisor 和网络访问边界。
+- [Prometheus Targets 与 Labels](docs/ops-reporting/prometheus-targets.md) — 抓取目标、标签及查询约束。
+- [故障判定规则边界](docs/ops-reporting/fault-classification.md) — 可判定能力、证据组合和 unknown 边界。
+- [每日日报器](docs/ops-reporting/daily-reporter.md) — 日报生成流程和职责边界。
+- [报告契约](docs/ops-reporting/report-contract.md) — 报告结构、字段和输出约束。
+- [报告运行审计与历史归档](docs/ops-reporting/report-run-audit.md) — SQLite 审计记录和保留边界。
+- [灰度发布与回滚](docs/ops-reporting/rollout.md) — 分阶段发布、观察期和回滚条件。
+- [验收标准](docs/ops-reporting/acceptance.md) — 上线门禁和验收指标。
+- [故障排查](docs/ops-reporting/troubleshooting.md) — Target、AI 监控和日报异常处理。
+
+### 历史与停用文档
+
+以下文档用于追溯历史决策，不代表当前推荐部署方式：
+
+- [Reality dest 修复与多端口最终状态](docs/PORT443_PER_USER_MIGRATION.md) — 历史生产修复和验证记录。
+- [Prometheus-only 生产部署状态](docs/ops-reporting/deployment.md) — 历史部署状态记录；现行入口见模块首页。
+- [SSH 日志采集器停用说明](docs/ops-reporting/log-collector.md) — 已停用方案及迁移背景。
+
+## 安全边界
+
+- 不提交 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token 或数据库备份。
+- 控制面与数据面应使用独立主机、独立目录和最小权限凭据。
+- Xray 配置必须先渲染和校验，再同步并确认健康检查、探针和监控恢复。
+- Node Exporter、cAdvisor、Grafana、Kubernetes API 和管理接口应限制到受信任网络。
+- 数据库备份不能只验证任务成功，还应定期验证实际恢复流程。

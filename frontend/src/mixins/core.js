@@ -1,5 +1,14 @@
 import { fallbackCopyText } from "../utils.js";
 
+export function sameOriginLoginUrl(value, location = window.location) {
+  try {
+    const destination = new URL(value || "/login", location.origin);
+    return destination.origin === location.origin ? destination.href : "/login";
+  } catch (_error) {
+    return "/login";
+  }
+}
+
 // Cross-cutting state and helpers: dashboard application, HTTP/CSRF, busy/flash
 // tracking, and clipboard. Domain-specific data/computed/methods live in the
 // per-domain mixins; Vue merges them all so `this.x` resolves across mixins.
@@ -122,7 +131,7 @@ export const CoreMixin = {
         }
       }
       if (response.status === 401) {
-        window.location.assign(data.login_url || "/login");
+        window.location.assign(sameOriginLoginUrl(data.login_url));
         throw new Error(data.message || "登录已失效，请重新登录。");
       }
       if (!response.ok || data.ok === false) {

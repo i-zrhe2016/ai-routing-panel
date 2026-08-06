@@ -4,7 +4,7 @@
 
 三套独立会话：**管理员**、**客户**、**租户**（每端口）。
 
-- 管理员：未设置 `PANEL_USERNAME` / `PANEL_PASSWORD` 时，后台和 `/api/*`（不含 `/api/customer`、`/api/tenant`）默认无需登录；设置任一凭据后要求认证。Web 表单登录，API 支持 `Authorization: Basic ...`
+- 管理员：生产入口使用 Cloudflare Access Email OTP（One-time PIN），允许邮箱为 `zrhe2016@gmail.com`；Access 认证后由 Nginx 反代到本机 `127.0.0.1:18080`。不要公开暴露 `18080`。本地运维 API 仍可使用应用配置的 Basic/session 机制。
 - 客户：`/api/customer/*`（除 `plans`、`auth/*`）需客户会话，未登录返回 JSON 401（`{"ok":false,"code":"auth_required"}`）；变更请求需 `X-CSRF-Token`
 - 租户：`/api/tenant/<token>/*` 由管理员会话或该端口的租户会话放行
 - `GET /healthz` 永远不要求登录

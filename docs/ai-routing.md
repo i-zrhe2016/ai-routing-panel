@@ -4,6 +4,10 @@
 
 AI 路由由 `xray-ai-domain-manager` 驱动（运行在普通数据面上），默认流程如下：
 
+![AI 域名路由与回退流程](diagrams/ai-routing-flow.svg)
+
+[查看 PlantUML 源文件](diagrams/ai-routing-flow.puml)
+
 1. 从 `app/xray/logs/access.log` 读取最近一小时访问域名
 2. 先应用内建 AI 域名规则
 3. 对未知域名优先调用本机 `codex`
@@ -11,7 +15,7 @@ AI 路由由 `xray-ai-domain-manager` 驱动（运行在普通数据面上），
 5. 生成动态路由、小时报表和数据库聚合结果
 6. 路由变化时重新渲染并重启数据面
 
-AI 域名流量最终通过 `dynamic-routing.json` 中的 freedom redirect 转发到 AI 节点（远端独立 Xray），由 AI 节点 freedom 直出。AI 节点不可达时自动回退到数据面直出，详见下方"AI 上游选择"和 [ai-node-deployment.md](ai-node-deployment.md)。
+AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到远端 AI 节点并由其 freedom 直出。该 outbound 必须使用与 AI 节点独立 inbound 完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。AI 节点不可达时自动回退到数据面直出，详见下方“AI 上游选择”、[AI 节点独立凭据](ai-node-credentials.md)和 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
 
 ## 输入与输出
 
@@ -40,11 +44,11 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 - 直接提供完整优先级列表：
   - `AI_UPSTREAMS`
 
-如果备用上游不是同一套 Reality 参数，而是另一条完整分享链接：
+主 AI 上游也可能使用独立的 UUID、REALITY 公钥、Short ID 和 SNI。主数据面 `ai_proxy` outbound 与 AI inbound 的字段契约见 [AI 节点独立凭据](ai-node-credentials.md)。备用上游使用不同凭据时，应提供完整且受保护的分享链接：
 
 - 使用 `AI_UPSTREAM_FALLBACK_URL`
 
-当 AI 节点被控制面纳管（`AI_NODE_SSH_TARGET` 已配置）时，`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 应指向 AI 节点公网入口，控制面会自动派生 `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 供 DNS 故障切换 relay 模式使用。
+配置 `AI_NODE_SSH_TARGET` 只代表控制面能够纳管节点，不证明隧道凭据匹配，也不会安全地产生 relay URL。启用控制面备用 relay 时，必须显式提供与 AI inbound 匹配的 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`；否则保持 relay 能力关闭。
 
 管理器会按顺序做 TCP 探测，首个不可达时切换到下一个可达上游。
 

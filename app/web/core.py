@@ -120,6 +120,11 @@ def ensure_basic_auth():
         return None
     if not AUTH_ENABLED:
         return None
+    access_email = request.environ.get("HTTP_CF_ACCESS_AUTHENTICATED_USER_EMAIL", "").strip()
+    if access_email:
+        if not is_session_authenticated():
+            mark_session_authenticated()
+        return None
     if request.endpoint in {
         "login",
         "logout",

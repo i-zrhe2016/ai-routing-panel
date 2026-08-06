@@ -21,22 +21,18 @@ services:
     container_name: prometheus
     restart: unless-stopped
     mem_limit: 512m
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: host
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=90d'
       - '--web.enable-lifecycle'
+      - '--web.listen-address=127.0.0.1:9090'
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - ./prometheus/secrets:/etc/prometheus/secrets:ro
       - prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
-    networks:
-      - monitoring
 
   grafana:
     image: grafana/grafana:11.2.0
@@ -45,12 +41,14 @@ services:
     mem_limit: 320m
     depends_on:
       - prometheus
+    network_mode: host
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in monitoring/.env}"
+      GF_SERVER_HTTP_PORT: "3001"
       GF_USERS_ALLOW_SIGN_UP: "false"
       # Anonymous read-only access + iframe embedding, so the panel's 监控 tab can
       # embed Grafana panels (d-solo) without a login prompt. ⚠️ This makes every
-      # dashboard world-readable to anyone who can reach :3000 — firewall it.
+      # dashboard world-readable to anyone who can reach :3001 — firewall it.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
@@ -58,10 +56,6 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
-    ports:
-      - "3000:3000"
-    networks:
-      - monitoring
 
 volumes:
   prometheus-data:

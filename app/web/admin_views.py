@@ -26,6 +26,7 @@ from .core import (
     get_authenticated_tenant,
     is_session_authenticated,
     message_redirect,
+    require_csrf,
     route,
     state,
     tenant_panel_target,
@@ -45,6 +46,7 @@ def login():
         return redirect(next_target, code=303)
 
     if request.method == "POST":
+        require_csrf()
         state.sync_traffic_state()
         state.disable_auto_stopped_ports(reload_xray=True)
         username = request.form.get("username", "")

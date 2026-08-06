@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+identity_file=${AI_NODE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}
+exec ssh -o IdentitiesOnly=yes -i "$identity_file" "$@"

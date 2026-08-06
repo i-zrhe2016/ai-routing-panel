@@ -1,0 +1,75 @@
+@startuml
+!theme plain
+left to right direction
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.2
+skinparam defaultFontName Arial
+skinparam defaultTextAlignment center
+
+title Xray Routing Panel - Production Architecture
+
+actor "Proxy Client" as client
+cloud "Public DNS\n(Cloudflare)" as dns #E0F2FE
+
+node "Control Plane" as control #EFF6FF {
+  component "Routing Panel\nFlask + Vue" as panel #DBEAFE
+  database "panel.db\nconfiguration and state" as paneldb #E5E7EB
+  component "Optional Backup Xray\nrelay or direct" as backup #FEF3C7
+  component "Prometheus" as prometheus #FEE2E2
+  component "Grafana" as grafana #F3E8FF
+  component "Daily Reporter\nrules-only shadow mode" as reporter #DCFCE7
+  database "Report audit and files" as reports #E5E7EB
+  component "AI exporter SSH tunnel\nloopback only" as tunnel #E0E7FF
+}
+
+node "Normal Data Plane" as normal #ECFDF5 {
+  component "Xray\nVLESS + REALITY" as normalXray #D1FAE5
+  component "AI Domain Manager" as domainManager #CCFBF1
+  component "node-exporter + cAdvisor" as normalMetrics #F3F4F6
+}
+
+node "AI Data Plane (behind NAT)" as ai #FFF7ED {
+  component "Independent Xray\nVLESS + REALITY inbound" as aiXray #FED7AA
+  component "freedom egress" as aiEgress #FFEDD5
+  component "node-exporter + cAdvisor" as aiMetrics #F3F4F6
+}
+
+cloud "Internet" as internet #F3F4F6
+
+client --> dns : resolve proxy entry
+dns --> normalXray : primary traffic
+normalXray --> internet : non-AI traffic
+normalXray --> aiXray : AI domains via ai_proxy
+aiXray --> aiEgress
+aiEgress --> internet
+normalXray ..> internet : local fallback when AI unavailable
+
+panel --> paneldb
+panel ..> normalXray : status / controlled management
+panel ..> aiXray : status / restart only
+panel ..> dns : failover updates
+panel ..> backup : render and manage
+backup ..> aiXray : relay when enabled
+backup ..> internet : direct fallback
+
+domainManager --> normalXray : dynamic routing fragment
+normalXray --> domainManager : domain observations
+
+panel --> prometheus : authenticated /metrics
+normalMetrics --> prometheus : metrics
+aiMetrics --> tunnel : exporter HTTP
+tunnel --> prometheus : loopback forwards
+prometheus --> grafana
+prometheus --> reporter
+reporter --> reports
+
+note bottom of control
+  User proxy traffic remains on the data plane
+  and does not require the control plane to stay online.
+end note
+
+@enduml

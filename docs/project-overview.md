@@ -22,7 +22,7 @@
   - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
   - 通过 SSH 纳管两个远端节点：
     - **普通数据面**：渲染、校验、同步并重启唯一 `data_plane`
-    - **AI 节点**：渲染、推送并重启 `ai_node`（接收数据面转发的 AI 流量，freedom 直出）
+    - **AI 节点**：检查状态并按需重启 `ai_node`；配置上传独立受控且生产当前禁用
   - 维护 `dns_failover_state` / `dns_failover_history`
 - 普通数据面（`xray-reality-local` 或远端数据面）
   - 实际承载 `VLESS + REALITY` 流量
@@ -31,7 +31,7 @@
 - AI 节点（远端独立机器）
   - 运行 VLESS + REALITY Xray，监听 `AI_UPSTREAM_PORT`，接收数据面转发的 AI 流量
   - freedom 直出，不做域名分类、不运行 `ai_domain_manager`
-  - 复用普通数据面同一套 REALITY 参数
+  - 使用独立于普通数据面的 REALITY 凭据；主数据面 outbound 必须与 AI inbound 完整匹配
   - 详见 [ai-node-deployment.md](ai-node-deployment.md)
 - `xray-reality-backup`（控制面备用 Xray）
   - 可选的控制面备用 Xray，双模式运行：
@@ -164,15 +164,17 @@ docker compose --profile backup-xray up -d xray-reality-backup
 
 ### AI 节点
 
-AI 节点是远端独立机器上的 VLESS + REALITY Xray，接收数据面转发的 AI 流量并 freedom 直出。详见 [ai-node-deployment.md](ai-node-deployment.md)。
+AI 节点是远端独立机器上的 VLESS + REALITY Xray，接收数据面转发的 AI 流量并 freedom 直出。部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，凭据边界见 [AI 节点独立凭据](ai-node-credentials.md)。
 
 至少配置：
 
 - `AI_NODE_SSH_TARGET`
-- `AI_NODE_SSH_OPTIONS`
-- `AI_NODE_CONFIG_PATH`
+- `AI_NODE_SSH_BIN` / `AI_NODE_SSH_OPTIONS`
+- `AI_NODE_API_SERVER`
 - `AI_NODE_PROBE_HOST`
 - `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）
+
+生产当前保持 `AI_NODE_CONFIG_PATH=`，禁用配置上传但保留状态检查与容器重启。
 
 ### 控制面备用 Xray
 
@@ -181,7 +183,8 @@ AI 节点是远端独立机器上的 VLESS + REALITY Xray，接收数据面转�
 - 启用 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1`
 - 启动 `xray-reality-backup`：`docker compose --profile backup-xray up -d xray-reality-backup`
 - 如需自动推导备用 IP，可留空 `DNS_FAILOVER_BACKUP_CONTENT`
-- `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 在 AI 节点纳管时从 AI 节点公网 IP + REALITY 参数自动派生
+- relay 模式必须使用与 AI 节点独立 inbound 完整匹配、受保护的 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`
+- 不得从普通数据面 `XRAY_*` 盲目派生 relay URL；未提供独立 AI 凭据时应保持 relay 能力关闭
 
 重要限制：
 

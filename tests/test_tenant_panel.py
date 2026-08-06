@@ -206,7 +206,12 @@ class TenantPanelTest(unittest.TestCase):
     def tenant_login(self, tenant_token, username, password, follow_redirects=False):
         return self.client.post(
             "/login",
-            data={"username": username, "password": password, "next": f"/tenant/{tenant_token}"},
+            data={
+                "username": username,
+                "password": password,
+                "next": f"/tenant/{tenant_token}",
+                "csrf_token": self.csrf_token(),
+            },
             follow_redirects=follow_redirects,
         )
 
@@ -385,6 +390,14 @@ class UnifiedAdminLoginTest(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
+    def csrf_token(self):
+        with self.client.session_transaction() as session:
+            token = session.get("csrf_token")
+            if not token:
+                token = "test-csrf-token"
+                session["csrf_token"] = token
+            return token
+
     def test_admin_login_uses_unified_login_page(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 303)
@@ -399,17 +412,47 @@ class UnifiedAdminLoginTest(unittest.TestCase):
 
         failed = self.client.post(
             "/login",
-            data={"username": "admin-user", "password": "wrong-password", "next": "/"},
+            data={
+                "username": "admin-user",
+                "password": "wrong-password",
+                "next": "/",
+                "csrf_token": self.csrf_token(),
+            },
         )
         self.assertEqual(failed.status_code, 401)
 
         logged_in = self.client.post(
             "/login",
-            data={"username": "admin-user", "password": "admin-pass-123", "next": "/"},
+            data={
+                "username": "admin-user",
+                "password": "admin-pass-123",
+                "next": "/",
+                "csrf_token": self.csrf_token(),
+            },
             follow_redirects=True,
         )
         self.assertEqual(logged_in.status_code, 200)
         self.assertIn("xray-routing-panel", logged_in.get_data(as_text=True))
+
+    def test_admin_login_rejects_missing_csrf_token(self):
+        response = self.client.post(
+            "/login",
+            data={"username": "admin-user", "password": "admin-pass-123", "next": "/"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_admin_login_rejects_external_next_target(self):
+        response = self.client.post(
+            "/login",
+            data={
+                "username": "admin-user",
+                "password": "admin-pass-123",
+                "next": "https://attacker.example/phishing",
+                "csrf_token": self.csrf_token(),
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(urlparse(response.headers["Location"]).path, "/")
 
 
 class ProbeDashboardRenderTest(unittest.TestCase):

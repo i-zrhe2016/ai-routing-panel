@@ -37,6 +37,30 @@ describe("landing App", () => {
     wrapper.unmount();
   });
 
+  it("keeps reveal content visible when IntersectionObserver is unavailable", async () => {
+    const wrapper = mount(App, { props: { csrfToken: "test" } });
+    await Promise.resolve();
+    await wrapper.vm.$nextTick();
+
+    expect(document.documentElement.classList.contains("reveal-enabled")).toBe(false);
+    expect(wrapper.findAll(".reveal").length).toBeGreaterThan(0);
+    wrapper.unmount();
+  });
+
+  it("opens and closes the mobile navigation with accessible state", async () => {
+    const wrapper = mount(App, { props: { csrfToken: "test" } });
+    const toggle = wrapper.find(".nav-toggle");
+
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find(".nav-drawer").attributes("style")).toContain("display: none");
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(wrapper.find(".nav-drawer").attributes("style") || "").not.toContain("display: none");
+    await wrapper.find(".nav-drawer a").trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    wrapper.unmount();
+  });
+
   it("toggles a FAQ item open and closed", async () => {
     const wrapper = mount(App, { props: { csrfToken: "test" } });
     await wrapper.vm.$nextTick();

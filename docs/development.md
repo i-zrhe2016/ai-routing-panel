@@ -72,17 +72,17 @@ docker compose up -d --build
 
 ## AI 节点远端纳管
 
-AI 节点是远端独立机器上的 VLESS + REALITY Xray，通过 SSH 纳管。详见 [ai-node-deployment.md](ai-node-deployment.md)。
+AI 节点是远端独立机器上的 VLESS + REALITY Xray，通过 SSH 纳管。部署与认证方式见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
 
 至少配置：
 
 - `AI_NODE_SSH_TARGET`
-- `AI_NODE_SSH_OPTIONS`
-- `AI_NODE_CONFIG_PATH`
+- `AI_NODE_SSH_BIN` / `AI_NODE_SSH_OPTIONS`
+- `AI_NODE_API_SERVER`
 - `AI_NODE_PROBE_HOST`
 - `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）
 
-AI 节点复用普通数据面同一套 REALITY 参数，无需单独生成。
+AI 节点使用独立 REALITY 凭据，不能复用普通数据面参数。开发环境只有在具备独立 AI 凭据输入和完整回滚验证时才设置 `AI_NODE_CONFIG_PATH`；生产当前保持为空以禁用上传。详见 [AI 节点独立凭据](ai-node-credentials.md)。
 
 ## 常用命令
 
