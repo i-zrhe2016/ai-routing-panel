@@ -45,11 +45,20 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in monitoring/.env}"
       GF_SERVER_HTTP_PORT: "3001"
+      GF_SERVER_HTTP_ADDR: "127.0.0.1"
+      GF_SERVER_DOMAIN: "xray.zrhe2016.cc"
+      GF_SERVER_ROOT_URL: "https://xray.zrhe2016.cc/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
       # Anonymous read-only access + iframe embedding, so the panel's 监控 tab can
       # embed Grafana panels (d-solo) without a login prompt. ⚠️ This makes every
       # dashboard world-readable to anyone who can reach :3001 — firewall it.
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: "X-WEBAUTH-USER"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_WHITELIST: "127.0.0.1"
+      GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
     volumes:

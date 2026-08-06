@@ -57,10 +57,11 @@ scrape_configs:
 启用步骤：
 
 1. 启动 `monitoring/` 监控栈（Prometheus + Grafana + node_exporter）。其中 Grafana 已开启匿名只读（`GF_AUTH_ANONYMOUS_ENABLED=true` + `Viewer`）与内嵌（`GF_SECURITY_ALLOW_EMBEDDING=true`），并通过 provisioning 自动加载内嵌专用 dashboard `monitoring/grafana/dashboards/xray-observability.json`（UID `xray-observability`，带显式 panel id）。
-2. 给面板设置 `GRAFANA_PUBLIC_URL` 为**管理员浏览器可达**的 Grafana 地址（如 `http://your-host:3000`）。
-3. 重新构建前端（`cd frontend && npm run build`），登录后台点「监控」即可。顶部可切换 1h/6h/24h 时间范围。
+2. 给面板设置 `GRAFANA_PUBLIC_URL=https://xray.zrhe2016.cc/grafana/`；该路径由 Cloudflare Access Email OTP 保护。
+3. Grafana 使用 `GF_SERVER_ROOT_URL=https://xray.zrhe2016.cc/grafana/` 和 `GF_SERVER_SERVE_FROM_SUB_PATH=true`，重新启动监控栈后访问 `/grafana/`。
+4. 重新构建前端（`cd frontend && npm run build`），登录后台点「监控」即可。顶部可切换 1h/6h/24h 时间范围。
 
-> ⚠️ **安全权衡**：开启匿名只读后，任何能访问 Grafana `:3000` 的人都能只读全部图表；而 iframe 由管理员浏览器直连 `GRAFANA_PUBLIC_URL`，因此 `:3000` 必须对管理员浏览器可达。务必用云防火墙/iptables 把 `:3000`（以及 `:9090`、`:9100`）限制到可信来源。更稳妥的加固是把 Grafana 反代到面板受登录鉴权的同源子路径（配合 `GF_SERVER_ROOT_URL` + `serve_from_sub_path`），既复用后台鉴权又免开匿名——本最小方案未实现，可作为后续项。
+> ✅ **当前入口**：Grafana 通过 `https://xray.zrhe2016.cc/grafana/` 访问，Cloudflare Access 是公网认证边界；Grafana 的 `3001` 仅供本机 Nginx 反代使用。Cloudflare Access 邮箱会由 Nginx 转为 Grafana Auth Proxy 用户标识，认证后不再显示 Grafana 登录页。
 
 > 前置项：要看**数据面（DMIT `64.186.224.96`）**的系统资源，需在该机部署一份 node_exporter，并在 `monitoring/prometheus/prometheus.yml` 取消 `job_name: node` 下 DMIT target 的注释后 reload；否则「监控」里的主机指标只反映面板主机。
 
@@ -82,9 +83,8 @@ docker compose -f docker-compose.monitoring.yml down  # 保留数据卷
 curl -X POST http://127.0.0.1:9090/-/reload
 ```
 
-访问入口：Grafana 默认是 `:3000`，Prometheus 是 `:9090`。Grafana 管理员密码来自
-`monitoring/.env`。开启匿名只读后，能访问 `:3000` 的用户可以读取全部图表；`:9090`
-和 node_exporter 的 `:9100` 默认也没有认证，必须使用云防火墙或主机防火墙限制可信来源。
+访问入口：Grafana 使用 `https://xray.zrhe2016.cc/grafana/`，Prometheus 是 `127.0.0.1:9090`。Grafana 管理员密码来自
+`monitoring/.env`。公网访问 Grafana 前必须通过 Cloudflare Access；不要直接暴露 `3001`、`9090` 或 node_exporter 的 `:9100`。
 
 ## 流量与连接统计
 

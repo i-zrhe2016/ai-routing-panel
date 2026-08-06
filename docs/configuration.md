@@ -15,7 +15,7 @@
 | `PANEL_SECRET_KEY` | Session 签名密钥；不设置则每次启动随机生成 |
 | `METRICS_TOKEN` | Prometheus `/metrics` 抓取令牌；不设置则 `/metrics` 返回 404，设置后需 `Authorization: Bearer <token>` |
 | `METRICS_DP_TTL` | `/metrics` 缓存数据面存活检测的秒数，默认 `30`（抓取路径上唯一的 SSH 调用） |
-| `GRAFANA_PUBLIC_URL` | 浏览器可达的 Grafana 基址（如 `http://your-host:3000`）。设置后管理后台「监控」标签内嵌 Grafana 图表；不设置则该标签显示配置提示 |
+| `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台「监控」标签使用该同源地址 |
 | `GRAFANA_OBSERVABILITY_UID` | 「监控」标签内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
 | `DATAPLANE_SSH_TARGET` | 远端数据面 SSH 目标，例如 `root@node-a` |
