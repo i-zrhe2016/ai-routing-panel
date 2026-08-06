@@ -373,6 +373,239 @@
           "legendFormat": "主机={{host}}｜端口={{port}}｜方向={{direction}}｜备注={{note}}"
         }
       ]
+    },
+    {
+      "id": 110,
+      "type": "row",
+      "title": "容器资源｜cAdvisor（控制面、普通数据面、AI 数据面）",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      }
+    },
+    {
+      "id": 111,
+      "type": "timeseries",
+      "title": "容器｜CPU 使用率（%）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "不可用（无指标或无采样）",
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * sum by (host,node_role,name) (rate(container_cpu_usage_seconds_total{name!=\"\",image!=\"\"}[5m]))",
+          "legendFormat": "主机={{host}}｜节点角色={{node_role}}｜容器={{name}}"
+        }
+      ]
+    },
+    {
+      "id": 112,
+      "type": "timeseries",
+      "title": "容器｜内存工作集（字节）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "不可用（无指标或无采样）",
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (host,node_role,name) (container_memory_working_set_bytes{name!=\"\",image!=\"\"})",
+          "legendFormat": "主机={{host}}｜节点角色={{node_role}}｜容器={{name}}"
+        }
+      ]
+    },
+    {
+      "id": 113,
+      "type": "timeseries",
+      "title": "容器｜网络接收速率（字节/秒）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "不可用（无指标或无采样）",
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (host,node_role,name) (rate(container_network_receive_bytes_total{name!=\"\",image!=\"\"}[5m]))",
+          "legendFormat": "主机={{host}}｜节点角色={{node_role}}｜容器={{name}}"
+        }
+      ]
+    },
+    {
+      "id": 114,
+      "type": "timeseries",
+      "title": "容器｜网络发送速率（字节/秒）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "不可用（无指标或无采样）",
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (host,node_role,name) (rate(container_network_transmit_bytes_total{name!=\"\",image!=\"\"}[5m]))",
+          "legendFormat": "主机={{host}}｜节点角色={{node_role}}｜容器={{name}}"
+        }
+      ]
+    },
+    {
+      "id": 115,
+      "type": "timeseries",
+      "title": "容器｜文件系统读写速率（字节/秒）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 55
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "不可用（无指标或无采样）",
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (host,node_role,name) (rate(container_fs_reads_bytes_total{name!=\"\",image!=\"\"}[5m])) + sum by (host,node_role,name) (rate(container_fs_writes_bytes_total{name!=\"\",image!=\"\"}[5m]))",
+          "legendFormat": "主机={{host}}｜节点角色={{node_role}}｜容器={{name}}"
+        }
+      ]
+    },
+    {
+      "id": 116,
+      "type": "timeseries",
+      "title": "容器｜启动时间（Unix 时间戳）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 55
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "不可用（无指标或无采样）",
+          "unit": "dateTimeAsIso",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (host,node_role,name) (container_start_time_seconds{name!=\"\",image!=\"\"})",
+          "legendFormat": "主机={{host}}｜节点角色={{node_role}}｜容器={{name}}"
+        }
+      ]
     }
   ]
 }

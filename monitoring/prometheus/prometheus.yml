@@ -43,13 +43,14 @@ scrape_configs:
           node_role: normal_data_plane
           environment: production
           region: unknown
-      - targets: ["127.0.0.1:19101"]
+      - targets: ["nat.qq.pw:27168"]
         labels:
           host: ai-data-plane
           node_id: ai-01
           node_role: ai_data_plane
           environment: production
           region: unknown
+          component: node_exporter
 
   - job_name: data-plane-cadvisor
     static_configs:
@@ -61,14 +62,14 @@ scrape_configs:
           environment: production
           region: unknown
           xray_container: xray-reality-local
-      - targets: ["127.0.0.1:18082"]
+      - targets: ["nat.qq.pw:27169"]
         labels:
           host: ai-data-plane
           node_id: ai-01
           node_role: ai_data_plane
           environment: production
           region: unknown
-          xray_container: xray
+          component: cadvisor
 
   - job_name: prometheus
     static_configs:
