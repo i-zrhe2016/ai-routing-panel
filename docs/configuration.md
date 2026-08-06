@@ -47,9 +47,9 @@
 | 变量 | 说明 |
 | --- | --- |
 | `AI_NODE_SSH_TARGET` | AI 节点 SSH 目标，例如 `root@nat.qq.pw` |
-| `AI_NODE_SSH_BIN` | SSH 可执行文件或密码文件包装器，例如 `/app/scripts/ai-node-ssh` |
-| `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；必须启用严格主机校验 |
-| `AI_NODE_SSH_PASSWORD_FILE` | 密码包装器读取的容器内只读密码文件路径；不得把密码写入环境变量 |
+| `AI_NODE_SSH_BIN` | SSH 可执行文件或密钥包装器，例如 `/app/scripts/ai-node-ssh` |
+| `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；必须启用严格主机校验和仅公钥认证 |
+| `AI_NODE_SSH_KEY_FILE` | 密钥包装器读取的容器内只读私钥路径；不得把私钥写入环境变量或镜像 |
 | `AI_NODE_CONTAINER_NAME` | AI 节点上 Xray 容器名；生产当前为 `xray` |
 | `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
 | `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |

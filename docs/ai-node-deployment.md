@@ -45,24 +45,27 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 
 ## SSH 认证
 
-当前控制面使用密码文件配合 `sshpass`，但密码不进入普通环境变量或命令参数：
+当前控制面使用专用 Ed25519 私钥访问 AI 节点，私钥只读挂载到容器：
 
 ```text
-宿主机 0600 密码文件
-  └─ 只读挂载 → /run/secrets/ai_node_ssh_password
+宿主机 0600 私钥
+  └─ 只读挂载 → /run/secrets/fleet_ssh_key
                     │
                     └─ /app/scripts/ai-node-ssh
-                         └─ sshpass -f ... ssh
+                         └─ ssh -o IdentitiesOnly=yes -i ...
 ```
 
 同时只读挂载 AI 节点专用 `known_hosts`，并强制：
 
 ```text
+PreferredAuthentications=publickey
+PasswordAuthentication=no
+KbdInteractiveAuthentication=no
 StrictHostKeyChecking=yes
 UserKnownHostsFile=/root/.ssh/known_hosts_ai
 ```
 
-不要使用 `StrictHostKeyChecking=no`。长期建议迁移到 AI 节点专用 Ed25519 密钥。
+不要使用密码认证或 `StrictHostKeyChecking=no`。密钥轮换和恢复流程见 [SSH 密钥登录与轮换](ssh-key-access.md)。
 
 ## 根 `.env` 配置
 
@@ -71,8 +74,8 @@ UserKnownHostsFile=/root/.ssh/known_hosts_ai
 ```env
 AI_NODE_SSH_TARGET=root@nat.qq.pw
 AI_NODE_SSH_BIN=/app/scripts/ai-node-ssh
-AI_NODE_SSH_OPTIONS=-p 27160 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/known_hosts_ai -o ConnectTimeout=8
-AI_NODE_SSH_PASSWORD_FILE=/run/secrets/ai_node_ssh_password
+AI_NODE_SSH_OPTIONS=-p 27160 -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/known_hosts_ai -o ConnectTimeout=8
+AI_NODE_SSH_KEY_FILE=/run/secrets/fleet_ssh_key
 AI_NODE_CONTAINER_NAME=xray
 AI_NODE_RESTART_COMMAND=
 AI_NODE_PROBE_HOST=nat.qq.pw

@@ -1,40 +1,72 @@
 # 文档首页
 
-`docs/` 是当前仓库的权威文档目录；仓库入口 README 保留在根目录。
+`docs/` 是项目详细文档的权威目录；根目录的 [README.md](../README.md) 是项目入口、快速开始和完整导航。本页按使用场景组织所有模块，并区分当前文档与历史/停用记录。
 
 ## 建议阅读顺序
 
-1. [project-overview.md](project-overview.md)：项目能力、架构摘要和快速开始。
-2. [architecture.md](architecture.md)：先通过与 README 共享的 PlantUML 总体架构图理解控制面、数据面和 AI 节点的边界。
-3. [development.md](development.md)：本地启动、调试和常用命令。
-4. [configuration.md](configuration.md)：根 `.env` 与 `app/xray/.env` 的配置方式。
-5. [api.md](api.md) / [operations.md](operations.md)：接口细节、健康检查、探针、统计链路。
-6. [ai-node-deployment.md](ai-node-deployment.md)：AI 节点部署、SSH 认证与同步保护。
-7. [ai-node-credentials.md](ai-node-credentials.md)：主数据面 outbound 与 AI inbound 的独立凭据契约。
-8. [chatgpt-routing-troubleshooting.md](chatgpt-routing-troubleshooting.md)：ChatGPT/OpenAI 路由分层排障和恢复。
-9. [dns-failover.md](dns-failover.md)：DNS 故障切换完整机制。
-10. [fault-tolerance.md](fault-tolerance.md)：控制面、普通数据面、AI 节点的单点故障边界和验收矩阵。
-11. [ai-routing.md](ai-routing.md) / [kubernetes.md](kubernetes.md)：按需阅读 AI 路由和 K3s 部署。
-12. [panel-migration.md](panel-migration.md) / [db-backup-uploader.md](db-backup-uploader.md)：迁移和备份恢复。
-13. [ops-reporting/index.md](ops-reporting/index.md)：Prometheus-only 节点运维日报、部署边界和验收回滚。
-14. [PORT443_PER_USER_MIGRATION.md](PORT443_PER_USER_MIGRATION.md)：Reality `dest` 修复和生产验证记录（历史技术记录）。
+1. [项目概览](project-overview.md)：了解项目定位、核心能力和最小启动方式。
+2. [架构说明](architecture.md)：理解控制面、普通数据面、AI 数据面和组件边界。
+3. [配置说明](configuration.md)：配置根 `.env`、Xray 参数、节点和可选组件。
+4. [开发与启动](development.md)：本地开发、Docker 启动、测试和调试。
+5. [运维与排障](operations.md) / [API 与页面路径](api.md)：运行检查、监控、接口和常见运维动作。
+6. [AI 节点部署](ai-node-deployment.md) → [AI 节点独立凭据](ai-node-credentials.md) → [SSH 密钥登录与轮换](ssh-key-access.md)：部署和纳管独立 AI 数据面。
+7. [AI 路由](ai-routing.md) / [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)：理解 AI 流量链路并执行分层排障。
+8. [DNS 故障切换](dns-failover.md) → [三节点故障容错](fault-tolerance.md)：配置切换机制、备用 Xray 和验收边界。
+9. [Prometheus-only 运维分析](ops-reporting/index.md)：部署观测组件、生成日报、灰度发布和回滚。
+10. [面板迁移](panel-migration.md) / [数据库备份上传](db-backup-uploader.md)：迁移、备份和恢复。
 
-## 快速索引
+## 开始使用
 
-- [project-overview.md](project-overview.md)
-- [architecture.md](architecture.md)
-- [development.md](development.md)
-- [configuration.md](configuration.md)
-- [api.md](api.md)
-- [operations.md](operations.md)
-- [ai-node-deployment.md](ai-node-deployment.md)
-- [ai-node-credentials.md](ai-node-credentials.md)
-- [chatgpt-routing-troubleshooting.md](chatgpt-routing-troubleshooting.md)
-- [dns-failover.md](dns-failover.md)
-- [fault-tolerance.md](fault-tolerance.md)
-- [ai-routing.md](ai-routing.md)
-- [kubernetes.md](kubernetes.md)
-- [panel-migration.md](panel-migration.md)
-- [db-backup-uploader.md](db-backup-uploader.md)
-- [ops-reporting/index.md](ops-reporting/index.md)
-- [PORT443_PER_USER_MIGRATION.md](PORT443_PER_USER_MIGRATION.md)
+- [项目概览](project-overview.md) — 项目能力、架构摘要和快速开始。
+- [架构说明](architecture.md) — 组件职责、数据流、运行产物和边界。
+- [配置说明](configuration.md) — 根 `.env`、Xray 环境变量及模块配置。
+- [开发与启动](development.md) — 本地开发、Docker 启动、测试和调试。
+
+## 部署、凭据与迁移
+
+- [AI 节点部署与 SSH 纳管](ai-node-deployment.md) — 独立 AI 数据面部署、状态检查和同步保护。
+- [AI 节点独立凭据](ai-node-credentials.md) — AI inbound/outbound 凭据契约和轮换边界。
+- [Cloudflare Access 邮箱登录](cloudflare-access-email-login.md) — 控制面 Email OTP 登录、Access 策略和源站边界。
+- [SSH 密钥登录与轮换](ssh-key-access.md) — fleet 密钥、容器只读挂载、验证和回滚。
+- [K3s 部署](kubernetes.md) — Kubernetes 分阶段部署结构和边界。
+- [面板迁移](panel-migration.md) — 控制面数据、配置和服务迁移。
+
+## 运行、接口与故障处理
+
+- [运维与排障](operations.md) — 健康检查、Prometheus、Grafana、备份和常见故障。
+- [API 与页面路径](api.md) — 页面、认证、订阅接口和 JSON API。
+- [三节点故障容错](fault-tolerance.md) — 控制面、普通数据面和 AI 数据面故障矩阵。
+- [DNS 故障切换](dns-failover.md) — 探测、Cloudflare DNS、备用 Xray 和自动回切。
+- [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md) — 客户端、入口、路由、AI 节点和出口排障。
+
+## AI 路由与备份
+
+- [AI 路由](ai-routing.md) — 域名分类、动态规则、AI 上游选择和回退。
+- [数据库备份上传](db-backup-uploader.md) — 加密、切片、发布和恢复。
+
+## Prometheus-only 运维分析
+
+- [模块首页](ops-reporting/index.md) — 模块边界、生产状态和子模块导航。
+- [Exporter 部署与网络隔离](ops-reporting/exporter-deployment.md) — Node Exporter、cAdvisor 和网络访问边界。
+- [Prometheus Targets 与 Labels](ops-reporting/prometheus-targets.md) — 抓取目标、标签和查询约束。
+- [故障判定规则边界](ops-reporting/fault-classification.md) — 可判定能力、证据组合和 unknown 边界。
+- [每日日报器](ops-reporting/daily-reporter.md) — 日报生成流程和职责边界。
+- [报告契约](ops-reporting/report-contract.md) — 报告结构、字段和输出约束。
+- [报告运行审计与历史归档](ops-reporting/report-run-audit.md) — SQLite 审计和保留边界。
+- [灰度发布与回滚](ops-reporting/rollout.md) — 分阶段发布、观察期和回滚条件。
+- [验收标准](ops-reporting/acceptance.md) — 上线门禁和验收指标。
+- [故障排查](ops-reporting/troubleshooting.md) — Target、AI 监控和日报异常处理。
+
+## 历史与停用记录
+
+以下文档用于追溯历史决策，不代表当前推荐部署方式：
+
+- [Reality dest 修复与多端口最终状态](PORT443_PER_USER_MIGRATION.md) — 历史生产修复和验证记录。
+- [Prometheus-only 生产部署状态](ops-reporting/deployment.md) — 历史部署状态记录；现行入口见模块首页。
+- [SSH 日志采集器停用说明](ops-reporting/log-collector.md) — 已停用方案及迁移背景。
+
+## 文档维护约定
+
+- 新增功能时，在 `docs/` 新建只关注一个模块的文档，并在本页和根 README 同步添加入口。
+- 详细配置、状态机、API 字段和排障步骤放在对应模块文档；README 只保留摘要和导航。
+- 历史方案不删除，需在标题或导航中标记状态，避免与现行部署指南混淆。

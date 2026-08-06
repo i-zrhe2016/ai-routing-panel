@@ -1,5 +1,5 @@
 #!/bin/sh
 set -eu
 
-password_file=${AI_NODE_SSH_PASSWORD_FILE:-/run/secrets/ai_node_ssh_password}
-exec sshpass -f "$password_file" ssh "$@"
+identity_file=${AI_NODE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}
+exec ssh -o IdentitiesOnly=yes -i "$identity_file" "$@"
