@@ -57,6 +57,11 @@ const PUBLISH_TIMEOUT_MS = parsePositiveInt(
   process.env.NPM_PUBLISH_TIMEOUT_MS,
   10 * 60 * 1000
 );
+// The scheduled panel backup sets this to 0 so npm remains a durable,
+// immutable disaster-recovery channel.  Standalone uploader users retain the
+// historical latest-only behavior unless they opt out explicitly.
+const PRUNE_REMOTE_UPLOADS = process.env.PRUNE_REMOTE_UPLOADS !== '0';
+const KEEP_UPLOAD_HISTORY = process.env.PRUNE_REMOTE_UPLOADS === '0';
 
 const execFileAsync = promisify(execFile);
 const MODULE_PATH = fileURLToPath(import.meta.url);
@@ -513,6 +518,13 @@ function buildUploadRecordUpdate(record, filePath, manifest, manifestPath, recor
     history: []
   };
   const previousLatest = artifactRecord.latest || null;
+  const historyLimit = parsePositiveInt(
+    process.env.UPLOAD_RECORD_HISTORY_LIMIT,
+    20
+  );
+  const history = KEEP_UPLOAD_HISTORY && previousLatest
+    ? [previousLatest, ...(artifactRecord.history || [])].slice(0, historyLimit)
+    : [];
   const snapshot = {
     ...cloneJson(manifest),
     uploadId,
@@ -527,7 +539,7 @@ function buildUploadRecordUpdate(record, filePath, manifest, manifestPath, recor
     latestUploadId: uploadId,
     updatedAt: recordUpdatedAt,
     latest: snapshot,
-    history: []
+    history
   };
   record.updatedAt = recordUpdatedAt;
 
@@ -537,7 +549,7 @@ function buildUploadRecordUpdate(record, filePath, manifest, manifestPath, recor
     recordPath: resolvedRecordPath,
     recordUpdatedAt,
     uploadId,
-    historyLength: 0
+    historyLength: history.length
   };
 }
 
@@ -592,7 +604,12 @@ async function unpublishPreviousVersion({ packageName, version }) {
 }
 
 async function prunePreviousUpload(previousLatest, currentUploadId) {
-  if (DRY_RUN || !previousLatest || previousLatest.uploadId === currentUploadId) {
+  if (
+    DRY_RUN ||
+    !PRUNE_REMOTE_UPLOADS ||
+    !previousLatest ||
+    previousLatest.uploadId === currentUploadId
+  ) {
     return [];
   }
 

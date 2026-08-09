@@ -1,6 +1,6 @@
 # xray-routing-panel
 
-`xray-routing-panel` 是面向开发者和运维人员的 Xray REALITY 控制面，用于统一管理普通数据面、AI 数据面、订阅业务、流量观测、故障切换和数据库备份。
+`xray-routing-panel` 是面向开发者和运维人员的 Xray REALITY 控制面，用于统一管理普通数据面、AI 数据面、订阅业务、流量观测、故障切换和灾备归档。
 
 控制面负责状态、配置编排和运维决策；普通数据面只承载代理流量并执行下发配置；AI 数据面只接收 AI 路由流量并独立出站。详细介绍见[项目概览](docs/project-overview.md)。
 
@@ -12,7 +12,7 @@
 - 识别 AI 域名并将相关流量转发到独立 AI 数据面，故障时自动回退。
 - 通过 Cloudflare DNS API 实现普通数据面故障切换和自动回切。
 - 使用 Prometheus、Grafana、Node Exporter 和 cAdvisor 提供可观测性与日报。
-- 定时备份 `panel.db`，并可选执行加密、切片、发布和恢复。
+- 定时备份 `panel.db` 及配置文件等内容，生成加密灾备归档；可选通过 npm 做异地上传，恢复只在灾难阶段人工执行。
 
 ## 架构概览
 
@@ -27,7 +27,7 @@
 | AI 数据面 | 接收 AI 流量并独立出站，不执行域名分类或控制面逻辑 |
 | `xray-ai-domain-manager` | 从访问日志生成 AI 域名路由产物和统计 |
 | `xray-reality-backup` | 普通数据面故障时提供备用入口 |
-| `db-backup-uploader` | 加密、切片、发布和恢复数据库备份 |
+| `db-backup-uploader` | 加密、切片、发布和灾难阶段恢复备份归档 |
 
 ## 快速开始
 
@@ -75,6 +75,16 @@ docker compose --profile backup-xray up -d xray-reality-backup
 
 更多模式和排障命令见[开发与启动](docs/development.md)和[运维与排障](docs/operations.md)。
 
+启用配置归档并通过 npm 保存异地灾备版本（不用于快速恢复）：
+
+```bash
+DB_BACKUP_UPLOADER_ENABLED=1 \
+DB_BACKUP_UPLOADER_PASSWORD='replace-with-a-random-secret' \
+docker compose up -d --build xray-routing-panel-db-backup
+```
+
+控制面额外文件通过 `DB_BACKUP_EXTRA_PATHS` 配置，普通/AI 数据面实际配置由只读 SSH 采集；完整边界见[灾备归档与 npm 上传通道](docs/disaster-backup.md)和[远端节点配置采集](docs/remote-node-backup.md)。
+
 ### 默认访问地址
 
 | 功能 | 地址 |
@@ -97,10 +107,11 @@ docker compose --profile backup-xray up -d xray-reality-backup
 | 本地开发或启动控制面 | [开发与启动](docs/development.md) |
 | 管理远端普通数据面 | [架构说明](docs/architecture.md) → [SSH 密钥登录与轮换](docs/ssh-key-access.md) |
 | 部署独立 AI 数据面 | [AI 节点部署](docs/ai-node-deployment.md) → [AI 节点独立凭据](docs/ai-node-credentials.md) |
+| 查看 AI 主机与容器监控 | [AI 节点部署](docs/ai-node-deployment.md#ai-节点监控采集) → [运维与排障](docs/operations.md#prometheus-监控metrics) |
 | 排查 ChatGPT/OpenAI 路由 | [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) |
 | 配置故障切换 | [DNS 故障切换](docs/dns-failover.md) → [三节点容错](docs/fault-tolerance.md) |
 | 监控节点和生成日报 | [Prometheus-only 运维分析](docs/ops-reporting/index.md) |
-| 迁移或恢复 | [面板迁移](docs/panel-migration.md) → [数据库备份上传](docs/db-backup-uploader.md) |
+| 迁移或灾难恢复 | [面板迁移](docs/panel-migration.md) → [灾备归档](docs/disaster-backup.md) → [远端节点配置采集](docs/remote-node-backup.md) → [数据库备份上传](docs/db-backup-uploader.md) |
 
 ## 开发与验证
 
@@ -156,7 +167,9 @@ npm test
 ### AI 路由与备份
 
 - [AI 路由](docs/ai-routing.md) — 域名分类、动态规则、AI 上游选择和故障回退。
-- [数据库备份上传](docs/db-backup-uploader.md) — 数据库备份的加密、切片、发布和恢复。
+- [灾备归档与 npm 上传通道](docs/disaster-backup.md) — 配置文件等额外内容的归档、npm 异地保留和离线恢复边界。
+- [远端节点配置采集](docs/remote-node-backup.md) — 通过严格只读 SSH 采集普通数据面和 AI 数据面的实际配置。
+- [数据库备份上传](docs/db-backup-uploader.md) — 加密、切片、npm 发布和灾难阶段恢复。
 
 ### Prometheus-only 运维分析
 
@@ -181,7 +194,7 @@ npm test
 
 ## 安全边界
 
-- 不提交 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token 或数据库备份。
+- 不提交 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token、数据库快照或灾备归档。
 - 控制面与数据面应使用独立主机、独立目录和最小权限凭据。
 - Xray 配置必须先渲染和校验，再同步并确认健康检查、探针和监控恢复。
 - Node Exporter、cAdvisor、Grafana、Kubernetes API 和管理接口应限制到受信任网络。

@@ -77,11 +77,12 @@
 - 结合内建规则、Codex 或 OpenAI 兼容接口做域名分类
 - 输出动态路由片段、小时报表、数据库聚合快照
 
-### 备份上传组件
+### 灾备归档与上传组件
 
-- 入口代码：`scripts/run_db_backup_cycle.py`、`components/db-backup-uploader/`
-- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份
-- 再按配置调用 `db-backup-uploader` 做加密、切片、上传和记录写入
+- 入口代码：`scripts/run_db_backup_cycle.py`、`scripts/collect_remote_backup.py`、`scripts/build_backup_bundle.py`、`components/db-backup-uploader/`
+- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件，并可通过严格只读 SSH 收集两个数据面的实际配置
+- `collect_remote_backup.py` 只负责 SSH、校验和 staging；`build_backup_bundle.py` 只负责归档和 manifest；上传器只负责加密、分片与 npm 发布
+- 按配置调用 `db-backup-uploader` 做加密、切片、上传和记录写入；npm 只作为低频异地灾备通道，不进入快速恢复或故障切换路径
 
 ## 节点模式判定
 
@@ -118,7 +119,7 @@ AI 节点通常使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为
 8. AI 节点不可达时，`ai_domain_manager` 删除 `dynamic-routing.json`，AI 流量回退数据面 freedom 直出。
 9. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
 10. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
-11. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，并在启用时调用 `db-backup-uploader` 上传最新备份。
+11. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集两个数据面，再生成 `backups/*-disaster-*.tar.gz`；启用时调用 `db-backup-uploader` 上传加密灾备归档，默认不删除 npm 历史版本。
 12. 首页读取三节点状态、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
 ## 关键运行产物
@@ -126,6 +127,8 @@ AI 节点通常使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为
 - `data/panel.db`：端口、租户、流量和 AI 域名聚合
 - `data/panel.db` 内 `dns_failover_state` / `dns_failover_history`：DNS 切换当前态和最近事件
 - `backups/*.db`：最近几天的本地数据库备份
+- `backups/*-disaster-*.tar.gz`：包含数据库与配置文件的离线灾备归档
+- 归档 `nodes/remote-node-collection.json`：两个数据面的 SSH 目标、文件状态和 SHA-256
 - `data/db-backup-uploader/upload-records.json`：最新上传记录和历史快照
 - `data/db-backup-uploader/shards/`：最新一次备份的本地分片产物
 - `app/xray/runtime/panel-ports.json`：当前有效监听端口列表

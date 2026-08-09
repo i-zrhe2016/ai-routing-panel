@@ -2,7 +2,7 @@ import base64
 import json
 from urllib.parse import quote, urlencode
 
-from .config import XRAY_CLIENT_CONFIG_PATH
+from .config import PANEL_SUBSCRIPTION_PUBLIC_URL, XRAY_CLIENT_CONFIG_PATH
 from .helpers import external_url_for, normalize_subscription_name, yaml_quote
 
 
@@ -233,14 +233,17 @@ def build_port_access_payload(port, subscription_profile):
 
     payload["tenant_subscription_default_url"] = external_url_for(
         "tenant_subscription_default",
+        base_url=PANEL_SUBSCRIPTION_PUBLIC_URL,
         subscription_token=port["subscription_token"],
     )
     payload["tenant_subscription_clash_url"] = external_url_for(
         "tenant_subscription_clash",
+        base_url=PANEL_SUBSCRIPTION_PUBLIC_URL,
         subscription_token=port["subscription_token"],
     )
     payload["tenant_subscription_v2ray_url"] = external_url_for(
         "tenant_subscription_v2ray",
+        base_url=PANEL_SUBSCRIPTION_PUBLIC_URL,
         subscription_token=port["subscription_token"],
     )
     payload["share_link"] = build_vless_share_link(subscription_profile, port["listen_port"], port["note"])

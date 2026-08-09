@@ -83,6 +83,7 @@ def main():
                 src_conn.backup(dst_conn)
 
         os.replace(temp_path, final_path)
+        os.chmod(final_path, 0o600)
         write_latest_path(args.latest_path_file, final_path.resolve())
         removed = prune_backups(backup_dir, args.prefix, args.keep_days)
         print(f"[backup] wrote {final_path}")

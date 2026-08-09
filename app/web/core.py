@@ -341,52 +341,37 @@ def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, 
     backup_xray_enabled = bool(dns_failover_status.get("control_plane_backup_xray_enabled"))
     backup_mode = "relay" if backup_xray_enabled and ai_ok else "direct"
 
+    def route(path, label, scenario, entry, transit, exit_node, status, degraded=False, waiting=False):
+        return {
+            "path": path,
+            "label": label,
+            "scenario": scenario,
+            "route_status": status,
+            "is_degraded": degraded,
+            "waiting_for_switch": waiting,
+            "entry_node": entry,
+            "transit_nodes": transit,
+            "exit_node": exit_node,
+        }
+
     if dns_target == "backup" and backup_enabled:
         if backup_mode == "relay" and ai_ok:
-            return {
-                "path": "dns_backup_relay_ai",
-                "label": "DNS→控制面备用→AI 节点",
-                "scenario": "数据面故障，控制面备用 relay 到 AI 节点",
-            }
-        return {
-            "path": "dns_backup_direct",
-            "label": "DNS→控制面备用→freedom 直出",
-            "scenario": "双节点故障，控制面备用 freedom 直出",
-        }
+            return route("dns_backup_relay_ai", "DNS→控制面备用→AI 节点", "数据面故障，控制面备用 relay 到 AI 节点", "控制面备用", ["AI 节点"], "AI 节点 freedom 直出", "备用 relay", True)
+        return route("dns_backup_direct", "DNS→控制面备用→freedom 直出", "双节点故障，控制面备用 freedom 直出", "控制面备用", [], "控制面备用 freedom 直出", "备用直出", True)
 
     if not dp_ok and backup_enabled:
-        return {
-            "path": "dns_backup_pending",
-            "label": "DNS 待切换到控制面备用",
-            "scenario": "数据面故障，等待 DNS 切换",
-        }
+        return route("dns_backup_pending", "DNS 待切换到控制面备用", "数据面故障，等待 DNS 切换", "当前 DNS 入口", [], "等待切换", "待切换", True, True)
 
     if dp_ok and ai_ok and not ai_fallback:
-        return {
-            "path": "normal_ai",
-            "label": "数据面→AI 节点直出",
-            "scenario": "正常：AI 流量经 AI 节点直出",
-        }
+        return route("normal_ai", "数据面→AI 节点直出", "正常：AI 流量经 AI 节点直出", "普通数据面", ["AI 节点"], "AI 节点 freedom 直出", "正常")
 
     if dp_ok and (not ai_ok or ai_fallback):
-        return {
-            "path": "normal_fallback",
-            "label": "数据面→freedom 直出",
-            "scenario": "AI 节点不可达，AI 流量回退到数据面直出",
-        }
+        return route("normal_fallback", "数据面→freedom 直出", "AI 节点不可达，AI 流量回退到数据面直出", "普通数据面", [], "普通数据面 freedom 直出", "AI 回退", True)
 
     if dp_ok:
-        return {
-            "path": "normal_direct",
-            "label": "数据面→freedom 直出",
-            "scenario": "正常：流量经数据面直出",
-        }
+        return route("normal_direct", "数据面→freedom 直出", "正常：流量经数据面直出", "普通数据面", [], "普通数据面 freedom 直出", "正常")
 
-    return {
-        "path": "unknown",
-        "label": "状态未知",
-        "scenario": "节点状态待确认",
-    }
+    return route("unknown", "状态未知", "节点状态待确认", "入口未确认", [], "出口未确认", "未知", True)
 
 
 def build_tenant_dashboard_state(tenant_token, message="", level="info"):
@@ -487,6 +472,21 @@ def json_success_response(message="", level="success", status_code=200):
                 "message": message,
                 "level": level,
                 "dashboard": build_dashboard_state(message=message, level=level),
+            }
+        ),
+        status_code,
+    )
+
+
+def json_snapshot_success_response(message="", level="success", status_code=200):
+    """Return the current dashboard without running maintenance a second time."""
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "message": message,
+                "level": level,
+                "dashboard": collect_dashboard_state(message=message, level=level),
             }
         ),
         status_code,
@@ -617,7 +617,15 @@ def build_subscription_response(token, listen_port, output_format):
         content = build_clash_subscription_content(profile, listen_port, port["note"])
         content_type = "text/yaml; charset=utf-8"
 
-    return Response(content, content_type=content_type)
+    return Response(
+        content,
+        content_type=content_type,
+        headers={
+            "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 def build_port_token_subscription_response(subscription_token, output_format):
@@ -636,7 +644,15 @@ def build_port_token_subscription_response(subscription_token, output_format):
         content = build_clash_subscription_content(profile, port["listen_port"], port["note"])
         content_type = "text/yaml; charset=utf-8"
 
-    return Response(content, content_type=content_type)
+    return Response(
+        content,
+        content_type=content_type,
+        headers={
+            "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 def message_redirect(message, level):

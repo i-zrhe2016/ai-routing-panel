@@ -223,6 +223,45 @@ class TenantPanelTest(unittest.TestCase):
                 session["csrf_token"] = token
             return token
 
+    def test_port_api_create_returns_snapshot_without_second_maintenance_pass(self):
+        original_sync = self.panel.state.sync_traffic_state
+        sync_calls = []
+
+        def track_maintenance_pass():
+            sync_calls.append(True)
+            return original_sync()
+
+        self.panel.state.sync_traffic_state = track_maintenance_pass
+        response = self.client.post(
+            "/api/ports",
+            json={"listen_port": 31200, "traffic_limit": "10G", "note": "API create"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(sync_calls, [])
+        self.assertIn(31200, [port["listen_port"] for port in body["dashboard"]["ports"]])
+        self.assertEqual(
+            [port["listen_port"] for port in self.panel.state.query_ports()].count(31200),
+            1,
+        )
+
+    def test_port_api_duplicate_listen_port_returns_conflict(self):
+        self.create_port(31201, "Existing")
+
+        response = self.client.post(
+            "/api/ports",
+            json={"listen_port": 31201, "traffic_limit": "10G", "note": "Duplicate"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["message"], "监听端口已存在，请更换其他端口。")
+        self.assertEqual(
+            [port["listen_port"] for port in self.panel.state.query_ports()].count(31201),
+            1,
+        )
+
     def test_tenant_panel_login_is_isolated_per_port(self):
         port_a = self.create_port(31001, "Tenant A")
         port_b = self.create_port(31002, "Tenant B")

@@ -6,12 +6,14 @@ from ..errors import ValidationError
 from .core import (
     build_dashboard_state,
     json_error_response,
+    json_snapshot_success_response,
     json_success_response,
     request_payload,
     require_csrf,
     route,
     state,
 )
+from .sqlite_errors import is_listen_port_conflict
 
 
 @route("/api/dashboard", methods=["GET"])
@@ -137,11 +139,13 @@ def api_create_port():
     try:
         payload = state.validate_port_payload(request_payload())
         state.create_port(payload)
-        return json_success_response("端口已创建并写入 Xray。", status_code=201)
-    except sqlite3.IntegrityError:
-        return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
+    except sqlite3.IntegrityError as exc:
+        if is_listen_port_conflict(exc):
+            return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
+        raise
     except (ValidationError, RuntimeError) as exc:
         return json_error_response(str(exc), status_code=400)
+    return json_snapshot_success_response("端口已创建并写入 Xray。", status_code=201)
 
 
 @route("/api/ports/<int:port_id>", methods=["PUT"])
@@ -149,11 +153,13 @@ def api_update_port(port_id):
     try:
         payload = state.validate_port_payload(request_payload())
         state.update_port(port_id, payload)
-        return json_success_response("端口配置已更新。")
-    except sqlite3.IntegrityError:
-        return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
+    except sqlite3.IntegrityError as exc:
+        if is_listen_port_conflict(exc):
+            return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
+        raise
     except (ValidationError, RuntimeError) as exc:
         return json_error_response(str(exc), status_code=400)
+    return json_snapshot_success_response("端口配置已更新。")
 
 
 @route("/api/ports/<int:port_id>/toggle", methods=["POST"])

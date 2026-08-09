@@ -95,6 +95,10 @@ AI_NODE_CONFIG_OUT = Path(
 PANEL_HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))
 PANEL_PUBLIC_URL = os.environ.get("PANEL_PUBLIC_URL", "").strip().rstrip("/")
+PANEL_SUBSCRIPTION_PUBLIC_URL = (
+    os.environ.get("PANEL_SUBSCRIPTION_PUBLIC_URL", "").strip().rstrip("/")
+    or PANEL_PUBLIC_URL
+)
 PANEL_USERNAME = os.environ.get("PANEL_USERNAME", "")
 PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
 PANEL_SECRET_KEY = os.environ.get("PANEL_SECRET_KEY", "").strip()

@@ -14,6 +14,17 @@ export default {
     trafficRouting() {
       return this.panel.trafficRouting || {};
     },
+    trafficNodes() {
+      const route = this.trafficRouting;
+      const transit = Array.isArray(route.transit_nodes) ? route.transit_nodes : [];
+      const names = [route.entry_node || "入口未确认", ...transit, route.exit_node || "出口未确认"];
+      return names.map((name, index) => ({
+        role: index === 0 ? "入口" : (index === names.length - 1 ? "出口" : "中转"),
+        name,
+        icon: index === 0 ? "入口" : (index === names.length - 1 ? "出口" : "转发"),
+        active: route.path !== "unknown" && (route.waiting_for_switch ? index === 0 : true),
+      }));
+    },
     peak() {
       return this.dns.peak_window || {};
     },
@@ -145,31 +156,31 @@ export default {
     </div>
 
     <!-- Traffic routing flow -->
-    <div class="a-card">
-      <div class="a-card-head">
-        <p class="eyebrow">TRAFFIC ROUTING</p>
-        <h3>流量导向</h3>
-        <p>根据各节点状态自动决定流量路径，客户端 DNS 指向决定入口节点。</p>
+    <div class="a-card traffic-routing-card">
+      <div class="a-card-head traffic-routing-head">
+        <div>
+          <p class="eyebrow">TRAFFIC ROUTING</p>
+          <h3>流量导向</h3>
+          <p>按当前 DNS 入口、节点可达性和 AI 路由状态展示实际路径；虚线节点未参与本次路径。</p>
+        </div>
+        <span class="traffic-status" :class="trafficRouting.is_degraded ? (trafficRouting.waiting_for_switch ? 'warn' : 'bad') : 'ok'">
+          {{ trafficRouting.route_status || "未知" }}
+        </span>
       </div>
-      <div class="traffic-flow">
-        <div class="flow-step" :class="{ active: trafficRouting.path === 'normal_ai' || trafficRouting.path === 'normal_fallback' || trafficRouting.path === 'normal_direct' }">
-          <span class="flow-label">客户端</span>
-          <small>DNS → 数据面</small>
-        </div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step" :class="{ active: trafficRouting.path === 'normal_ai' }">
-          <span class="flow-label">AI 节点</span>
-          <small>AI 域名 → freedom 直出</small>
-        </div>
-        <div class="flow-arrow" :class="{ dim: trafficRouting.path !== 'normal_ai' }">→</div>
-        <div class="flow-step" :class="{ active: trafficRouting.path !== 'normal_ai' }">
-          <span class="flow-label">数据面直出</span>
-          <small>普通域名 / AI 回退</small>
-        </div>
+      <div class="traffic-path" :class="{ 'traffic-path-degraded': trafficRouting.is_degraded }" aria-label="当前流量路径">
+        <template v-for="(node, index) in trafficNodes" :key="`${node.role}-${index}`">
+          <div class="traffic-node" :class="{ active: node.active, muted: !node.active }">
+            <span class="traffic-node-icon" aria-hidden="true">{{ node.icon }}</span>
+            <strong>{{ node.role }}</strong>
+            <small>{{ node.name }}</small>
+            <em>{{ node.active ? "当前经过" : "未经过" }}</em>
+          </div>
+          <span v-if="index < trafficNodes.length - 1" class="traffic-connector" :class="{ active: node.active && trafficNodes[index + 1].active }" aria-hidden="true">→</span>
+        </template>
       </div>
       <div class="traffic-scenario">
-        <strong>{{ trafficRouting.label || "—" }}</strong>
-        <small>{{ trafficRouting.scenario || "" }}</small>
+        <strong>{{ trafficRouting.label || "状态未知" }}</strong>
+        <small>{{ trafficRouting.scenario || "节点状态待确认" }}</small>
       </div>
     </div>
 
@@ -335,12 +346,79 @@ export default {
   box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.5);
 }
 
-.traffic-flow {
+.traffic-routing-card {
+  overflow: hidden;
+}
+
+.traffic-routing-head {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 8px 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.traffic-status {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-text, #1f2937);
+  background: rgba(100, 116, 139, 0.12);
+}
+
+.traffic-status.ok { color: var(--c-success, #188038); background: rgba(24, 128, 56, 0.12); }
+.traffic-status.warn { color: var(--c-warning, #b06000); background: rgba(176, 96, 0, 0.12); }
+.traffic-status.bad { color: var(--c-danger, #d93025); background: rgba(217, 48, 37, 0.12); }
+
+.traffic-path {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 16px 2px 12px;
+}
+
+.traffic-node {
+  min-width: 142px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--c-primary, #1a73e8);
+  border-radius: var(--r-md, 8px);
+  background: rgba(26, 115, 232, 0.08);
+  color: var(--c-text, #1f2937);
+}
+
+.traffic-node.muted {
+  border-style: dashed;
+  border-color: rgba(100, 116, 139, 0.35);
+  background: rgba(100, 116, 139, 0.05);
+  opacity: 0.62;
+}
+
+.traffic-node-icon {
+  color: var(--c-primary, #1a73e8);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.traffic-node strong { font-size: 14px; }
+.traffic-node small, .traffic-node em { color: var(--c-text-muted, #64748b); font-size: 12px; font-style: normal; }
+.traffic-node em { color: var(--c-success, #188038); }
+.traffic-node.muted em { color: var(--c-text-muted, #64748b); }
+
+.traffic-connector {
+  align-self: center;
+  color: var(--c-text-muted, #94a3b8);
+  font-size: 22px;
+}
+
+.traffic-connector.active { color: var(--c-primary, #1a73e8); }
+
+.traffic-flow {
+  display: none;
 }
 
 .flow-step {

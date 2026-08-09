@@ -43,6 +43,35 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 
 > 不能仅凭容器内路径推断宿主机配置路径。必须通过 `docker inspect xray` 的 `Mounts[].Source` 确认真实 bind source。
 
+## AI 节点监控采集
+
+AI 节点的主机和容器指标由控制面 Prometheus 通过公网监控端口采集；这些端口只用于 Prometheus `/metrics`，不承载 Xray 业务流量。
+
+| 端点 | 服务 | 指标路径 | 采集目标 | 说明 |
+| --- | --- | --- | --- | --- |
+| `nat.qq.pw:27168` | Node Exporter | `/metrics` | `data-plane-node` | AI 节点 CPU、内存、磁盘、网络等主机指标 |
+| `nat.qq.pw:27169` | cAdvisor | `/metrics` | `data-plane-cadvisor` | Docker 容器 CPU、内存、网络和文件系统指标 |
+
+当前 AI 节点容器部署为：
+
+```text
+xray-node-exporter  → host network → :27168
+xray-cadvisor       → host network → :27169
+xray                → :27166（业务端口，不得修改）
+```
+
+部署或变更监控容器时，不得删除或重建 `xray` 业务容器。容器使用只读宿主机挂载；Node Exporter 使用宿主机 PID namespace，cAdvisor 使用 Docker、运行时和 sysfs 的只读挂载。
+
+从控制面验证采集链路：
+
+```bash
+curl -fsS http://nat.qq.pw:27168/metrics | grep '^node_cpu_seconds_total' | head
+curl -fsS http://nat.qq.pw:27169/metrics | grep '^container_cpu_usage_seconds_total' | head
+curl -fsS http://127.0.0.1:9090/api/v1/targets
+```
+
+Prometheus 中两个 AI targets 应为 `up`。Grafana 的 AI 主机面板按 `node_role="ai_data_plane"` 区分 AI 节点，容器面板按 `host="ai-data-plane"` 和 `name` 区分容器。生产环境应在 AI 节点防火墙中仅允许控制面访问 `27168/27169`，不要将监控端口用于公网开放服务。
+
 ## SSH 认证
 
 当前控制面使用专用 Ed25519 私钥访问 AI 节点，私钥只读挂载到容器：

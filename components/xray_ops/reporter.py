@@ -499,8 +499,11 @@ class ReporterService:
                     detail=str(exc)[:500],
                 )
             deadline = time.monotonic() + self.config.scheduler_interval_seconds
-            while not stopping and time.monotonic() < deadline:
-                time.sleep(min(1.0, deadline - time.monotonic()))
+            while not stopping:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(1.0, remaining))
 
 
 def _build_parser() -> argparse.ArgumentParser:

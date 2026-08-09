@@ -175,9 +175,10 @@ def current_request_host():
     return forwarded or request.host
 
 
-def external_url_for(endpoint, **values):
-    if PANEL_PUBLIC_URL:
-        return f"{PANEL_PUBLIC_URL}{url_for(endpoint, **values)}"
+def external_url_for(endpoint, base_url=None, **values):
+    public_url = PANEL_PUBLIC_URL if base_url is None else str(base_url).strip().rstrip("/")
+    if public_url:
+        return f"{public_url}{url_for(endpoint, **values)}"
     return f"{current_request_scheme()}://{current_request_host()}{url_for(endpoint, **values)}"
 
 

@@ -33,7 +33,9 @@
 
 > `traffic`/`connections` 为 counter，但“重置流量并启用”/配额恢复会清零累计值——这是合法的 counter reset，`rate()`/`increase()` 能正确处理。
 
-主机层 CPU/内存/磁盘/网络不在本端点内，按惯例由 node_exporter 提供：在面板主机与数据面主机各部署一份，数据面的 `:9100` 用防火墙限定只允许 Prometheus 源 IP（或走隧道）。
+- AI 节点监控端点：`nat.qq.pw:27168`（Node Exporter）和 `nat.qq.pw:27169`（cAdvisor）；业务端口仍为 `27166`，三者职责不可混用。
+- 控制面 Prometheus 的 `data-plane-node` 与 `data-plane-cadvisor` 两个 AI target 应显示 `up`；若出现 `timeout` 或 `connection refused`，先检查 AI 节点上的 `xray-node-exporter`、`xray-cadvisor` 容器和端口监听。
+
 
 Prometheus `scrape_config` 示例：
 
@@ -108,12 +110,15 @@ curl -X POST http://127.0.0.1:9090/-/reload
 - 达到流量上限的端口会自动停用
 - “重置流量并启用”会清零累计流量与当日流量，但不会清零连接数
 
-## 数据库备份与上传
+## 灾备归档与上传
 
-- `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`
-- 本地备份文件落在 `./backups`
-- 当 `DB_BACKUP_UPLOADER_ENABLED=1` 时，备份成功后会继续调用 `db-backup-uploader`
-- 上传成功后会尝试删除上一份备份的 npm 包版本，只保留最新一份上传记录
+- `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`，并生成一个包含配置文件的灾备归档
+- 本地 `.db` 和 `tar.gz` 备份文件均落在 `./backups`
+- 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env` 和 `app/xray/runtime`
+- Compose 还会在打包前通过严格只读 SSH 采集普通数据面（`64.186.224.96:22`）和 AI 数据面（`nat.qq.pw:27160`）的主配置，结果位于归档 `nodes/` 下
+- 远端采集默认是非必需的：节点失联不会丢弃控制面归档；要把两个数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
+- 当 `DB_BACKUP_UPLOADER_ENABLED=1` 时，归档成功后会继续调用 `db-backup-uploader`
+- npm 默认保留每一轮不可变版本（`DB_BACKUP_UPLOADER_PRUNE_REMOTE=0`），作为异地灾备上传通道，不承担快速恢复
 
 上传链路依赖：
 
@@ -125,7 +130,11 @@ curl -X POST http://127.0.0.1:9090/-/reload
 
 - 查看日志：`docker compose logs -f xray-routing-panel-db-backup`
 - 确认最新本地备份已生成到 `./backups`
+- 确认对应的 `*-disaster-*.tar.gz` 已生成，并检查其中 `backup-manifest.json` 的 `skippedExtraPaths`
+- 检查归档 `nodes/remote-node-collection.json`：两个节点 `status=ok` 且 `configCollected=true`；`.env` 缺失只会显示为文件级 `missing`
 - 确认 `./data/db-backup-uploader/upload-records.json` 是否已更新
+
+SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
 
 ## TCP 探针
 

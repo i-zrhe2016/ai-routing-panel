@@ -31,6 +31,7 @@ from .core import (
     state,
     tenant_panel_target,
 )
+from .sqlite_errors import is_listen_port_conflict
 
 
 @route("/login", methods=["GET", "POST"])
@@ -129,8 +130,10 @@ def create_port():
         payload = state.validate_port_payload(request.form)
         state.create_port(payload)
         return message_redirect("端口已创建并写入 Xray。", "success")
-    except sqlite3.IntegrityError:
-        return message_redirect("监听端口已存在，请更换其他端口。", "error")
+    except sqlite3.IntegrityError as exc:
+        if is_listen_port_conflict(exc):
+            return message_redirect("监听端口已存在，请更换其他端口。", "error")
+        raise
     except (ValidationError, RuntimeError) as exc:
         return message_redirect(str(exc), "error")
 
@@ -141,8 +144,10 @@ def update_port(port_id):
         payload = state.validate_port_payload(request.form)
         state.update_port(port_id, payload)
         return message_redirect("端口配置已更新。", "success")
-    except sqlite3.IntegrityError:
-        return message_redirect("监听端口已存在，请更换其他端口。", "error")
+    except sqlite3.IntegrityError as exc:
+        if is_listen_port_conflict(exc):
+            return message_redirect("监听端口已存在，请更换其他端口。", "error")
+        raise
     except (ValidationError, RuntimeError) as exc:
         return message_redirect(str(exc), "error")
 

@@ -4,6 +4,7 @@ metadata:
   name: xray-routing-panel-config
 data:
   PANEL_PUBLIC_URL: "http://your-node-or-domain:30080"
+  PANEL_SUBSCRIPTION_PUBLIC_URL: "https://sub.xray.zrhe2016.cc"
   DEFAULT_UPSTREAM_HOST: "127.0.0.1"
   DEFAULT_UPSTREAM_PORT: "443"
   SEED_LISTEN_PORT: "31098"
@@ -23,3 +24,11 @@ data:
   OPENAI_ALLOW_NO_KEY: "0"
   DB_BACKUP_KEEP_DAYS: "7"
   DB_BACKUP_PREFIX: "xray-routing-panel"
+  DB_BACKUP_BUNDLE_ENABLED: "1"
+  DB_BACKUP_BUNDLE_DIR: "/backups"
+  DB_BACKUP_BUNDLE_KEEP_DAYS: "7"
+  DB_BACKUP_BUNDLE_PREFIX: "xray-routing-panel"
+  DB_BACKUP_EXTRA_PATHS: "/app/xray/runtime"
+  DB_BACKUP_SSH_COLLECTION_ENABLED: "0"
+  DB_BACKUP_SSH_COLLECTION_REQUIRED: "0"
+  DB_BACKUP_UPLOADER_PRUNE_REMOTE: "0"

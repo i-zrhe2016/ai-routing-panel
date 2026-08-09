@@ -1,15 +1,41 @@
-# 数据库备份上传组件
+# 灾备归档上传组件（npm 分片通道）
 
-`db-backup-uploader` 是仓库内负责数据库备份归档的独立组件。它基于上游
-`npm-uploader` 改造，职责固定为接收 `panel.db` 备份、使用 `AES-256-GCM` 加密、切片、
-发布为 npm 包，并支持从本地分片或 npm registry 恢复原文件。
+`db-backup-uploader` 是仓库内负责灾备归档上传的独立组件。它基于上游
+`npm-uploader` 改造，接收数据库快照或 `scripts/build_backup_bundle.py` 生成的配置归档，使用
+`AES-256-GCM` 加密、切片、发布为 npm 包，并支持在灾难阶段从本地分片或 npm registry 恢复原文件。
+
+自动备份默认上传灾备归档，而不是只上传裸 `panel.db`。npm 在这里是低频、异地、离线恢复通道，不参与快速恢复或故障切换；归档流程与组件边界见[灾备归档与 npm 上传通道](disaster-backup.md)。
+
+## 真实发布前检查
+
+真实 npm 发布前必须同时满足：
+
+1. `DB_BACKUP_UPLOADER_ENABLED=1`；
+2. `DB_BACKUP_UPLOADER_PASSWORD` 已设置为独立、随机且可长期保管的灾备密码；
+3. `DB_BACKUP_UPLOADER_SCOPE` 是当前 npm 账号可发布的 scope；
+4. `data/db-backup-uploader/.npmrc` 存在且权限为 `0600`；
+5. `DB_BACKUP_UPLOADER_PRUNE_REMOTE=0`，保留不可变历史版本；
+6. 先使用 `npm whoami` 和 `DB_BACKUP_UPLOADER_DRY_RUN=1` 验证，再执行真实发布。
+
+示例（不把 token 写入仓库或 `.env`）：
+
+```bash
+npm whoami \
+  --registry=https://registry.npmjs.org \
+  --userconfig=/root/xray-routing-panel/data/db-backup-uploader/.npmrc
+chmod 600 /root/xray-routing-panel/data/db-backup-uploader/.npmrc
+```
+
+`DB_BACKUP_UPLOADER_PASSWORD` 不是 npm token；前者用于解密灾备归档，后者仅用于 npm 身份认证。任何曾经出现在终端记录、聊天记录或日志中的 token 都应在 npm 后台撤销并重新生成。
 
 ## 在本项目中的使用
 
 自动模式由 `xray-routing-panel-db-backup` 容器中的 cron 每天触发：
 
 1. `scripts/backup_db.py` 生成新的 `.db` 备份。
-2. `scripts/run_db_backup_cycle.py` 调用本组件上传该备份。
+2. `scripts/collect_remote_backup.py`（启用时）通过严格只读 SSH 采集两个数据面的实际配置。
+3. `scripts/build_backup_bundle.py` 将数据库、控制面 `DB_BACKUP_EXTRA_PATHS` 和 `nodes/` staging 合并成加密前的灾备归档。
+4. `scripts/run_db_backup_cycle.py` 调用本组件上传该归档。
 
 也可以手动执行：
 
@@ -31,15 +57,20 @@ docker compose run --rm \
 
 项目运行时的默认目录：
 
-- 输入备份：由 `scripts/run_db_backup_cycle.py` 指定单个文件路径
+- 输入备份：由 `scripts/run_db_backup_cycle.py` 指定单个灾备归档路径
 - 分片目录：`/db-backup-uploader-data/shards`
 - 恢复目录：`/db-backup-uploader-data/restored`
 - 上传记录：`/db-backup-uploader-data/upload-records.json`
 
-关键配置为 `DB_BACKUP_UPLOADER_ENABLED`、`DB_BACKUP_UPLOADER_PASSWORD`、
+关键配置为 `DB_BACKUP_BUNDLE_ENABLED`、`DB_BACKUP_EXTRA_PATHS`、
+`DB_BACKUP_UPLOADER_ENABLED`、`DB_BACKUP_UPLOADER_PASSWORD`、
 `DB_BACKUP_UPLOADER_SCOPE`、`DB_BACKUP_UPLOADER_PACKAGE_VERSION`、
 `DB_BACKUP_UPLOADER_DRY_RUN` 和 `DB_BACKUP_UPLOADER_NPMRC_PATH`。真实发布通常需要在
 `data/db-backup-uploader/.npmrc` 中放置 npm 认证配置。
+
+灾备模式还会使用 `DB_BACKUP_UPLOADER_RECORD_HISTORY_LIMIT`（默认 `20`）保存有限的本地版本索引；它不改变 npm 远端版本保留策略。
+
+自动任务还会设置 `PRUNE_REMOTE_UPLOADS=0`，因此不会删除 npm 上一轮的不可变版本；如需旧的 latest-only 行为，必须显式设置 `DB_BACKUP_UPLOADER_PRUNE_REMOTE=1`。
 
 源码：[`components/db-backup-uploader/shard-upload.js`](../components/db-backup-uploader/shard-upload.js)、
 [`components/db-backup-uploader/shard-restore.js`](../components/db-backup-uploader/shard-restore.js)。

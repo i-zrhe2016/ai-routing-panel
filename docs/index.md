@@ -13,7 +13,7 @@
 7. [AI 路由](ai-routing.md) / [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)：理解 AI 流量链路并执行分层排障。
 8. [DNS 故障切换](dns-failover.md) → [三节点故障容错](fault-tolerance.md)：配置切换机制、备用 Xray 和验收边界。
 9. [Prometheus-only 运维分析](ops-reporting/index.md)：部署观测组件、生成日报、灰度发布和回滚。
-10. [面板迁移](panel-migration.md) / [数据库备份上传](db-backup-uploader.md)：迁移、备份和恢复。
+10. [面板迁移](panel-migration.md) / [灾备归档](disaster-backup.md) / [远端节点配置采集](remote-node-backup.md) / [数据库备份上传](db-backup-uploader.md)：迁移、备份和灾难阶段恢复。
 
 ## 开始使用
 
@@ -42,7 +42,9 @@
 ## AI 路由与备份
 
 - [AI 路由](ai-routing.md) — 域名分类、动态规则、AI 上游选择和回退。
-- [数据库备份上传](db-backup-uploader.md) — 加密、切片、发布和恢复。
+- [灾备归档与 npm 上传通道](disaster-backup.md) — 配置文件等额外内容的归档、npm 异地保留和离线恢复边界。
+- [远端节点配置采集](remote-node-backup.md) — 通过严格只读 SSH 采集两个数据面的实际配置。
+- [数据库备份上传](db-backup-uploader.md) — 加密、切片、发布和灾难阶段恢复。
 
 ## Prometheus-only 运维分析
 

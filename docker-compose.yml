@@ -14,6 +14,7 @@ services:
       PANEL_PORT: "18080"
       PANEL_HOST: "127.0.0.1"
       PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-https://xray.zrhe2016.cc}"
+      PANEL_SUBSCRIPTION_PUBLIC_URL: "${PANEL_SUBSCRIPTION_PUBLIC_URL:-https://sub.xray.zrhe2016.cc}"
       DEFAULT_UPSTREAM_HOST: "127.0.0.1"
       DEFAULT_UPSTREAM_PORT: "443"
       SEED_LISTEN_PORT: "31098"
@@ -102,6 +103,35 @@ services:
       DB_BACKUP_DIR: "/backups"
       DB_BACKUP_KEEP_DAYS: "7"
       DB_BACKUP_PREFIX: "xray-routing-panel"
+      DB_BACKUP_OPS_DB_PATH: "${DB_BACKUP_OPS_DB_PATH:-/ops-data/ops.db}"
+      # The bundle is an encrypted, offline disaster-recovery archive.  Keep
+      # the rendered Xray environment/configuration beside the database.
+      DB_BACKUP_BUNDLE_ENABLED: "${DB_BACKUP_BUNDLE_ENABLED:-1}"
+      DB_BACKUP_BUNDLE_DIR: "${DB_BACKUP_BUNDLE_DIR:-/backups}"
+      DB_BACKUP_BUNDLE_KEEP_DAYS: "${DB_BACKUP_BUNDLE_KEEP_DAYS:-7}"
+      DB_BACKUP_BUNDLE_PREFIX: "${DB_BACKUP_BUNDLE_PREFIX:-xray-routing-panel}"
+      DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/k8s,/project/app/xray/.env,/project/app/xray/runtime,/project/scripts,/project/components/db-backup-uploader/package.json}"
+      # Read the actual normal/AI node files over SSH before bundling.  The AI
+      # NAT entry is intentionally explicit: production SSH is on port 27160.
+      DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-1}"
+      DB_BACKUP_SSH_COLLECTION_REQUIRED: "${DB_BACKUP_SSH_COLLECTION_REQUIRED:-0}"
+      DB_BACKUP_SSH_KEY_PATH: "${DB_BACKUP_SSH_KEY_PATH:-/run/secrets/fleet_ssh_key}"
+      DB_BACKUP_SSH_KNOWN_HOSTS: "${DB_BACKUP_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      DB_BACKUP_SSH_OPTIONS: "${DB_BACKUP_SSH_OPTIONS:-}"
+      DB_BACKUP_SSH_TIMEOUT_SECONDS: "${DB_BACKUP_SSH_TIMEOUT_SECONDS:-20}"
+      DB_BACKUP_SSH_MAX_FILE_BYTES: "${DB_BACKUP_SSH_MAX_FILE_BYTES:-5242880}"
+      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-root@64.186.224.96}"
+      DB_BACKUP_DATAPLANE_SSH_PORT: "${DB_BACKUP_DATAPLANE_SSH_PORT:-22}"
+      DB_BACKUP_DATAPLANE_KNOWN_HOSTS: "${DB_BACKUP_DATAPLANE_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      DB_BACKUP_DATAPLANE_SSH_OPTIONS: "${DB_BACKUP_DATAPLANE_SSH_OPTIONS:-}"
+      DB_BACKUP_DATAPLANE_CONFIG_PATH: "${DB_BACKUP_DATAPLANE_CONFIG_PATH:-}"
+      DB_BACKUP_DATAPLANE_REMOTE_PATHS: "${DB_BACKUP_DATAPLANE_REMOTE_PATHS:-/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env}"
+      DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET:-root@nat.qq.pw}"
+      DB_BACKUP_AI_NODE_SSH_PORT: "${DB_BACKUP_AI_NODE_SSH_PORT:-27160}"
+      DB_BACKUP_AI_NODE_KNOWN_HOSTS: "${DB_BACKUP_AI_NODE_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
+      DB_BACKUP_AI_NODE_SSH_OPTIONS: "${DB_BACKUP_AI_NODE_SSH_OPTIONS:-}"
+      DB_BACKUP_AI_NODE_CONFIG_PATH: "${DB_BACKUP_AI_NODE_CONFIG_PATH:-}"
+      DB_BACKUP_AI_NODE_REMOTE_PATHS: "${DB_BACKUP_AI_NODE_REMOTE_PATHS:-/etc/xray/config.json,/etc/xray/.env}"
       DB_BACKUP_CRON_SCHEDULE: "0 3 * * *"
       DB_BACKUP_UPLOADER_ENABLED: "${DB_BACKUP_UPLOADER_ENABLED:-0}"
       DB_BACKUP_UPLOADER_DATA_DIR: "/db-backup-uploader-data"
@@ -121,13 +151,22 @@ services:
       DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES: "${DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES:-5242880}"
       DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY: "${DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY:-2}"
       DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS: "${DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS:-600000}"
+      # Do not remove immutable npm versions: npm is the long-term disaster
+      # recovery channel, not a fast restore cache.
+      DB_BACKUP_UPLOADER_PRUNE_REMOTE: "${DB_BACKUP_UPLOADER_PRUNE_REMOTE:-0}"
       DB_BACKUP_UPLOADER_OTP: "${DB_BACKUP_UPLOADER_OTP:-}"
       DB_BACKUP_UPLOADER_DRY_RUN: "${DB_BACKUP_UPLOADER_DRY_RUN:-0}"
       DB_BACKUP_UPLOADER_NPMRC_PATH: "${DB_BACKUP_UPLOADER_NPMRC_PATH:-/db-backup-uploader-data/.npmrc}"
     volumes:
       - ./data:/data
       - ./backups:/backups
+      - ./app/xray:/app/xray:ro
+      - ./:/project:ro
+      - /srv/xray-ops:/ops-data:ro
       - ./data/db-backup-uploader:/db-backup-uploader-data
+      - /root/ssh-keys/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
+      - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+      - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - ./logs:/var/log
   xray-reality:
     profiles: ["xray"]

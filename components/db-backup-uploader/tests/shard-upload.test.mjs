@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.DRY_RUN = '1';
+delete process.env.PRUNE_REMOTE_UPLOADS;
 
 const moduleUrl = new URL(`../shard-upload.js?test=${Date.now()}`, import.meta.url).href;
 const {

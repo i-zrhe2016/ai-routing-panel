@@ -14,13 +14,21 @@ spec:
           nodeSelector:
             xray-routing-panel/node: "true"
           restartPolicy: OnFailure
+          initContainers:
+            - name: ensure-backup-runtime
+              image: ghcr.io/your-org/xray-routing-panel:latest
+              imagePullPolicy: IfNotPresent
+              command: ["sh", "-c", "mkdir -p /shared-storage/runtime"]
+              volumeMounts:
+                - name: shared-storage
+                  mountPath: /shared-storage
           containers:
             - name: backup
               image: ghcr.io/your-org/xray-routing-panel:latest
               imagePullPolicy: IfNotPresent
               command:
                 - python3
-                - /app/scripts/backup_db.py
+                - /app/scripts/run_db_backup_cycle.py
               envFrom:
                 - configMapRef:
                     name: xray-routing-panel-config
@@ -36,6 +44,9 @@ spec:
                 - name: shared-storage
                   mountPath: /backups
                   subPath: backups
+                - name: shared-storage
+                  mountPath: /app/xray/runtime
+                  subPath: runtime
           volumes:
             - name: shared-storage
               persistentVolumeClaim:

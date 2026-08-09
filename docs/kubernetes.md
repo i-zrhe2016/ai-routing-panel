@@ -85,6 +85,48 @@ kubectl apply -k k8s
 
 只执行与你当前阶段对应的那一条。
 
+## 备份 CronJob 与灾备归档
+
+三个阶段的 `cronjob-backup.yaml` 都执行 `scripts/run_db_backup_cycle.py`，而不是只执行数据库快照脚本。任务会在共享 PVC 的 `backups/` 下生成 `.db` 和 `*-disaster-*.tar.gz`；默认把共享卷的 `/app/xray/runtime` 纳入归档。
+
+Kubernetes 清单默认不启用远端 SSH 采集（`DB_BACKUP_SSH_COLLECTION_ENABLED` 未设置时脚本默认 `0`），因为仓库不能携带生产私钥和 known_hosts。若需要把普通数据面和 AI 数据面的实际配置也纳入灾备，按以下最小边界扩展备份 CronJob：
+
+1. 创建只包含 fleet 私钥的 Secret，并创建只包含已核验主机指纹的 Secret；两个 Secret 都只挂载到备份容器、使用 `readOnly: true`。
+2. 在备份容器加入 `/run/secrets/fleet_ssh_key`、`/root/.ssh/known_hosts` 和 `/root/.ssh/known_hosts_ai` 三个挂载。
+3. 通过 Secret 或受控的环境注入设置 `DB_BACKUP_SSH_COLLECTION_ENABLED=1`、两个 SSH target/port/path；普通数据面默认端口 22，AI 数据面生产端口为 27160。
+4. 先保持 `DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 观察 `nodes/remote-node-collection.json`，确认两个节点 `configCollected=true` 后，再按发布门禁需要改为 `1`。
+
+示例（内容值仅为占位符，不要提交真实 key）：
+
+```yaml
+volumes:
+  - name: fleet-ssh-key
+    secret:
+      secretName: xray-fleet-ssh
+      defaultMode: 0600
+  - name: fleet-known-hosts
+    secret:
+      secretName: xray-fleet-known-hosts
+      defaultMode: 0600
+volumeMounts:
+  - name: fleet-ssh-key
+    mountPath: /run/secrets/fleet_ssh_key
+    subPath: fleet_ssh_key
+    readOnly: true
+  - name: fleet-known-hosts
+    mountPath: /root/.ssh/known_hosts
+    subPath: known_hosts
+    readOnly: true
+  - name: fleet-known-hosts
+    mountPath: /root/.ssh/known_hosts_ai
+    subPath: known_hosts_ai
+    readOnly: true
+```
+
+不要把 `nat.qq.pw:27160` 误当成 Xray 业务端口以外的默认 SSH 22；本项目生产 AI NAT 入口已实测为 SSH 27160。完整采集器安全边界见[远端节点配置采集](remote-node-backup.md)。
+
+如需把 `xray.env`、npm `.npmrc` 或其他项目文件加入归档，应通过 Secret/只读挂载提供文件，再在对应 ConfigMap 设置 `DB_BACKUP_EXTRA_PATHS`。不要把 npm 密码直接写进 ConfigMap。npm 上传仍需显式设置 `DB_BACKUP_UPLOADER_ENABLED=1`、加密密码和认证文件；任务默认 `DB_BACKUP_UPLOADER_PRUNE_REMOTE=0`，保留 registry 上的历史版本作为异地灾备，不参与快速恢复。
+
 ## 验证
 
 ```bash
