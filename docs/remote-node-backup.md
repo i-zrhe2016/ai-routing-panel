@@ -14,7 +14,7 @@
 - 远端进程不写文件、不修改权限、不执行 `systemctl`/`docker restart`，也不会上传或替换配置。
 - 内容以 Base64 返回，控制面重新计算 SHA-256 后才落入临时 staging 目录。
 - staging 文件和 `remote-node-collection.json` 使用 `0600`；临时 SSH 私钥副本同样为 `0600`，任务结束后清理。
-- 私钥、`.npmrc` 和密码不会写入归档。配置文件在本地打包前是明文，备份目录必须限制为备份服务可读。
+- 私钥、`Docker Secret` 和密码不会写入归档。配置文件在本地打包前是明文，备份目录必须限制为备份服务可读。
 
 ## 三个节点的配置来源
 
@@ -52,7 +52,7 @@ backup-manifest.json
 - `DB_BACKUP_SSH_OPTIONS` 以及节点级 options 只允许无边界风险的网络/日志选项（`-4`、`-6`、`-q`/`-v` 和连接超时/keepalive）；身份、known_hosts、代理和远端命令选项会被拒绝。
 - `/root/ssh-keys` 中的密钥文件如果权限过宽，采集器会复制到任务临时目录并改为 `0600`，避免 OpenSSH 拒绝使用；不会修改源密钥权限。
 
-不要把 root 密码、私钥内容或 npm token 放在环境变量、日志、Markdown 或归档中。AI 节点当前能够使用统一 fleet 公钥；密码只作为人工应急登录手段，不是自动备份路径。
+不要把 root 密码、私钥内容或 R2 Secret Access Key 放在环境变量、日志、Markdown 或归档中。AI 节点当前能够使用统一 fleet 公钥；密码只作为人工应急登录手段，不是自动备份路径。
 
 ## 开关与失败策略
 
@@ -108,4 +108,4 @@ python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-stagi
 4. `partial`：查看文件级 status；主配置缺失时不要把 `.env` 采集成功误判为完整配置。
 5. `too_large`：提高 `DB_BACKUP_SSH_MAX_FILE_BYTES` 前先确认该文件确实属于灾备范围，并评估归档和 npm 分片成本。
 
-SSH 采集失败不会触发节点重启、配置回滚或 DNS 切换；这些是独立运维流程。npm 上传仍只是加密后的异地灾备通道，不承担快速恢复。
+SSH 采集失败不会触发节点重启、配置回滚或 DNS 切换；这些是独立运维流程。R2 上传仍只是加密后的异地灾备通道，不承担快速恢复。

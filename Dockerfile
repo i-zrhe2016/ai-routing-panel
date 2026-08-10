@@ -13,15 +13,12 @@ RUN cd frontend && npm run build
 FROM debian:bookworm-slim
 
 # Runtime deps. python3-pip replaces the apt python3-flask package (the Python
-# deps are now pinned in requirements.txt and installed with pip). nodejs/npm
-# stay because the db-backup service shares this image and runs a Node uploader.
+# deps are pinned in requirements.txt and installed with pip).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         cron \
         ca-certificates \
         docker.io \
-        nodejs \
-        npm \
         python3 \
         python3-pip \
         openssh-client \

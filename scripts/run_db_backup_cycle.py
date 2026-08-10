@@ -1,137 +1,29 @@
 #!/usr/bin/env python3
 import os
-import re
 import sqlite3
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 try:
     from build_backup_bundle import create_backup_bundle, parse_extra_paths, prune_bundles
     from collect_remote_backup import collect_remote_configs
-except ModuleNotFoundError:  # Imported by the repository test suite.
+    from upload_backup_r2 import encrypt_bundle, upload_bundle
+except ModuleNotFoundError:
     from scripts.build_backup_bundle import create_backup_bundle, parse_extra_paths, prune_bundles
     from scripts.collect_remote_backup import collect_remote_configs
+    from scripts.upload_backup_r2 import encrypt_bundle, upload_bundle
 
 
 ROOT = Path(__file__).resolve().parent.parent
 BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.py"
-UPLOAD_SCRIPT = ROOT / "components" / "db-backup-uploader" / "shard-upload.js"
-DEFAULT_PASSWORD = "your-strong-password-here-123456"
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def env_enabled(name, default="0"):
     raw = str(os.environ.get(name, default)).strip().lower()
     return raw in TRUE_VALUES
-
-
-def sanitize_name(value):
-    sanitized = re.sub(r"[^a-z0-9._-]+", "-", str(value or "").strip().lower())
-    sanitized = re.sub(r"-{2,}", "-", sanitized).strip("-")
-    return sanitized or "db-backup"
-
-
-def build_artifact_name(file_path=None):
-    configured = str(os.environ.get("DB_BACKUP_UPLOADER_ARTIFACT_NAME", "")).strip()
-    if configured:
-        return sanitize_name(configured)
-    prefix = os.environ.get("DB_BACKUP_PREFIX", "xray-routing-panel")
-    suffix = "db-backup"
-    if file_path and Path(file_path).suffixes[-2:] == [".tar", ".gz"]:
-        suffix = "disaster-backup"
-    return f"{sanitize_name(prefix)}-{suffix}"
-
-
-def build_package_version(backup_path):
-    configured = str(os.environ.get("DB_BACKUP_UPLOADER_PACKAGE_VERSION", "")).strip()
-    if configured:
-        return configured
-
-    match = re.search(r"(\d{8})T(\d{6})Z", backup_path.name)
-    if match:
-        date_part, time_part = match.groups()
-    else:
-        now = datetime.now(timezone.utc)
-        date_part = now.strftime("%Y%m%d")
-        time_part = now.strftime("%H%M%S")
-    return f"{int(date_part)}.{int(time_part)}.0"
-
-
-def ensure_upload_password():
-    password = str(os.environ.get("DB_BACKUP_UPLOADER_PASSWORD", "")).strip()
-    if not password:
-        raise RuntimeError("DB_BACKUP_UPLOADER_PASSWORD is required when backup upload is enabled.")
-    if password == DEFAULT_PASSWORD:
-        raise RuntimeError("DB_BACKUP_UPLOADER_PASSWORD must not use the upstream placeholder password.")
-    return password
-
-
-def build_upload_env(password):
-    data_dir = Path(os.environ.get("DB_BACKUP_UPLOADER_DATA_DIR", "/db-backup-uploader-data"))
-    files_dir = Path(os.environ.get("DB_BACKUP_UPLOADER_FILES_DIR", str(data_dir / "files")))
-    shards_dir = Path(os.environ.get("DB_BACKUP_UPLOADER_SHARDS_DIR", str(data_dir / "shards")))
-    restored_dir = Path(
-        os.environ.get("DB_BACKUP_UPLOADER_RESTORED_DIR", str(data_dir / "restored"))
-    )
-    record_path = Path(
-        os.environ.get("DB_BACKUP_UPLOADER_RECORD_PATH", str(data_dir / "upload-records.json"))
-    )
-
-    for directory in [data_dir, files_dir, shards_dir, restored_dir, record_path.parent]:
-        directory.mkdir(parents=True, exist_ok=True)
-
-    env = os.environ.copy()
-    env["SHARD_PASSWORD"] = password
-    env["FILES_DIR"] = str(files_dir)
-    env["SHARDS_DIR"] = str(shards_dir)
-    env["OUTPUT_DIR"] = str(restored_dir)
-    env["UPLOAD_RECORD_PATH"] = str(record_path)
-    env["UPLOAD_RECORD_HISTORY_LIMIT"] = str(
-        os.environ.get("DB_BACKUP_UPLOADER_RECORD_HISTORY_LIMIT", "20")
-    )
-    env["NPM_SCOPE"] = str(os.environ.get("DB_BACKUP_UPLOADER_SCOPE", "")).strip()
-    env["NPM_ACCESS"] = str(os.environ.get("DB_BACKUP_UPLOADER_ACCESS", "public")).strip() or "public"
-    env["NPM_PACKAGE_VERSION"] = str(os.environ.get("DB_BACKUP_UPLOADER_PACKAGE_VERSION", "")).strip()
-    env["NPM_REGISTRY"] = str(
-        os.environ.get("DB_BACKUP_UPLOADER_REGISTRY", "https://registry.npmjs.org")
-    ).strip()
-    env["NPM_WEB_BASE"] = str(
-        os.environ.get("DB_BACKUP_UPLOADER_NPM_WEB_BASE", "https://www.npmjs.com/package")
-    ).strip()
-    env["NPM_TAG"] = str(os.environ.get("DB_BACKUP_UPLOADER_TAG", "latest")).strip() or "latest"
-    env["NPM_PUBLISH_OTP"] = str(os.environ.get("DB_BACKUP_UPLOADER_OTP", "")).strip()
-    env["PUBLISH_CONCURRENCY"] = str(
-        os.environ.get("DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY", "2")
-    )
-    env["NPM_PUBLISH_TIMEOUT_MS"] = str(
-        os.environ.get("DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS", "600000")
-    )
-    # npm is the long-term disaster-recovery channel.  Keep immutable package
-    # versions by default; local retention is handled by DB_BACKUP_KEEP_DAYS.
-    env["PRUNE_REMOTE_UPLOADS"] = "1" if env_enabled(
-        "DB_BACKUP_UPLOADER_PRUNE_REMOTE", "0"
-    ) else "0"
-    env["SHARD_SIZE_BYTES"] = str(
-        os.environ.get("DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES", str(5 * 1024 * 1024))
-    )
-    env["DRY_RUN"] = "1" if env_enabled("DB_BACKUP_UPLOADER_DRY_RUN") else "0"
-
-    npmrc_path = str(
-        os.environ.get("DB_BACKUP_UPLOADER_NPMRC_PATH", str(data_dir / ".npmrc"))
-    ).strip()
-    if npmrc_path and Path(npmrc_path).exists():
-        env["NPM_CONFIG_USERCONFIG"] = npmrc_path
-    elif npmrc_path and not env_enabled("DB_BACKUP_UPLOADER_DRY_RUN"):
-        print(
-            f"[upload] npmrc not found at {npmrc_path}; relying on existing npm auth config.",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    return env
 
 
 def run_backup():
@@ -167,30 +59,6 @@ def run_backup():
         return 0, backup_path
     finally:
         path_file.unlink(missing_ok=True)
-
-
-def run_upload(backup_path):
-    password = ensure_upload_password()
-    artifact_name = build_artifact_name(backup_path)
-    package_version = build_package_version(backup_path)
-    env = build_upload_env(password)
-    env["NPM_PACKAGE_VERSION"] = package_version
-
-    command = [
-        "node",
-        str(UPLOAD_SCRIPT),
-        "--file",
-        str(backup_path),
-        "--artifact",
-        artifact_name,
-        "--version",
-        package_version,
-    ]
-
-    print(f"[upload] processing {backup_path}", flush=True)
-    print(f"[upload] artifact={artifact_name} version={package_version}", flush=True)
-    completed = subprocess.run(command, cwd=str(ROOT), env=env, check=False)
-    return completed.returncode
 
 
 def bundle_enabled():
@@ -287,11 +155,19 @@ def main():
                 flush=True,
             )
 
-        if not env_enabled("DB_BACKUP_UPLOADER_ENABLED"):
-            print("[upload] skipped: DB_BACKUP_UPLOADER_ENABLED is disabled.", flush=True)
+        if not env_enabled("DB_BACKUP_R2_ENABLED"):
+            print("[backup:r2] skipped: DB_BACKUP_R2_ENABLED is disabled.", flush=True)
             return 0
 
-        return run_upload(upload_path)
+        record_path = os.environ.get(
+            "DB_BACKUP_R2_RECORD_PATH", "/backups/r2-upload-record.json"
+        )
+        encrypted_path = encrypt_bundle(upload_path)
+        try:
+            upload_bundle(encrypted_path, record_path=record_path)
+        finally:
+            encrypted_path.unlink(missing_ok=True)
+        return 0
 
 
 if __name__ == "__main__":

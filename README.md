@@ -12,7 +12,7 @@
 - 识别 AI 域名并将相关流量转发到独立 AI 数据面，故障时自动回退。
 - 通过 Cloudflare DNS API 实现普通数据面故障切换和自动回切。
 - 使用 Prometheus、Grafana、Node Exporter 和 cAdvisor 提供可观测性与日报。
-- 定时备份 `panel.db` 及配置文件等内容，生成加密灾备归档；可选通过 npm 做异地上传，恢复只在灾难阶段人工执行。
+- 定时备份 `panel.db` 及配置文件等内容，生成 AES-256-GCM 加密灾备归档；可选通过 Cloudflare R2 做异地保存，恢复只在灾难阶段人工执行。
 
 ## 架构概览
 
@@ -27,7 +27,7 @@
 | AI 数据面 | 接收 AI 流量并独立出站，不执行域名分类或控制面逻辑 |
 | `xray-ai-domain-manager` | 从访问日志生成 AI 域名路由产物和统计 |
 | `xray-reality-backup` | 普通数据面故障时提供备用入口 |
-| `db-backup-uploader` | 加密、切片、发布和灾难阶段恢复备份归档 |
+| `upload_backup_r2.py` | 使用 AES-256-GCM 加密灾备归档并通过 R2 S3 API 上传 |
 
 ## 快速开始
 
@@ -75,15 +75,19 @@ docker compose --profile backup-xray up -d xray-reality-backup
 
 更多模式和排障命令见[开发与启动](docs/development.md)和[运维与排障](docs/operations.md)。
 
-启用配置归档并通过 npm 保存异地灾备版本（不用于快速恢复）：
+启用配置归档并通过 Cloudflare R2 保存异地灾备版本（不用于快速恢复）：
 
 ```bash
-DB_BACKUP_UPLOADER_ENABLED=1 \
-DB_BACKUP_UPLOADER_PASSWORD='replace-with-a-random-secret' \
+DB_BACKUP_R2_ENABLED=1 \
+DB_BACKUP_R2_ENDPOINT='https://<account-id>.r2.cloudflarestorage.com' \
+DB_BACKUP_R2_BUCKET='xray-routing-panel-disaster' \
+DB_BACKUP_R2_ACCESS_KEY_ID='replace-with-access-key' \
+DB_BACKUP_R2_SECRET_ACCESS_KEY='replace-with-secret-key' \
+DB_BACKUP_ENCRYPTION_PASSWORD='separate-archive-password' \
 docker compose up -d --build xray-routing-panel-db-backup
 ```
 
-控制面额外文件通过 `DB_BACKUP_EXTRA_PATHS` 配置，普通/AI 数据面实际配置由只读 SSH 采集；完整边界见[灾备归档与 npm 上传通道](docs/disaster-backup.md)和[远端节点配置采集](docs/remote-node-backup.md)。
+控制面额外文件通过 `DB_BACKUP_EXTRA_PATHS` 配置，普通/AI 数据面实际配置由只读 SSH 采集；完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)和[远端节点配置采集](docs/remote-node-backup.md)。
 
 ### 默认访问地址
 
@@ -111,7 +115,7 @@ docker compose up -d --build xray-routing-panel-db-backup
 | 排查 ChatGPT/OpenAI 路由 | [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) |
 | 配置故障切换 | [DNS 故障切换](docs/dns-failover.md) → [三节点容错](docs/fault-tolerance.md) |
 | 监控节点和生成日报 | [Prometheus-only 运维分析](docs/ops-reporting/index.md) |
-| 迁移或灾难恢复 | [面板迁移](docs/panel-migration.md) → [灾备归档](docs/disaster-backup.md) → [远端节点配置采集](docs/remote-node-backup.md) → [数据库备份上传](docs/db-backup-uploader.md) |
+| 迁移或灾难恢复 | [面板迁移](docs/panel-migration.md) → [灾备归档](docs/disaster-backup.md) → [远端节点配置采集](docs/remote-node-backup.md) |
 
 ## 开发与验证
 
@@ -167,9 +171,9 @@ npm test
 ### AI 路由与备份
 
 - [AI 路由](docs/ai-routing.md) — 域名分类、动态规则、AI 上游选择和故障回退。
-- [灾备归档与 npm 上传通道](docs/disaster-backup.md) — 配置文件等额外内容的归档、npm 异地保留和离线恢复边界。
+- [灾备归档与 R2 上传通道](docs/disaster-backup.md) — 配置文件等额外内容的归档、R2 异地保留和离线恢复边界。
 - [远端节点配置采集](docs/remote-node-backup.md) — 通过严格只读 SSH 采集普通数据面和 AI 数据面的实际配置。
-- [数据库备份上传](docs/db-backup-uploader.md) — 加密、切片、npm 发布和灾难阶段恢复。
+- [Cloudflare R2 灾备上传](docs/db-backup-uploader.md) — 加密上传、对象命名、安全边界和人工恢复。
 
 ### Prometheus-only 运维分析
 

@@ -12,7 +12,7 @@
 - 基于公网 TCP 探测和 Cloudflare API 做单记录 DNS 故障切换，并支持自动回切。
 - 管理后台「监控」标签内嵌 Grafana 图表（数据源自 Prometheus），展示主机系统资源与每端口流量/连接速率；配置/订单等数据仍由面板自身（SQLite）提供。详见 [operations.md](operations.md)。
 - 可选启用控制面备用 Xray，配合 DNS 切换让控制面本机接管流量。
-- 每天备份 `panel.db`，并可选地加密切片后发布到 npm registry。
+- 每天备份 `panel.db`，并可选地加密切片后发布到 Cloudflare R2。
 
 ## 当前架构
 
@@ -47,7 +47,7 @@
   - 负责 `panel.db` 定时备份、控制面配置归档，并可在打包前调用只读 SSH 采集两个数据面的实际配置
 - `collect_remote_backup.py`
   - 只负责普通/AI 数据面配置的 SSH 读取、SHA-256 校验和 `nodes/` staging
-- `db-backup-uploader`
+- `R2 灾备上传`
   - 负责将数据库备份加密、切片、发布和恢复
 
 首页当前聚合展示：
@@ -98,7 +98,7 @@ cp .env.example .env
 - `DATAPLANE_SSH_TARGET`
 - `DATAPLANE_PROBE_HOST`
 - `DNS_FAILOVER_ENABLED`
-- `DB_BACKUP_UPLOADER_ENABLED`
+- `DB_BACKUP_R2_ENABLED`
 
 4. 渲染配置：
 
@@ -241,24 +241,24 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 - `POST /api/dns-failover/check`
 - `POST /api/dns-failover/switch`
 
-## 灾备归档与 npm 上传
+## 灾备归档与 R2 上传
 
 默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和灾备归档；Compose 同时通过严格只读 SSH 采集普通数据面 `64.186.224.96:22` 和 AI 数据面 `nat.qq.pw:27160` 的主配置，归档可包含 `app/xray/.env`、运行时配置及 `DB_BACKUP_EXTRA_PATHS` 指定的其他文件。
 
 如需在备份完成后自动加密分片并上传到 npm：
 
-- 在根 `.env` 中设置 `DB_BACKUP_UPLOADER_ENABLED=1`
-- 设置 `DB_BACKUP_UPLOADER_PASSWORD`
-- 按需设置 `DB_BACKUP_UPLOADER_SCOPE`
-- 保持 `DB_BACKUP_UPLOADER_PRUNE_REMOTE=0`，让 npm 保存每一轮不可变版本
-- 把 npm 认证文件放到 `data/db-backup-uploader/.npmrc`，或改写 `DB_BACKUP_UPLOADER_NPMRC_PATH`
+- 在根 `.env` 中设置 `DB_BACKUP_R2_ENABLED=1`
+- 设置 `DB_BACKUP_R2_SECRET_ACCESS_KEY`
+- 按需设置 `DB_BACKUP_R2_BUCKET`
+- 保持 `DB_BACKUP_R2_PREFIX=0`，让 npm 保存每一轮不可变版本
+- 把 npm 认证文件放到 `data/R2 灾备上传/Docker Secret`，或改写 `DB_BACKUP_R2_ENDPOINT`
 
 npm 在此处是低频异地灾备上传通道，不进入 DNS 故障切换和快速恢复路径。归档结构、远端采集和灾难阶段恢复见 [disaster-backup.md](disaster-backup.md) 与 [remote-node-backup.md](remote-node-backup.md)。
 
 先验证链路而不真实发布：
 
 ```bash
-DB_BACKUP_UPLOADER_ENABLED=1 DB_BACKUP_UPLOADER_DRY_RUN=1 \
+DB_BACKUP_R2_ENABLED=1 DB_BACKUP_R2_REGION=1 \
 docker compose up -d --build xray-routing-panel-db-backup
 ```
 
@@ -318,7 +318,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 - `AI_NODE_*`
   - AI 节点 SSH 纳管参数，详见 [ai-node-deployment.md](ai-node-deployment.md)
 - `DB_BACKUP_*`
-  - 本地 SQLite 快照、控制面/远端节点配置归档和 npm 灾备上传组件配置
+  - 本地 SQLite 快照、控制面/远端节点配置归档和 R2 灾备上传组件配置
 - `app/xray/.env`
   - REALITY 基础参数、AI 上游、分类器和 MCP 配置
 
@@ -339,9 +339,9 @@ docker compose run --rm xray-routing-panel-db-backup \
 前端与运维：
 
 - [../frontend/](../frontend/): Vite + Vue 3 + Naive UI + Vitest 工程；`src/shared/`（设计令牌、apiClient、共享组件）、`src/admin/`（后台 SPA）、`src/portal/`（订阅者门户 SPA）。`npm run build` 出 `app/static/{admin,portal}`，`npm test` 跑 Vitest
-- [disaster-backup.md](disaster-backup.md): 配置归档、npm 灾备保留和离线恢复边界
+- [disaster-backup.md](disaster-backup.md): 配置归档、R2 灾备保留和离线恢复边界
 - [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集两个数据面实际配置
-- [db-backup-uploader.md](db-backup-uploader.md): 加密、切片和 npm 上传组件
+- [disaster-backup.md](disaster-backup.md): 加密、切片和 R2 上传组件
 - [../Dockerfile](../Dockerfile): 多阶段构建（node 构建 SPA + pip 安装 Python 依赖）
 - [../docker-compose.yml](../docker-compose.yml): 本地 compose 栈
 - [../k8s/](../k8s/): K3s 清单

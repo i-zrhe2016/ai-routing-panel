@@ -117,14 +117,14 @@ curl -X POST http://127.0.0.1:9090/-/reload
 - 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env` 和 `app/xray/runtime`
 - Compose 还会在打包前通过严格只读 SSH 采集普通数据面（`64.186.224.96:22`）和 AI 数据面（`nat.qq.pw:27160`）的主配置，结果位于归档 `nodes/` 下
 - 远端采集默认是非必需的：节点失联不会丢弃控制面归档；要把两个数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
-- 当 `DB_BACKUP_UPLOADER_ENABLED=1` 时，归档成功后会继续调用 `db-backup-uploader`
-- npm 默认保留每一轮不可变版本（`DB_BACKUP_UPLOADER_PRUNE_REMOTE=0`），作为异地灾备上传通道，不承担快速恢复
+- 当 `DB_BACKUP_R2_ENABLED=1` 时，归档成功后会继续调用 `R2 灾备上传`
+- npm 默认保留每一轮不可变版本（`DB_BACKUP_R2_PREFIX=0`），作为异地灾备上传通道，不承担快速恢复
 
 上传链路依赖：
 
-- `DB_BACKUP_UPLOADER_PASSWORD`
-- 有效的 npm 认证配置，默认读取 `./data/db-backup-uploader/.npmrc`
-- 如需先验证流程，可设置 `DB_BACKUP_UPLOADER_DRY_RUN=1`
+- `DB_BACKUP_R2_SECRET_ACCESS_KEY`
+- 有效的 npm 认证配置，默认读取 `./data/R2 灾备上传/Docker Secret`
+- 如需先验证流程，可设置 `DB_BACKUP_R2_REGION=1`
 
 排查建议：
 
@@ -132,7 +132,7 @@ curl -X POST http://127.0.0.1:9090/-/reload
 - 确认最新本地备份已生成到 `./backups`
 - 确认对应的 `*-disaster-*.tar.gz` 已生成，并检查其中 `backup-manifest.json` 的 `skippedExtraPaths`
 - 检查归档 `nodes/remote-node-collection.json`：两个节点 `status=ok` 且 `configCollected=true`；`.env` 缺失只会显示为文件级 `missing`
-- 确认 `./data/db-backup-uploader/upload-records.json` 是否已更新
+- 确认 `./data/R2 灾备上传/upload-records.json` 是否已更新
 
 SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
 

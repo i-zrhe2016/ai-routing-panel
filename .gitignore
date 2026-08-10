@@ -39,7 +39,6 @@ app/xray/runtime/**
 !app/xray/reports/
 app/xray/reports/**
 !app/xray/reports/.gitkeep
-components/db-backup-uploader/node_modules/
 
 # opencode local agent config (contains infra host IPs / key paths)
 AGENTS.md

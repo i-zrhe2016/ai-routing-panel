@@ -125,7 +125,7 @@ volumeMounts:
 
 不要把 `nat.qq.pw:27160` 误当成 Xray 业务端口以外的默认 SSH 22；本项目生产 AI NAT 入口已实测为 SSH 27160。完整采集器安全边界见[远端节点配置采集](remote-node-backup.md)。
 
-如需把 `xray.env`、npm `.npmrc` 或其他项目文件加入归档，应通过 Secret/只读挂载提供文件，再在对应 ConfigMap 设置 `DB_BACKUP_EXTRA_PATHS`。不要把 npm 密码直接写进 ConfigMap。npm 上传仍需显式设置 `DB_BACKUP_UPLOADER_ENABLED=1`、加密密码和认证文件；任务默认 `DB_BACKUP_UPLOADER_PRUNE_REMOTE=0`，保留 registry 上的历史版本作为异地灾备，不参与快速恢复。
+如需把 `xray.env`、R2 密钥 或其他项目文件加入归档，应通过 Secret/只读挂载提供文件，再在对应 ConfigMap 设置 `DB_BACKUP_EXTRA_PATHS`。不要把 npm 密码直接写进 ConfigMap。R2 上传仍需显式设置 `DB_BACKUP_R2_ENABLED=1`、加密密码和认证文件；任务默认 `DB_BACKUP_R2_PREFIX=0`，保留 registry 上的历史版本作为异地灾备，不参与快速恢复。
 
 ## 验证
 

@@ -153,9 +153,9 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 ```bash
 docker compose run --rm \
-  -e DB_BACKUP_UPLOADER_ENABLED=1 \
-  -e DB_BACKUP_UPLOADER_DRY_RUN=1 \
-  -e DB_BACKUP_UPLOADER_PASSWORD=test-password \
+  -e DB_BACKUP_R2_ENABLED=1 \
+  -e DB_BACKUP_R2_REGION=1 \
+  -e DB_BACKUP_R2_SECRET_ACCESS_KEY=test-password \
   xray-routing-panel-db-backup \
   python3 /app/scripts/run_db_backup_cycle.py
 ```

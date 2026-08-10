@@ -103,46 +103,24 @@
 - 对 REALITY 这类直连流量，想让 IP 更快生效，优先把 `CF_DNS_RECORD_TTL` 设为 `60`
 - 完整 DNS 故障切换机制详见 [dns-failover.md](dns-failover.md)
 
-## 灾备归档与 npm 上传变量
+## 灾备归档与 R2 上传变量
 
 | 变量 | 说明 |
 | --- | --- |
-| `DB_BACKUP_UPLOADER_ENABLED` | 是否在每日本地备份成功后自动上传 |
+| `DB_BACKUP_R2_ENABLED` | 是否在每日本地备份成功后上传；默认 `0` |
+| `DB_BACKUP_R2_ENDPOINT` | Cloudflare R2 S3 endpoint，必须使用 HTTPS |
+| `DB_BACKUP_R2_BUCKET` | R2 bucket 名称 |
+| `DB_BACKUP_R2_ACCESS_KEY_ID` / `DB_BACKUP_R2_SECRET_ACCESS_KEY` | R2 S3 凭据，只通过部署环境或 Secret 注入 |
+| `DB_BACKUP_R2_REGION` | R2 S3 region，默认 `auto` |
+| `DB_BACKUP_R2_PREFIX` | 对象 key 前缀，默认 `xray-routing-panel` |
+| `DB_BACKUP_R2_RECORD_PATH` | 本地上传记录，默认 `/backups/r2-upload-record.json` |
+| `DB_BACKUP_ENCRYPTION_PASSWORD` | AES-256-GCM 归档密码，必须与 R2 secret 分离保存 |
 | `DB_BACKUP_BUNDLE_ENABLED` | 是否生成包含数据库和配置文件的灾备归档；默认 `1` |
-| `DB_BACKUP_EXTRA_PATHS` | 逗号/换行分隔的额外文件、目录或 glob；Compose 默认收集 `/app/xray/.env,/app/xray/runtime` |
-| `DB_BACKUP_BUNDLE_DIR` | 灾备归档本地目录，默认跟随 `DB_BACKUP_DIR` |
-| `DB_BACKUP_BUNDLE_KEEP_DAYS` | 灾备归档本地保留天数，默认跟随 `DB_BACKUP_KEEP_DAYS` |
-| `DB_BACKUP_BUNDLE_PREFIX` | 灾备归档名前缀，默认跟随 `DB_BACKUP_PREFIX` |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否在归档前通过只读 SSH 采集两个数据面；Compose 默认 `1`，脚本默认 `0` |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `1` 时两个节点都必须连通且第一个主配置路径成功；`0` 时远端失败只记入 manifest |
-| `DB_BACKUP_SSH_KEY_PATH` | SSH 私钥路径，默认 `/run/secrets/fleet_ssh_key`；不得把内容放入环境变量 |
-| `DB_BACKUP_SSH_OPTIONS` | 仅允许 `-4`/`-6`、日志级别和连接超时/keepalive 等安全选项；身份、known_hosts、代理和远端命令覆盖会被拒绝 |
-| `DB_BACKUP_SSH_TIMEOUT_SECONDS` / `DB_BACKUP_SSH_MAX_FILE_BYTES` | 远端连接超时（默认 20 秒）和单文件上限（默认 5 MiB） |
-| `DB_BACKUP_DATAPLANE_SSH_TARGET` / `DB_BACKUP_DATAPLANE_SSH_PORT` | 普通数据面 SSH 目标和端口；生产为 `root@64.186.224.96:22` |
-| `DB_BACKUP_DATAPLANE_KNOWN_HOSTS` | 普通数据面专用 known_hosts 文件，默认 `/root/.ssh/known_hosts` |
-| `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面主机路径；实测主配置为 `/root/xray-routing-panel/app/xray/runtime/config.json` |
-| `DB_BACKUP_AI_NODE_SSH_TARGET` / `DB_BACKUP_AI_NODE_SSH_PORT` | AI 数据面 SSH 目标和端口；生产为 `root@nat.qq.pw:27160` |
-| `DB_BACKUP_AI_NODE_KNOWN_HOSTS` | AI 节点专用 known_hosts，默认 `/root/.ssh/known_hosts_ai` |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | AI 节点路径，默认 `/etc/xray/config.json,/etc/xray/.env` |
-| `DB_BACKUP_UPLOADER_PASSWORD` | 备份加密密码；必须覆盖上游占位值 |
-| `DB_BACKUP_UPLOADER_SCOPE` | npm 包 scope，例如 `@example` |
-| `DB_BACKUP_UPLOADER_DRY_RUN` | 设为 `1` 时只做加密切片和记录写入，不真实 publish |
-| `DB_BACKUP_UPLOADER_NPMRC_PATH` | npm 认证配置文件路径，默认 `/db-backup-uploader-data/.npmrc` |
-| `DB_BACKUP_UPLOADER_ARTIFACT_NAME` | 逻辑 artifact 名；不设时灾备归档默认为 `<DB_BACKUP_PREFIX>-disaster-backup`，关闭归档时为 `<DB_BACKUP_PREFIX>-db-backup` |
-| `DB_BACKUP_UPLOADER_PACKAGE_VERSION` | 强制覆盖自动生成的包版本；留空时按备份时间戳生成 |
-| `DB_BACKUP_UPLOADER_SHARD_SIZE_BYTES` | 单分片大小，默认 `5242880` |
-| `DB_BACKUP_UPLOADER_PUBLISH_CONCURRENCY` | 并发发布数，默认 `2` |
-| `DB_BACKUP_UPLOADER_NPM_PUBLISH_TIMEOUT_MS` | 单个 `npm publish` 超时时间 |
-| `DB_BACKUP_UPLOADER_PRUNE_REMOTE` | 是否删除上一轮 npm 版本；灾备默认 `0`，保留不可变历史 |
-| `DB_BACKUP_UPLOADER_RECORD_HISTORY_LIMIT` | 本地记录保留的历史归档数量，默认 `20`；只影响索引，不影响 npm 版本 |
+| `DB_BACKUP_EXTRA_PATHS` | 逗号/换行分隔的额外文件、目录或 glob |
+| `DB_BACKUP_BUNDLE_DIR` / `DB_BACKUP_BUNDLE_KEEP_DAYS` | 本地归档目录和保留天数 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否通过只读 SSH 采集两个数据面 |
 
-目录约定：
-
-- 本地 `.db` 备份：`./backups`
-- 上传工作目录：`./data/db-backup-uploader`
-- 默认认证文件：`./data/db-backup-uploader/.npmrc`
-
-自动灾备任务使用历史保留模式：npm 版本不会被删除，`upload-records.json` 保存最近一次和有限历史索引。npm 只用于低频灾难阶段下载，不作为快速恢复或故障切换依赖。
+R2 对象不会由备份任务删除；生命周期规则在 Cloudflare 侧配置。恢复时人工下载、解密、校验 manifest，再恢复数据库和配置。
 
 SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读验证命令见[远端节点配置采集](remote-node-backup.md)。
 

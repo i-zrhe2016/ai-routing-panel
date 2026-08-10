@@ -79,7 +79,7 @@ class BackupCycleTest(unittest.TestCase):
                     "DB_BACKUP_DIR": str(backup_dir),
                     "DB_BACKUP_KEEP_DAYS": "7",
                     "DB_BACKUP_PREFIX": "panel-test",
-                    "DB_BACKUP_UPLOADER_ENABLED": "0",
+                    "DB_BACKUP_R2_ENABLED": "0",
                 }
             )
 
@@ -93,7 +93,7 @@ class BackupCycleTest(unittest.TestCase):
             )
 
             self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
-            self.assertIn("DB_BACKUP_UPLOADER_ENABLED is disabled", completed.stdout)
+            self.assertIn("[backup:r2] skipped", completed.stdout)
             backups = list(backup_dir.glob("panel-test-*.db"))
             self.assertEqual(len(backups), 1)
 
@@ -105,7 +105,7 @@ class BackupCycleTest(unittest.TestCase):
                 {
                     "DB_PATH": str(root / "missing.db"),
                     "DB_BACKUP_DIR": str(root / "backups"),
-                    "DB_BACKUP_UPLOADER_ENABLED": "0",
+                    "DB_BACKUP_R2_ENABLED": "0",
                 }
             )
             completed = subprocess.run(
@@ -118,20 +118,6 @@ class BackupCycleTest(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
             self.assertIn("source database was not found", completed.stdout)
-
-    def test_run_db_backup_cycle_builds_project_defaults(self):
-        module = load_module("run_db_backup_cycle", RUN_CYCLE_SCRIPT)
-        original_environ = os.environ.copy()
-        try:
-            os.environ["DB_BACKUP_PREFIX"] = "Xray Routing Panel"
-            artifact_name = module.build_artifact_name()
-            version = module.build_package_version(Path("/tmp/panel-test-20260619T030000Z.db"))
-        finally:
-            os.environ.clear()
-            os.environ.update(original_environ)
-
-        self.assertEqual(artifact_name, "xray-routing-panel-db-backup")
-        self.assertEqual(version, "20260619.30000.0")
 
     def test_disaster_bundle_contains_database_and_extra_configuration(self):
         module = load_module("build_backup_bundle", ROOT / "scripts" / "build_backup_bundle.py")
@@ -178,23 +164,6 @@ class BackupCycleTest(unittest.TestCase):
             with sqlite3.connect(str(snapshot)) as conn:
                 self.assertEqual(conn.execute("SELECT value FROM sample").fetchone()[0], "ok")
 
-    def test_bundle_artifact_uses_disaster_name_and_preserves_remote_versions(self):
-        module = load_module("run_db_backup_cycle_bundle", RUN_CYCLE_SCRIPT)
-        original_environ = os.environ.copy()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            try:
-                os.environ["DB_BACKUP_PREFIX"] = "Xray Routing Panel"
-                self.assertEqual(
-                    module.build_artifact_name(Path("/tmp/panel-disaster-20260808T030000Z.tar.gz")),
-                    "xray-routing-panel-disaster-backup",
-                )
-                os.environ.pop("DB_BACKUP_UPLOADER_PRUNE_REMOTE", None)
-                os.environ["DB_BACKUP_UPLOADER_DATA_DIR"] = str(Path(tmpdir) / "uploader")
-                upload_env = module.build_upload_env("test-password")
-                self.assertEqual(upload_env["PRUNE_REMOTE_UPLOADS"], "0")
-            finally:
-                os.environ.clear()
-                os.environ.update(original_environ)
 
 
 if __name__ == "__main__":
