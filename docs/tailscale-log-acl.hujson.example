@@ -1,0 +1,26 @@
+{
+  // Apply this policy in the Tailscale admin policy editor after replacing
+  // the tag ownership with the tailnet's operator group.
+  "tagOwners": {
+    "tag:log-agent": ["autogroup:admin"],
+    "tag:log-store": ["autogroup:admin"],
+    "tag:log-grafana": ["autogroup:admin"],
+  },
+  "grants": [
+    {
+      "src": ["tag:log-agent"],
+      "dst": ["tag:log-store"],
+      "ip": ["3100"],
+    },
+    {
+      "src": ["tag:log-grafana"],
+      "dst": ["tag:log-store"],
+      "ip": ["3100"],
+    },
+    {
+      "src": ["autogroup:admin"],
+      "dst": ["tag:log-store"],
+      "ip": ["3100"],
+    },
+  ],
+}

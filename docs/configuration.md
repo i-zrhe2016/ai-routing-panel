@@ -13,6 +13,8 @@
 | `PANEL_PUBLIC_URL` | 面板对外地址；影响订阅链接和安全 Cookie |
 | `PANEL_USERNAME` / `PANEL_PASSWORD` | 管理员认证；任一设置后首页、探针页和 `/api/*` 都要求登录 |
 | `PANEL_SECRET_KEY` | Session 签名密钥；不设置则每次启动随机生成 |
+| `PANEL_LOG_LEVEL` | 控制面 JSON 日志最低级别，默认 `INFO` |
+| `PANEL_SLOW_REQUEST_MS` | 慢请求阈值（毫秒），默认 `1000`；普通成功 GET 仍不记录 |
 | `METRICS_TOKEN` | Prometheus `/metrics` 抓取令牌；不设置则 `/metrics` 返回 404，设置后需 `Authorization: Bearer <token>` |
 | `METRICS_DP_TTL` | `/metrics` 缓存数据面存活检测的秒数，默认 `30`（抓取路径上唯一的 SSH 调用） |
 | `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台「监控」标签使用该同源地址 |
@@ -41,6 +43,8 @@
 - `PROBE_INTERVAL`
 - `PROBE_TEST_LISTEN_PORT`
 - `PANEL_HEALTH_REQUIRES_XRAY`
+
+Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 `monitoring/loki/.env`，Grafana 使用 `monitoring/.env` 中的 `GRAFANA_LOKI_URL`。三节点生产路径和实际主机角色见 [Fluent Bit 日志采集](logging-fluent-bit.md#当前生产部署)。
 
 ## AI 节点纳管变量
 

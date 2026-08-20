@@ -1,0 +1,40 @@
+@startuml
+!theme plain
+title Tailscale Fluent Bit log collection
+left to right direction
+
+package "Tailscale tailnet" #F3F4F6 {
+  node "Control plane" as control #AED6F1 {
+    component "Panel app\nJSON business/request logs" as panel
+  }
+  node "Normal data plane" as data #AED6F1
+  node "AI data plane" as ai #AED6F1
+  component "Fluent Bit Agent\nDocker JSON + Xray error + systemd" as fluentbit #D7BDE2
+  component "Fluent Bit Agent\nDocker JSON + Xray error + systemd" as fluentbit_data #D7BDE2
+  component "Fluent Bit Agent\nDocker JSON + Xray error + systemd" as fluentbit_ai #D7BDE2
+  database "Loki\nTailscale :3100" as loki #FAD7A0
+  component "Grafana\nPrometheus host" as grafana #A9DFBF
+}
+actor "Operator" as operator
+
+panel --> fluentbit : stdout/stderr\nJSON + X-Request-ID
+control --> fluentbit : Docker JSON / Xray error
+data --> fluentbit_data : Docker JSON / Xray error
+ai --> fluentbit_ai : Docker JSON / Xray error
+fluentbit --> loki : Tailscale\nLoki HTTP push
+fluentbit_data --> loki : Tailscale\nLoki HTTP push
+fluentbit_ai --> loki : Tailscale\nLoki HTTP push
+grafana --> loki : LogQL queries
+operator --> grafana : Explore / dashboards
+
+note bottom of fluentbit
+  Filesystem buffer per node.
+  Queue cap: FLUENT_BIT_STORAGE_LIMIT.
+end note
+
+note bottom of loki
+  Single instance.
+  Retention: 168h.
+  No public listener.
+end note
+@enduml

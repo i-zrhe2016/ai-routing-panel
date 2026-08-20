@@ -12,6 +12,7 @@
 - 识别 AI 域名并将相关流量转发到独立 AI 数据面，故障时自动回退。
 - 通过 Cloudflare DNS API 实现普通数据面故障切换和自动回切。
 - 使用 Prometheus、Grafana、Node Exporter 和 cAdvisor 提供可观测性与日报。
+- 可选使用 Fluent Bit + Loki 通过 Tailscale 采集三节点 Docker stdout/stderr 和关键错误日志，并在 Grafana 中查询。
 - 定时备份 `panel.db` 及配置文件等内容，生成 AES-256-GCM 加密灾备归档；可选通过 Cloudflare R2 做异地保存，恢复只在灾难阶段人工执行。
 
 ## 架构概览
@@ -75,6 +76,32 @@ docker compose --profile backup-xray up -d xray-reality-backup
 
 更多模式和排障命令见[开发与启动](docs/development.md)和[运维与排障](docs/operations.md)。
 
+启用 Fluent Bit 三节点日志采集：
+
+```bash
+# 在日志中心主机
+cd monitoring/loki
+cp .env.example .env
+# 编辑 .env，设置 LOKI_TAILNET_BIND_ADDRESS
+docker compose up -d
+
+# 在控制面、普通数据面、AI 数据面分别执行
+cd ../fluent-bit
+cp .env.example .env
+# 编辑 .env，设置节点角色、主机名、Xray 日志目录和 Loki Tailscale 地址
+docker compose -f docker-compose.agent.yml up -d
+
+# 在 Grafana/Prometheus 所在控制面
+cd ../..
+cp monitoring/.env.example monitoring/.env
+# 编辑 monitoring/.env，设置 GRAFANA_LOKI_URL
+docker compose -f monitoring/docker-compose.monitoring.yml up -d prometheus grafana
+```
+
+日志采集边界见 [Fluent Bit 日志采集](docs/logging-fluent-bit.md)。
+
+当前生产环境已在控制面 `100.92.111.68`、普通数据面 `100.65.108.93`、AI 数据面 `100.109.201.64` 部署 Fluent Bit；控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
+
 启用配置归档并通过 Cloudflare R2 保存异地灾备版本（不用于快速恢复）：
 
 ```bash
@@ -114,6 +141,7 @@ docker compose up -d --build xray-routing-panel-db-backup
 | 查看 AI 主机与容器监控 | [AI 节点部署](docs/ai-node-deployment.md#ai-节点监控采集) → [运维与排障](docs/operations.md#prometheus-监控metrics) |
 | 排查 ChatGPT/OpenAI 路由 | [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) |
 | 配置故障切换 | [DNS 故障切换](docs/dns-failover.md) → [三节点容错](docs/fault-tolerance.md) |
+| 查询三节点日志 | [Fluent Bit 日志采集](docs/logging-fluent-bit.md) |
 | 监控节点和生成日报 | [Prometheus-only 运维分析](docs/ops-reporting/index.md) |
 | 迁移或灾难恢复 | [面板迁移](docs/panel-migration.md) → [灾备归档](docs/disaster-backup.md) → [远端节点配置采集](docs/remote-node-backup.md) |
 
@@ -164,6 +192,7 @@ npm test
 
 - [运维与排障](docs/operations.md) — 健康检查、监控、备份和常见故障处理。
 - [API 与页面路径](docs/api.md) — 页面、认证、订阅接口和 JSON API。
+- [Fluent Bit 日志采集](docs/logging-fluent-bit.md) — 三节点 Docker/Xray 关键日志经 Tailscale 到远端 Loki 和 Grafana。
 - [三节点故障容错](docs/fault-tolerance.md) — 控制面、普通数据面和 AI 数据面的故障边界。
 - [DNS 故障切换](docs/dns-failover.md) — 探测、Cloudflare DNS 切换、备用 Xray 和自动回切。
 - [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) — 客户端、入口、路由、AI 节点和出口的分层排查。
@@ -201,5 +230,5 @@ npm test
 - 不提交 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token、数据库快照或灾备归档。
 - 控制面与数据面应使用独立主机、独立目录和最小权限凭据。
 - Xray 配置必须先渲染和校验，再同步并确认健康检查、探针和监控恢复。
-- Node Exporter、cAdvisor、Grafana、Kubernetes API 和管理接口应限制到受信任网络。
+- Node Exporter、cAdvisor、Grafana、Loki、Fluent Bit、Kubernetes API 和管理接口应限制到受信任网络。
 - 数据库备份不能只验证任务成功，还应定期验证实际恢复流程。

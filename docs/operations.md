@@ -88,6 +88,32 @@ curl -X POST http://127.0.0.1:9090/-/reload
 访问入口：Grafana 使用 `https://xray.zrhe2016.cc/grafana/`，Prometheus 是 `127.0.0.1:9090`。Grafana 管理员密码来自
 `monitoring/.env`。公网访问 Grafana 前必须通过 Cloudflare Access；不要直接暴露 `3001`、`9090` 或 node_exporter 的 `:9100`。
 
+### Fluent Bit 日志采集
+
+日志采集由三类独立组件组成：日志中心主机上的 Loki、三台 Docker 主机上的 Fluent Bit Agent，以及控制面上的 Grafana。Agent 不修改业务容器的 logging driver，而是读取 Docker JSON 日志、Xray `error.log` 和 allowlist 内的 systemd 错误日志，通过 Tailscale 发送到远端 Loki。
+
+```bash
+# 日志中心
+cd monitoring/loki
+docker compose up -d
+
+# 每台控制面/普通数据面/AI 数据面主机
+cd ../fluent-bit
+docker compose -f docker-compose.agent.yml up -d
+
+# 控制面的 Grafana/Prometheus
+cd ..
+docker compose -f docker-compose.monitoring.yml up -d prometheus grafana
+```
+
+Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailscale ACL、LogQL 示例和排障命令见 [Fluent Bit 日志采集](logging-fluent-bit.md)。
+
+当前三节点部署状态和生产路径见 [Fluent Bit 日志采集·当前生产部署](logging-fluent-bit.md#当前生产部署)。控制面业务日志可直接查询：
+
+```logql
+{job="platform-logs",node_role="control_plane",category="business"} | json
+```
+
 ## 流量与连接统计
 
 当前统计链路拆成两部分：

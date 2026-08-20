@@ -1,0 +1,38 @@
+name: xray-fluent-bit-agent
+
+services:
+  fluent-bit:
+    image: fluent/fluent-bit:3.2.10
+    container_name: fluent-bit-agent
+    restart: unless-stopped
+    user: "0:0"
+    mem_limit: 192m
+    network_mode: host
+    logging:
+      driver: none
+    command:
+      - /fluent-bit/bin/fluent-bit
+      - -c
+      - /fluent-bit/etc/fluent-bit.conf
+    environment:
+      FLUENT_BIT_NODE_ROLE: "${FLUENT_BIT_NODE_ROLE:?set FLUENT_BIT_NODE_ROLE}"
+      FLUENT_BIT_HOST: "${FLUENT_BIT_HOST:?set FLUENT_BIT_HOST}"
+      FLUENT_BIT_LOKI_HOST: "${FLUENT_BIT_LOKI_HOST:?set FLUENT_BIT_LOKI_HOST}"
+      FLUENT_BIT_LOKI_PORT: "${FLUENT_BIT_LOKI_PORT:-3100}"
+      FLUENT_BIT_STORAGE_LIMIT: "${FLUENT_BIT_STORAGE_LIMIT:-2G}"
+      FLUENT_BIT_SYSTEMD_UNIT_1: "${FLUENT_BIT_SYSTEMD_UNIT_1:-docker.service}"
+      FLUENT_BIT_SYSTEMD_UNIT_2: "${FLUENT_BIT_SYSTEMD_UNIT_2:-containerd.service}"
+      FLUENT_BIT_SYSTEMD_UNIT_3: "${FLUENT_BIT_SYSTEMD_UNIT_3:-tailscaled.service}"
+      FLUENT_BIT_SYSTEMD_UNIT_4: "${FLUENT_BIT_SYSTEMD_UNIT_4:-xray.service}"
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - fluent-bit-state:/buffers
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - "${FLUENT_BIT_XRAY_LOG_DIR:?set FLUENT_BIT_XRAY_LOG_DIR}:/var/log/xray:ro"
+      - /run/log/journal:/run/log/journal:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+
+volumes:
+  fluent-bit-state:

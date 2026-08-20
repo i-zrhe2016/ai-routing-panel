@@ -1,0 +1,44 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "title": "Control Plane Business Logs",
+  "uid": "control-plane-business-logs",
+  "tags": ["panel", "loki", "business-logs"],
+  "time": {"from": "now-24h", "to": "now"},
+  "refresh": "30s",
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "控制面业务事件",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{job=\"platform-logs\",node_role=\"control_plane\",category=\"business\"} | json"
+        }
+      ],
+      "options": {"showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLines": true, "prettifyLogMessage": true, "enableLogDetails": true}
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "失败与慢请求",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 14},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{job=\"platform-logs\",node_role=\"control_plane\"} |~ \"\\\"category\\\":\\\"request\\\"|\\\"level\\\":\\\"error\\\"\""
+        }
+      ],
+      "options": {"showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLines": true, "prettifyLogMessage": true, "enableLogDetails": true}
+    }
+  ]
+}

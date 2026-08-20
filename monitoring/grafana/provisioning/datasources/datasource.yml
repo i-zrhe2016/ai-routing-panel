@@ -8,3 +8,9 @@ datasources:
     url: http://127.0.0.1:9090
     isDefault: true
     editable: false
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: ${GRAFANA_LOKI_URL}
+    editable: false

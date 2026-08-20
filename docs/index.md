@@ -8,7 +8,7 @@
 2. [架构说明](architecture.md)：理解控制面、普通数据面、AI 数据面和组件边界。
 3. [配置说明](configuration.md)：配置根 `.env`、Xray 参数、节点和可选组件。
 4. [开发与启动](development.md)：本地开发、Docker 启动、测试和调试。
-5. [运维与排障](operations.md) / [API 与页面路径](api.md)：运行检查、监控、接口和常见运维动作。
+5. [运维与排障](operations.md) / [API 与页面路径](api.md) / [Fluent Bit 日志采集](logging-fluent-bit.md)：运行检查、监控、日志、接口和常见运维动作。
 6. [AI 节点部署](ai-node-deployment.md) → [AI 节点独立凭据](ai-node-credentials.md) → [SSH 密钥登录与轮换](ssh-key-access.md)：部署和纳管独立 AI 数据面。
 7. [AI 路由](ai-routing.md) / [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)：理解 AI 流量链路并执行分层排障。
 8. [DNS 故障切换](dns-failover.md) → [三节点故障容错](fault-tolerance.md)：配置切换机制、备用 Xray 和验收边界。
@@ -35,6 +35,7 @@
 
 - [运维与排障](operations.md) — 健康检查、Prometheus、Grafana、备份和常见故障。
 - [API 与页面路径](api.md) — 页面、认证、订阅接口和 JSON API。
+- [Fluent Bit 日志采集](logging-fluent-bit.md) — 三节点 Docker stdout/stderr 到 Fluent Bit、Loki 和 Grafana，含当前生产部署状态与回滚。
 - [三节点故障容错](fault-tolerance.md) — 控制面、普通数据面和 AI 数据面故障矩阵。
 - [DNS 故障切换](dns-failover.md) — 探测、Cloudflare DNS、备用 Xray 和自动回切。
 - [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md) — 客户端、入口、路由、AI 节点和出口排障。
