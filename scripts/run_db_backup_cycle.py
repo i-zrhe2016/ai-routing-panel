@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import os
+import json
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -19,6 +22,34 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parent.parent
 BACKUP_SCRIPT = ROOT / "scripts" / "backup_db.py"
 TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def emit_backup_event(event, result="success", message="", exc=None):
+    payload = {
+        "schema_version": "1",
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "level": "error" if result == "failure" else "info",
+        "service": "control-plane",
+        "category": "background",
+        "event": event,
+        "result": result,
+        "actor_type": "system",
+        "actor_id": "",
+        "resource_type": "backup",
+        "resource_id": "",
+        "request_id": "",
+        "endpoint": "",
+        "method": "",
+        "status_code": None,
+        "duration_ms": None,
+        "error_code": "backup_failed" if result == "failure" else "",
+        "message": str(message or "")[:2000],
+        "metadata": {},
+    }
+    if exc is not None:
+        payload["error_type"] = type(exc).__name__
+        payload["stacktrace"] = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), file=sys.stderr, flush=True)
 
 
 def env_enabled(name, default="0"):
@@ -171,4 +202,13 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        exit_code = main()
+    except Exception as exc:
+        emit_backup_event("backup.failed", result="failure", exc=exc)
+        raise
+    if exit_code == 0:
+        emit_backup_event("backup.completed")
+    else:
+        emit_backup_event("backup.failed", result="failure", message=f"exit_code={exit_code}")
+    raise SystemExit(exit_code)

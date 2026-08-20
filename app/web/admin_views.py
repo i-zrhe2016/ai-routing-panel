@@ -25,6 +25,8 @@ from .core import (
     get_authenticated_customer,
     get_authenticated_tenant,
     is_session_authenticated,
+    bind_actor,
+    log_business_event,
     message_redirect,
     require_csrf,
     route,
@@ -54,11 +56,19 @@ def login():
         password = request.form.get("password", "")
         if AUTH_ENABLED and credentials_match(username, password):
             mark_session_authenticated()
+            bind_actor("admin")
+            log_business_event("auth.admin.login", actor_type="admin")
             return redirect(next_target, code=303)
         port = state.get_port_by_tenant_username(username)
         if port is not None and tenant_credentials_match(port, username, password):
             mark_tenant_session_authenticated(port)
+            bind_actor("tenant", port.get("id"))
+            log_business_event("auth.tenant.login", actor_type="tenant", resource_type="port", resource_id=port.get("id"))
             return redirect(tenant_panel_target(port["tenant_token"]), code=303)
+        if port is not None:
+            log_business_event("auth.tenant.login", result="failure", actor_type="tenant", resource_type="port", resource_id=port.get("id"), error_code="invalid_credentials")
+        else:
+            log_business_event("auth.admin.login", result="failure", actor_type="admin", error_code="invalid_credentials")
         return render_login_page(
             next_target=next_target,
             form_username=username,
@@ -71,6 +81,7 @@ def login():
 
 @route("/logout", methods=["GET", "POST"])
 def logout():
+    log_business_event("auth.admin.logout", actor_type="admin")
     session.clear()
     return redirect(url_for("login", message="已退出登录。", level="info"), code=303)
 
@@ -128,13 +139,16 @@ def ai_domain_dashboard():
 def create_port():
     try:
         payload = state.validate_port_payload(request.form)
-        state.create_port(payload)
+        port_id = state.create_port(payload)
+        log_business_event("port.created", resource_type="port", resource_id=port_id, metadata={"listen_port": payload.get("listen_port")})
         return message_redirect("端口已创建并写入 Xray。", "success")
     except sqlite3.IntegrityError as exc:
         if is_listen_port_conflict(exc):
+            log_business_event("port.created", result="failure", error_code="conflict", resource_type="port")
             return message_redirect("监听端口已存在，请更换其他端口。", "error")
         raise
     except (ValidationError, RuntimeError) as exc:
+        log_business_event("port.created", result="failure", error_code="validation", message=str(exc), resource_type="port")
         return message_redirect(str(exc), "error")
 
 
@@ -143,12 +157,15 @@ def update_port(port_id):
     try:
         payload = state.validate_port_payload(request.form)
         state.update_port(port_id, payload)
+        log_business_event("port.updated", resource_type="port", resource_id=port_id)
         return message_redirect("端口配置已更新。", "success")
     except sqlite3.IntegrityError as exc:
         if is_listen_port_conflict(exc):
+            log_business_event("port.updated", result="failure", error_code="conflict", resource_type="port", resource_id=port_id)
             return message_redirect("监听端口已存在，请更换其他端口。", "error")
         raise
     except (ValidationError, RuntimeError) as exc:
+        log_business_event("port.updated", result="failure", error_code="validation", message=str(exc), resource_type="port", resource_id=port_id)
         return message_redirect(str(exc), "error")
 
 
@@ -156,8 +173,10 @@ def update_port(port_id):
 def toggle_port(port_id):
     try:
         state.toggle_port(port_id)
+        log_business_event("port.toggled", resource_type="port", resource_id=port_id)
         return message_redirect("端口状态已切换。", "success")
     except (ValidationError, RuntimeError) as exc:
+        log_business_event("port.toggled", result="failure", error_code="rejected", message=str(exc), resource_type="port", resource_id=port_id)
         return message_redirect(str(exc), "error")
 
 
@@ -165,8 +184,10 @@ def toggle_port(port_id):
 def delete_port(port_id):
     try:
         state.delete_port(port_id)
+        log_business_event("port.deleted", resource_type="port", resource_id=port_id)
         return message_redirect("端口已删除。", "success")
     except (ValidationError, RuntimeError) as exc:
+        log_business_event("port.deleted", result="failure", error_code="rejected", message=str(exc), resource_type="port", resource_id=port_id)
         return message_redirect(str(exc), "error")
 
 
@@ -174,7 +195,9 @@ def delete_port(port_id):
 def reset_port_traffic(port_id):
     try:
         restored = state.reset_port_traffic(port_id)
+        log_business_event("port.traffic_reset", resource_type="port", resource_id=port_id, metadata={"restored": restored})
         message = "流量已重置，端口已恢复启用。" if restored else "流量已重置。"
         return message_redirect(message, "success")
     except (ValidationError, RuntimeError) as exc:
+        log_business_event("port.traffic_reset", result="failure", error_code="reset_failed", message=str(exc), resource_type="port", resource_id=port_id)
         return message_redirect(str(exc), "error")

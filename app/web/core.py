@@ -1,9 +1,11 @@
 import atexit
+import logging
 import signal
 import threading
+import time
 from datetime import datetime
 
-from flask import Flask, Response, abort, jsonify, redirect, request, session, url_for
+from flask import Flask, Response, abort, cli as flask_cli, g, jsonify, redirect, request, session, url_for
 
 from ..auth import (
     auth_required_response,
@@ -38,6 +40,20 @@ from ..config import (
     XRAY_CLIENT_CONFIG_PATH,
 )
 from ..helpers import human_bytes
+from ..observability.logging import (
+    REQUEST_ID_HEADER,
+    bind_actor,
+    clear_request_context,
+    emit_business_event,
+    emit_event,
+    emit_request_event,
+    get_request_context,
+    initialize_request_context,
+    is_valid_request_id,
+    new_request_id,
+    set_request_endpoint,
+    slow_request_threshold_ms,
+)
 from ..state import PanelState
 from ..subscriptions import (
     build_clash_subscription_content,
@@ -100,18 +116,70 @@ def create_app():
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=PANEL_PUBLIC_URL.startswith("https://"),
     )
+    werkzeug_logger = logging.getLogger("werkzeug")
+    werkzeug_logger.disabled = True
+    werkzeug_logger.propagate = False
     for rule, options, view_func in _ROUTES:
         endpoint = options.get("endpoint", view_func.__name__)
         extra = {key: value for key, value in options.items() if key != "endpoint"}
         flask_app.add_url_rule(rule, endpoint, view_func, **extra)
     for view_func in _BEFORE_REQUEST:
         flask_app.before_request(view_func)
+    flask_app.after_request(observability_after_request)
+    flask_app.teardown_request(observability_teardown_request)
     for name, filter_func in _TEMPLATE_FILTERS:
         flask_app.add_template_filter(filter_func, name)
     return flask_app
 
 
 state = PanelState()
+
+_BUSINESS_EVENT_BY_ENDPOINT = {
+    "login": "auth.admin.login",
+    "customer_login": "auth.customer.login",
+    "customer_register": "auth.customer.register",
+    "tenant_login": "auth.tenant.login",
+    "api_customer_login": "auth.customer.login",
+    "api_customer_register": "auth.customer.register",
+    "api_tenant_login": "auth.tenant.login",
+    "api_create_port": "port.created",
+    "create_port": "port.created",
+    "api_update_port": "port.updated",
+    "update_port": "port.updated",
+    "api_toggle_port": "port.toggled",
+    "toggle_port": "port.toggled",
+    "api_delete_port": "port.deleted",
+    "delete_port": "port.deleted",
+    "api_reset_port_traffic": "port.traffic_reset",
+    "reset_port_traffic": "port.traffic_reset",
+    "api_fulfill_order": "order.fulfilled",
+    "api_reject_order": "order.rejected",
+    "api_cancel_order": "order.cancelled",
+    "api_rotate_subscription": "subscription.rotated",
+    "rotate_subscription": "subscription.rotated",
+    "api_customer_subscription_renew": "subscription.renewed",
+    "customer_subscription_renew": "subscription.renewed",
+    "api_customer_create_order": "order.created",
+    "create_order": "order.created",
+    "api_customer_submit_payment_proof": "order.payment_proof_submitted",
+    "customer_submit_order_payment_proof": "order.payment_proof_submitted",
+    "api_dns_failover_check": "dns_failover.checked",
+    "api_dns_failover_switch": "dns_failover.switched",
+    "api_restart_data_plane": "node.data_plane.restarted",
+    "api_diagnose_data_plane": "node.data_plane.diagnosed",
+    "api_restart_ai_node": "node.ai.restarted",
+}
+
+
+@before_request
+def initialize_observability():
+    supplied_request_id = request.headers.get(REQUEST_ID_HEADER, "").strip()
+    request_id = supplied_request_id if is_valid_request_id(supplied_request_id) else new_request_id()
+    endpoint = request.url_rule.rule if request.url_rule is not None else (request.endpoint or "unmatched")
+    initialize_request_context(request_id, method=request.method, endpoint=endpoint)
+    g.panel_request_started_at = time.monotonic()
+    g.panel_request_id = request_id
+    return None
 
 
 @before_request
@@ -217,6 +285,83 @@ def ensure_customer_portal_auth():
     if customer is not None:
         return None
     return customer_auth_required_response()
+
+
+@before_request
+def bind_observability_actor():
+    if is_session_authenticated():
+        bind_actor("admin")
+        return None
+    customer = get_authenticated_customer()
+    if customer is not None:
+        bind_actor("customer", customer.get("id"))
+        return None
+    tenant = get_authenticated_tenant()
+    if tenant is not None:
+        bind_actor("tenant", tenant.get("id"))
+    return None
+
+
+def observability_after_request(response):
+    """Add the request ID and emit only actionable request access logs."""
+
+    try:
+        endpoint = request.url_rule.rule if request.url_rule is not None else (request.endpoint or "unmatched")
+        set_request_endpoint(endpoint, request.method)
+        context = get_request_context()
+        request_id = str(context.get("request_id") or getattr(g, "panel_request_id", "") or new_request_id())
+        response.headers[REQUEST_ID_HEADER] = request_id
+        started_at = getattr(g, "panel_request_started_at", time.monotonic())
+        duration_ms = (time.monotonic() - started_at) * 1000
+        status_code = int(response.status_code)
+        if status_code >= 400 and not context.get("business_event_emitted"):
+            failed_event = _BUSINESS_EVENT_BY_ENDPOINT.get(request.endpoint or "")
+            if failed_event:
+                emit_business_event(
+                    failed_event,
+                    result="failure",
+                    status_code=status_code,
+                    error_code="http_rejected",
+                )
+        is_slow = duration_ms >= slow_request_threshold_ms()
+        should_log = request.method.upper() not in {"GET", "HEAD", "OPTIONS"} or is_slow or status_code >= 400
+        if should_log:
+            if status_code >= 500:
+                result = "failure"
+            elif status_code >= 400:
+                result = "rejected"
+            elif is_slow:
+                result = "slow"
+            else:
+                result = "success"
+            emit_request_event(
+                status_code=status_code,
+                duration_ms=duration_ms,
+                result=result,
+                message="slow request" if is_slow and status_code < 400 else "",
+            )
+    except Exception:
+        pass
+    return response
+
+
+def observability_teardown_request(exc):
+    try:
+        if exc is not None:
+            emit_event(
+                "http.unhandled_exception",
+                category="request",
+                result="failure",
+                level="ERROR",
+                status_code=500,
+                exc=exc,
+            )
+    finally:
+        clear_request_context()
+
+
+def log_business_event(event, **kwargs):
+    emit_business_event(event, **kwargs)
 
 
 @template_filter("human_bytes")
@@ -680,7 +825,10 @@ def main():
     atexit.register(state.stop)
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
+    show_server_banner = flask_cli.show_server_banner
+    flask_cli.show_server_banner = lambda *args, **kwargs: None
     try:
         app.run(host=PANEL_HOST, port=PANEL_PORT, threaded=True, use_reloader=False)
     finally:
+        flask_cli.show_server_banner = show_server_banner
         state.stop()

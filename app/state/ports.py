@@ -204,8 +204,9 @@ class PortsService:
                     now,
                 ),
             )
+            return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 
-        self._panel.apply_mutation(operation)
+        return self._panel.apply_mutation(operation)
     def update_port(self, port_id, payload):
         def operation(conn):
             now = utc_iso_now()

@@ -1,5 +1,4 @@
 import json
-import logging
 import sqlite3
 import subprocess
 import sys
@@ -39,10 +38,8 @@ from ..helpers import (
     utc_iso_now,
     utc_now,
 )
+from ..observability.logging import emit_business_event
 from ..xray.envfile import load_env_file
-
-
-LOGGER = logging.getLogger(__name__)
 
 
 class CoreService:
@@ -490,9 +487,22 @@ class CoreService:
             if backup_restarted:
                 try:
                     if not self._panel.restart_backup_xray():
-                        LOGGER.error("控制面备用 Xray 回滚重载失败，运行实例可能仍使用新端口配置")
-                except Exception:
-                    LOGGER.exception("控制面备用 Xray 回滚重载失败")
+                        emit_business_event(
+                            "node.backup.rollback_failed",
+                            result="failure",
+                            actor_type="system",
+                            resource_type="node",
+                            resource_id="control_plane_backup",
+                        )
+                except Exception as exc:
+                    emit_business_event(
+                        "node.backup.rollback_failed",
+                        result="failure",
+                        actor_type="system",
+                        resource_type="node",
+                        resource_id="control_plane_backup",
+                        exc=exc,
+                    )
             if self._panel.data_plane.supports_sync():
                 try:
                     self._panel.data_plane.sync_generated_files(validate_config=True)
@@ -527,20 +537,33 @@ class CoreService:
         self._panel.render_xray_config()
         try:
             self._panel.xray_config_test()
-        except RuntimeError:
+        except RuntimeError as exc:
             if not self._panel.data_plane.is_remote:
                 raise
-            LOGGER.exception("数据面不可达，跳过启动阶段的远程配置校验；控制面继续启动")
+            emit_business_event(
+                "node.data_plane.diagnosed",
+                result="failure",
+                actor_type="system",
+                resource_type="node",
+                resource_id="data_plane",
+                exc=exc,
+            )
     def write_json_file(self, path, payload):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     def render_xray_config(self):
         try:
             self._panel.sync_data_plane_dynamic_routing()
-        except RuntimeError:
+        except RuntimeError as exc:
             if not self._panel.data_plane.is_remote:
                 raise
-            LOGGER.exception("数据面动态路由读取失败，继续使用控制面最近一次本地产物")
+            emit_business_event(
+                "ai_routing.changed",
+                result="failure",
+                actor_type="system",
+                error_code="sync_failed",
+                exc=exc,
+            )
         share_path = XRAY_CONFIG_PATH.parent / "client-share.txt"
         command = [
             sys.executable,
@@ -798,8 +821,14 @@ class CoreService:
                 if now_monotonic - last_backup_mode_at >= backup_mode_interval:
                     self._panel.sync_backup_xray_mode()
                     last_backup_mode_at = now_monotonic
-            except Exception:
-                LOGGER.exception("维护循环执行失败")
+            except Exception as exc:
+                emit_business_event(
+                    "maintenance.failed",
+                    result="failure",
+                    actor_type="system",
+                    error_code="maintenance_exception",
+                    exc=exc,
+                )
                 continue
 
     def dns_failover_loop(self):
@@ -813,8 +842,14 @@ class CoreService:
             try:
                 if self._panel.dns_failover_manager.config.enabled:
                     self._panel.run_dns_failover_check()
-            except Exception:
-                LOGGER.exception("DNS 故障切换检测失败")
+            except Exception as exc:
+                emit_business_event(
+                    "dns_failover.checked",
+                    result="failure",
+                    actor_type="system",
+                    error_code="check_failed",
+                    exc=exc,
+                )
             interval = max(1, self._panel.dns_failover_manager.config.interval)
             if self._panel.stop_event.wait(interval):
                 return

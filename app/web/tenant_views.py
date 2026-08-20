@@ -8,8 +8,10 @@ from ..auth import (
 )
 from .core import (
     clear_tenant_session,
+    bind_actor,
     is_session_authenticated,
     is_tenant_session_authenticated,
+    log_business_event,
     route,
     state,
     tenant_login_target,
@@ -37,7 +39,10 @@ def tenant_login(tenant_token):
     password = request.form.get("password", "")
     if tenant_credentials_match(port, username, password):
         mark_tenant_session_authenticated(port)
+        bind_actor("tenant", port.get("id"))
+        log_business_event("auth.tenant.login", actor_type="tenant", resource_type="port", resource_id=port.get("id"))
         return redirect(tenant_panel_target(tenant_token), code=303)
+    log_business_event("auth.tenant.login", result="failure", actor_type="tenant", resource_type="port", resource_id=port.get("id"), error_code="invalid_credentials")
     return render_tenant_login_page(
         port,
         form_username=username,
@@ -48,6 +53,7 @@ def tenant_login(tenant_token):
 
 @route("/tenant/<tenant_token>/logout", methods=["GET", "POST"])
 def tenant_logout(tenant_token):
+    log_business_event("auth.tenant.logout", actor_type="tenant")
     clear_tenant_session()
     return redirect(tenant_login_target(tenant_token, message="已退出登录。", level="info"), code=303)
 

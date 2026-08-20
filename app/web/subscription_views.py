@@ -8,6 +8,7 @@ from .core import (
     is_session_authenticated,
     message_redirect,
     route,
+    log_business_event,
     state,
 )
 
@@ -15,6 +16,7 @@ from .core import (
 @route("/subscriptions/rotate", methods=["POST"])
 def rotate_subscription():
     state.rotate_subscription_token()
+    log_business_event("subscription.rotated", resource_type="subscription")
     return message_redirect("订阅链接已重新生成，旧链接已失效。", "success")
 
 

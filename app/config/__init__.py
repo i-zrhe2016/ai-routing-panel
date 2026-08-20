@@ -102,6 +102,11 @@ PANEL_SUBSCRIPTION_PUBLIC_URL = (
 PANEL_USERNAME = os.environ.get("PANEL_USERNAME", "")
 PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
 PANEL_SECRET_KEY = os.environ.get("PANEL_SECRET_KEY", "").strip()
+PANEL_LOG_LEVEL = os.environ.get("PANEL_LOG_LEVEL", "INFO").strip().upper() or "INFO"
+PANEL_SLOW_REQUEST_MS = parse_nonnegative_env_int(
+    os.environ.get("PANEL_SLOW_REQUEST_MS", "1000"),
+    "PANEL_SLOW_REQUEST_MS",
+)
 # Prometheus /metrics scrape token. Empty disables the endpoint (returns 404) so
 # the internet-facing panel never exposes metrics unauthenticated.
 METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "").strip()

@@ -27,11 +27,13 @@ from ..subscriptions import parse_xray_client_profile
 from .core import (
     build_customer_dashboard_state,
     build_customer_service_access,
+    bind_actor,
     get_authenticated_customer,
     json_customer_auth_required,
     json_customer_success,
     json_error_response,
     json_tenant_auth_required,
+    log_business_event,
     json_validate_csrf,
     request_payload,
     route,
@@ -83,7 +85,10 @@ def api_customer_login():
     if matched is not None and matched.get("status") == "active" and customer_credentials_match(matched, password):
         mark_customer_session_authenticated(matched)
         state.touch_customer_login(matched["id"])
+        bind_actor("customer", matched["id"])
+        log_business_event("auth.customer.login", actor_type="customer", actor_id=matched["id"])
         return json_customer_success({"customer": _serialize_customer(matched)}, message="登录成功。")
+    log_business_event("auth.customer.login", result="failure", actor_type="customer", error_code="invalid_credentials")
     return json_error_response("邮箱或密码错误。", 401)
 
 
@@ -104,15 +109,20 @@ def api_customer_register():
             raise ValidationError("客户账号创建失败。")
         mark_customer_session_authenticated(created)
         state.touch_customer_login(created["id"])
+        bind_actor("customer", created["id"])
+        log_business_event("auth.customer.register", actor_type="customer", actor_id=created["id"])
         return json_customer_success({"customer": _serialize_customer(created)}, message="注册成功。")
     except sqlite3.IntegrityError:
+        log_business_event("auth.customer.register", result="failure", actor_type="customer", error_code="conflict")
         return json_error_response("该邮箱已注册，请直接登录。", 409)
     except ValidationError as exc:
+        log_business_event("auth.customer.register", result="failure", actor_type="customer", error_code="validation", message=str(exc))
         return json_error_response(str(exc), 400)
 
 
 @route("/api/customer/auth/logout", methods=["POST"])
 def api_customer_logout():
+    log_business_event("auth.customer.logout", actor_type="customer")
     clear_customer_session()
     return json_customer_success(message="已退出登录。")
 
@@ -173,8 +183,10 @@ def api_customer_subscription_renew(service_subscription_id):
         order_no = state.create_order(
             customer["id"], service["plan_id"], kind="renewal", service_subscription_id=service_subscription_id
         )
+        log_business_event("subscription.renewed", actor_type="customer", actor_id=customer["id"], resource_type="subscription", resource_id=service_subscription_id, metadata={"order_no": order_no})
         return json_customer_success({"order_no": order_no}, message="续费订单已创建。")
     except ValidationError as exc:
+        log_business_event("subscription.renewed", result="failure", actor_type="customer", actor_id=customer["id"], resource_type="subscription", resource_id=service_subscription_id, error_code="rejected", message=str(exc))
         return json_error_response(str(exc), 400)
 
 
@@ -225,8 +237,10 @@ def api_customer_create_order():
         if plan is None:
             raise ValidationError("套餐不存在或已下架。")
         order_no = state.create_order(customer["id"], plan["id"], kind="new_purchase")
+        log_business_event("order.created", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no, metadata={"kind": "new_purchase"})
         return json_customer_success({"order_no": order_no}, message="订单已创建。")
     except ValidationError as exc:
+        log_business_event("order.created", result="failure", actor_type="customer", actor_id=customer["id"], error_code="rejected", message=str(exc))
         return json_error_response(str(exc), 400)
 
 
@@ -240,13 +254,24 @@ def api_customer_submit_payment_proof(order_no):
         return csrf_error
     file_storage = request.files.get("proof_image")
     if file_storage is None:
+        log_business_event(
+            "order.payment_proof_submitted",
+            result="failure",
+            actor_type="customer",
+            actor_id=customer["id"],
+            resource_type="order",
+            resource_id=order_no,
+            error_code="missing_proof",
+        )
         return json_error_response("请先选择支付截图。", 400)
     try:
         state.submit_order_payment_submission(
             customer["id"], order_no, file_storage, request.form.get("payer_note", "")
         )
+        log_business_event("order.payment_proof_submitted", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no)
         return json_customer_success(message="支付凭证已提交，等待人工审核。")
     except ValidationError as exc:
+        log_business_event("order.payment_proof_submitted", result="failure", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no, error_code="rejected", message=str(exc))
         return json_error_response(str(exc), 400)
 
 
@@ -304,5 +329,8 @@ def api_tenant_login(tenant_token):
     password = str(payload.get("password", "") or "")
     if tenant_credentials_match(port, username, password):
         mark_tenant_session_authenticated(port)
+        bind_actor("tenant", port.get("id"))
+        log_business_event("auth.tenant.login", actor_type="tenant", resource_type="port", resource_id=port.get("id"))
         return json_customer_success(message="登录成功。")
+    log_business_event("auth.tenant.login", result="failure", actor_type="tenant", resource_type="port", resource_id=port.get("id"), error_code="invalid_credentials")
     return json_error_response("用户名或密码错误。", 401)

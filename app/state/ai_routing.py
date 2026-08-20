@@ -7,6 +7,7 @@ from ..config import (
 from ..helpers import (
     utc_iso_now,
 )
+from ..observability.logging import emit_business_event
 from ..xray.ai_domain_manager import ensure_ai_domain_schema
 
 
@@ -15,17 +16,37 @@ class AiRoutingService:
     def __init__(self, panel):
         self._panel = panel
     def sync_data_plane_ai_state(self):
+        before = self._panel.read_ai_domain_report()
         result = {
             "report_synced": False,
             "snapshot_synced": False,
         }
-        if self._panel.data_plane.supports_ai_report_pull():
-            result["report_synced"] = self._panel.data_plane.sync_ai_report_from_remote()
-        if self._panel.data_plane.supports_ai_domains_snapshot_pull():
-            snapshot = self._panel.data_plane.read_ai_domains_snapshot_from_remote()
-            if snapshot.get("exists"):
-                self._panel.replace_ai_domains_snapshot(snapshot.get("ai_domains", []))
-                result["snapshot_synced"] = True
+        try:
+            if self._panel.data_plane.supports_ai_report_pull():
+                result["report_synced"] = self._panel.data_plane.sync_ai_report_from_remote()
+            if self._panel.data_plane.supports_ai_domains_snapshot_pull():
+                snapshot = self._panel.data_plane.read_ai_domains_snapshot_from_remote()
+                if snapshot.get("exists"):
+                    self._panel.replace_ai_domains_snapshot(snapshot.get("ai_domains", []))
+                    result["snapshot_synced"] = True
+        except Exception as exc:
+            emit_business_event(
+                "ai_routing.changed",
+                result="failure",
+                actor_type="system",
+                error_code="sync_failed",
+                exc=exc,
+            )
+            raise
+        after = self._panel.read_ai_domain_report()
+        before_signature = (before or {}).get("generated_at"), (before or {}).get("route_status")
+        after_signature = (after or {}).get("generated_at"), (after or {}).get("route_status")
+        if (result["report_synced"] or result["snapshot_synced"]) and before_signature != after_signature:
+            emit_business_event(
+                "ai_routing.changed",
+                actor_type="system",
+                metadata={"route_status": (after or {}).get("route_status", "unknown")},
+            )
         return result
     def replace_ai_domains_snapshot(self, rows):
         def operation(conn):

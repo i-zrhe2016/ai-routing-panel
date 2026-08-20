@@ -14,6 +14,7 @@ from ..helpers import (
     utc_iso_now,
     utc_now,
 )
+from ..observability.logging import emit_business_event
 
 
 
@@ -48,6 +49,17 @@ class ProbesService:
             except OSError as exc:
                 failure_reason = str(exc)[:200]
             results.append((row["listen_port"], reachable, checked_at, failure_reason))
+            if not reachable:
+                emit_business_event(
+                    "probe.failed",
+                    result="failure",
+                    actor_type="system",
+                    resource_type="port",
+                    resource_id=row["listen_port"],
+                    error_code="unreachable",
+                    message=failure_reason,
+                    metadata={"listen_port": row["listen_port"]},
+                )
 
         with self._panel.write_lock:
             with self._panel.connect() as conn:

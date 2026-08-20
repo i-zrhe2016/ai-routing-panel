@@ -13,6 +13,7 @@ from ..helpers import (
     format_display_time,
     utc_iso_now,
 )
+from ..observability.logging import emit_business_event
 
 
 
@@ -326,6 +327,14 @@ class DnsFailoverService:
         if not status["enabled"]:
             return status
         if not status["configured"]:
+            emit_business_event(
+                "dns_failover.checked",
+                result="failure",
+                actor_type="admin" if force else "system",
+                resource_type="dns",
+                error_code="configuration_missing",
+                message=status.get("config_error", ""),
+            )
             with self._panel.write_lock:
                 with self._panel.connect() as conn:
                     conn.execute("BEGIN IMMEDIATE")
@@ -336,6 +345,21 @@ class DnsFailoverService:
 
         probe = self._panel.dns_failover_manager.probe_once()
         probe_status = "healthy" if probe["ok"] else "unhealthy"
+        emit_business_event(
+            "dns_failover.checked",
+            actor_type="admin" if force else "system",
+            resource_type="dns",
+            metadata={"probe_status": probe_status},
+        )
+        if not probe["ok"]:
+            emit_business_event(
+                "probe.failed",
+                result="failure",
+                actor_type="admin" if force else "system",
+                resource_type="dns",
+                error_code="probe_failed",
+                message=probe.get("error", ""),
+            )
         switch_result = None
         with self._panel.write_lock:
             with self._panel.connect() as conn:
@@ -417,6 +441,16 @@ class DnsFailoverService:
                         detail=str(exc),
                     )
                     conn.commit()
+            if auto:
+                emit_business_event(
+                    "dns_failover.switched",
+                    result="failure",
+                    actor_type="system",
+                    resource_type="dns",
+                    error_code="provider_error",
+                    message=str(exc),
+                    exc=exc,
+                )
             raise ValidationError(str(exc)) from exc
         current_content = str(record.get("content") or "").strip()
         current_target = self._panel.dns_failover_manager.current_target_from_content(
@@ -445,6 +479,12 @@ class DnsFailoverService:
                         detail="DNS 已在目标指向，无需重复更新。",
                     )
                     conn.commit()
+            emit_business_event(
+                "dns_failover.switched",
+                actor_type="system" if auto else None,
+                resource_type="dns",
+                metadata={"target": target, "automatic": auto},
+            )
             return self._panel.dns_failover_status()
 
         try:
@@ -467,6 +507,16 @@ class DnsFailoverService:
                         detail=str(exc),
                     )
                     conn.commit()
+            if auto:
+                emit_business_event(
+                    "dns_failover.switched",
+                    result="failure",
+                    actor_type="system",
+                    resource_type="dns",
+                    error_code="provider_error",
+                    message=str(exc),
+                    exc=exc,
+                )
             raise ValidationError(str(exc)) from exc
 
         updated_content = str(updated.get("content") or "").strip()
@@ -497,6 +547,12 @@ class DnsFailoverService:
                     detail="自动切换完成。" if auto else "手动切换完成。",
                 )
                 conn.commit()
+        emit_business_event(
+            "dns_failover.switched",
+            actor_type="system" if auto else None,
+            resource_type="dns",
+            metadata={"target": target, "automatic": auto},
+        )
         return self._panel.dns_failover_status()
     def refresh_dns_failover_record_snapshot(self):
         status = self._panel.dns_failover_status()

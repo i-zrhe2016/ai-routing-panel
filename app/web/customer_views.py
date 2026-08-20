@@ -28,6 +28,8 @@ from .core import (
     clear_customer_session,
     customer_login_target,
     get_authenticated_customer,
+    bind_actor,
+    log_business_event,
     require_csrf,
     route,
     state,
@@ -233,8 +235,11 @@ def customer_register():
                 raise ValidationError("客户账号创建失败。")
             mark_customer_session_authenticated(created_customer)
             state.touch_customer_login(created_customer["id"])
+            bind_actor("customer", created_customer["id"])
+            log_business_event("auth.customer.register", actor_type="customer", actor_id=created_customer["id"])
             return redirect(next_target, code=303)
         except sqlite3.IntegrityError:
+            log_business_event("auth.customer.register", result="failure", actor_type="customer", error_code="conflict")
             return render_customer_register_page(
                 next_target=next_target,
                 form_email=email,
@@ -242,6 +247,13 @@ def customer_register():
                 status_code=409,
             )
         except ValidationError as exc:
+            log_business_event(
+                "auth.customer.register",
+                result="failure",
+                actor_type="customer",
+                error_code="validation",
+                message=str(exc),
+            )
             return render_customer_register_page(
                 next_target=next_target,
                 form_email=email,
@@ -272,7 +284,10 @@ def customer_login():
         ):
             mark_customer_session_authenticated(matched_customer)
             state.touch_customer_login(matched_customer["id"])
+            bind_actor("customer", matched_customer["id"])
+            log_business_event("auth.customer.login", actor_type="customer", actor_id=matched_customer["id"])
             return redirect(next_target, code=303)
+        log_business_event("auth.customer.login", result="failure", actor_type="customer", error_code="invalid_credentials")
         return render_customer_login_page(
             next_target=next_target,
             form_email=email,
@@ -285,6 +300,7 @@ def customer_login():
 
 @route("/customer/logout", methods=["GET", "POST"])
 def customer_logout():
+    log_business_event("auth.customer.logout", actor_type="customer")
     clear_customer_session()
     return redirect(url_for("plans_page"), code=303)
 
@@ -324,6 +340,15 @@ def customer_submit_order_payment_proof(order_no):
     require_csrf()
     file_storage = request.files.get("proof_image")
     if file_storage is None:
+        log_business_event(
+            "order.payment_proof_submitted",
+            result="failure",
+            actor_type="customer",
+            actor_id=customer["id"],
+            resource_type="order",
+            resource_id=order_no,
+            error_code="missing_proof",
+        )
         return redirect(_portal_order_url(order_no, message="请先选择支付截图。", level="error"), code=303)
     try:
         state.submit_order_payment_submission(
@@ -332,8 +357,10 @@ def customer_submit_order_payment_proof(order_no):
             file_storage,
             request.form.get("payer_note", ""),
         )
+        log_business_event("order.payment_proof_submitted", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no)
         return redirect(_portal_order_url(order_no, message="支付凭证已提交，等待人工审核。", level="success"), code=303)
     except ValidationError as exc:
+        log_business_event("order.payment_proof_submitted", result="failure", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no, error_code="rejected", message=str(exc))
         return redirect(_portal_order_url(order_no, message=str(exc), level="error"), code=303)
 
 
@@ -353,8 +380,10 @@ def customer_subscription_renew(service_subscription_id):
             kind="renewal",
             service_subscription_id=service_subscription_id,
         )
+        log_business_event("subscription.renewed", actor_type="customer", actor_id=customer["id"], resource_type="subscription", resource_id=service_subscription_id, metadata={"order_no": order_no})
         return redirect(_portal_order_url(order_no), code=303)
     except ValidationError as exc:
+        log_business_event("subscription.renewed", result="failure", actor_type="customer", actor_id=customer["id"], resource_type="subscription", resource_id=service_subscription_id, error_code="rejected", message=str(exc))
         query = urlencode({"message": str(exc), "level": "error"})
         return redirect(f"{PORTAL_HOME}/subscriptions/{service_subscription_id}?{query}", code=303)
 
@@ -384,8 +413,10 @@ def create_order():
             if plan is None:
                 raise ValidationError("套餐不存在或已下架。")
             order_no = state.create_order(customer["id"], plan["id"], kind="new_purchase")
+        log_business_event("order.created", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no, metadata={"kind": kind})
         return redirect(_portal_order_url(order_no), code=303)
     except ValidationError as exc:
+        log_business_event("order.created", result="failure", actor_type="customer", actor_id=customer["id"], error_code="rejected", message=str(exc), metadata={"kind": kind})
         fallback_slug = str(request.form.get("plan_slug", "") or "").strip()
         if fallback_slug:
             return redirect(
