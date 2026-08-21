@@ -146,6 +146,25 @@ def api_dns_failover_switch():
         return json_error_response(str(exc), status_code=400)
 
 
+@route("/api/ai-routing/switch", methods=["POST"])
+def api_ai_routing_switch():
+    require_csrf()
+    try:
+        mode = str(request_payload().get("mode") or "").strip().lower()
+        state.set_ai_routing_manual_mode(mode)
+        message = "AI 路由已强制回退到数据面直出。" if mode == "forced_fallback" else "AI 路由已恢复自动探测。"
+        return json_success_response(message)
+    except (ValidationError, RuntimeError) as exc:
+        log_business_event(
+            "ai_routing.manual_switched",
+            result="failure",
+            error_code="switch_failed",
+            message=str(exc),
+            resource_type="ai_routing",
+        )
+        return json_error_response(str(exc), status_code=400)
+
+
 @route("/api/subscriptions/rotate", methods=["POST"])
 def api_rotate_subscription():
     state.rotate_subscription_token()

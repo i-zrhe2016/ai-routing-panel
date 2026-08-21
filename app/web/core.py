@@ -165,6 +165,7 @@ _BUSINESS_EVENT_BY_ENDPOINT = {
     "customer_submit_order_payment_proof": "order.payment_proof_submitted",
     "api_dns_failover_check": "dns_failover.checked",
     "api_dns_failover_switch": "dns_failover.switched",
+    "api_ai_routing_switch": "ai_routing.manual_switched",
     "api_restart_data_plane": "node.data_plane.restarted",
     "api_diagnose_data_plane": "node.data_plane.diagnosed",
     "api_restart_ai_node": "node.ai.restarted",
@@ -243,6 +244,7 @@ def ensure_basic_auth():
         # Tokenized tenant deep-link: public shell + JSON API gated by tenant session.
         "api_tenant_subscription",
         "api_tenant_login",
+        "api_client_errors",
     }:
         return None
     if session.get(AUTH_SESSION_KEY) and not is_session_authenticated():
@@ -476,11 +478,10 @@ def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, 
     """Describe the current traffic-routing path for the dashboard flow diagram."""
     dp_ok = bool(data_plane_status.get("reachable"))
     ai_ok = bool(ai_node_status.get("reachable"))
-    ai_fallback = bool(
-        ai_routing_status
-        and str(ai_routing_status.get("route_status") or ai_routing_status.get("status") or "").strip()
-        == "fallback_to_primary"
-    )
+    ai_route_status = str(
+        ai_routing_status.get("route_status") or ai_routing_status.get("status") or ""
+    ).strip()
+    ai_fallback = ai_route_status in {"fallback_to_primary", "manual_fallback"}
     dns_target = str(dns_failover_status.get("current_target") or "primary").strip()
     backup_enabled = bool(dns_failover_status.get("enabled") and dns_failover_status.get("configured"))
     backup_xray_enabled = bool(dns_failover_status.get("control_plane_backup_xray_enabled"))
@@ -511,7 +512,9 @@ def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, 
         return route("normal_ai", "数据面→AI 节点直出", "正常：AI 流量经 AI 节点直出", "普通数据面", ["AI 节点"], "AI 节点 freedom 直出", "正常")
 
     if dp_ok and (not ai_ok or ai_fallback):
-        return route("normal_fallback", "数据面→freedom 直出", "AI 节点不可达，AI 流量回退到数据面直出", "普通数据面", [], "普通数据面 freedom 直出", "AI 回退", True)
+        reason = "AI 路由被人工强制回退，AI 流量改走数据面直出" if ai_route_status == "manual_fallback" else "AI 节点不可达，AI 流量回退到数据面直出"
+        status = "人工回退" if ai_route_status == "manual_fallback" else "AI 回退"
+        return route("normal_fallback", "数据面→freedom 直出", reason, "普通数据面", [], "普通数据面 freedom 直出", status, True)
 
     if dp_ok:
         return route("normal_direct", "数据面→freedom 直出", "正常：流量经数据面直出", "普通数据面", [], "普通数据面 freedom 直出", "正常")

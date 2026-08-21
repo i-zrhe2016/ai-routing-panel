@@ -26,6 +26,7 @@ from .core import (
 from . import (  # noqa: F401  (imported for route-registration side effects)
     admin_api,
     admin_views,
+    client_errors,
     customer_api,
     customer_views,
     health,
