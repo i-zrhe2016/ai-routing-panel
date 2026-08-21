@@ -99,6 +99,57 @@ class NodeControlTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "命令执行超时"):
                 controller._run_remote(["true"], "数据面命令失败")
 
+    def test_ssh_key_file_replaces_identity_options_and_forces_identities_only(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                ssh_options=("-i", "/wrong/key", "-o", "IdentitiesOnly=no", "-o", "ConnectTimeout=5"),
+                ssh_key_file="/run/secrets/fleet_ssh_key",
+            )
+        )
+
+        completed = subprocess.CompletedProcess(["ssh"], 0, stdout="", stderr="")
+        with mock.patch("app.xray.node_control.subprocess.run", return_value=completed) as mocked_run:
+            controller._run_remote(["true"], "数据面命令失败")
+
+        command = mocked_run.call_args.args[0]
+        self.assertNotIn("/wrong/key", command)
+        self.assertIn("/run/secrets/fleet_ssh_key", command)
+        self.assertIn("IdentitiesOnly=yes", command)
+        self.assertIn("ConnectTimeout=5", command)
+
+    def test_remote_reality_probe_returns_remote_payload(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+            )
+        )
+        controller._run_remote = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                ["ssh"],
+                0,
+                stdout=json.dumps(
+                    {
+                        "ok": True,
+                        "tls_handshake": True,
+                        "cert_chain_valid": True,
+                        "cert_matches_sni": True,
+                    }
+                ),
+                stderr="",
+            )
+        )
+
+        result = controller.probe_reality_endpoint("ai.example.com", 443, "www.example.com", 2)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["method"], "reality")
+        controller._run_remote.assert_called_once()
+
     def test_restart_data_plane_returns_summary(self):
         os.environ["DATAPLANE_SSH_TARGET"] = "root@data-plane"
         state_module = load_state_module(self.root)

@@ -1,5 +1,6 @@
 import io
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +24,20 @@ class _FakeHttpResponse:
 
 
 class AiDomainManagerTest(unittest.TestCase):
+    def test_read_ai_routing_manual_mode_defaults_and_reads_persisted_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "panel.db"
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                conn.execute(
+                    "INSERT INTO app_state (key, value) VALUES (?, ?)",
+                    ("ai_routing_manual_mode", "forced_fallback"),
+                )
+                conn.commit()
+
+            self.assertEqual(ai_domain_manager.read_ai_routing_manual_mode(db_path), "forced_fallback")
+            self.assertEqual(ai_domain_manager.read_ai_routing_manual_mode(Path(tmpdir) / "missing.db"), "auto")
+
     def test_gemini_session_domains_are_forced_to_ai_route(self):
         for domain in (
             "gemini.google.com",
@@ -167,6 +182,51 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(pending, ["unknown.example"])
         self.assertEqual(decisions["domains"], {})
         self.assertIn("openai classifier unavailable", stderr.getvalue())
+
+    def test_probe_uses_reality_callback_when_candidate_has_sni(self):
+        controller = mock.Mock()
+        controller.probe_reality_endpoint.return_value = {
+            "ok": False,
+            "error": "TLS handshake failed",
+            "method": "reality",
+        }
+
+        result = ai_domain_manager.probe_ai_upstream_candidate(
+            {
+                "upstream_host": "ai.example.com",
+                "upstream_port": 443,
+                "probe_server_name": "www.example.com",
+            },
+            2.0,
+            probe_controller=controller,
+        )
+
+        self.assertFalse(result["is_reachable"])
+        self.assertEqual(result["probe_method"], "reality")
+        controller.probe_reality_endpoint.assert_called_once_with(
+            "ai.example.com",
+            443,
+            "www.example.com",
+            2.0,
+        )
+
+    def test_select_ai_target_does_not_call_all_unreachable_on_probe_management_error(self):
+        controller = mock.Mock()
+        controller.probe_tcp_endpoint.return_value = {
+            "ok": False,
+            "error": "ssh authentication failed",
+            "management_error": True,
+            "method": "tcp",
+        }
+
+        result = ai_domain_manager.select_ai_target(
+            [{"upstream_host": "ai.example.com", "upstream_port": 443}],
+            2.0,
+            probe_controller=controller,
+        )
+
+        self.assertEqual(result["probe_status"], "probe_error")
+        self.assertFalse(ai_domain_manager.should_fallback_to_primary_route(result))
 
     @mock.patch("app.xray.ai_domain_manager.build_data_plane_controller")
     @mock.patch("app.xray.ai_domain_manager.rerender_config")
