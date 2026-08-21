@@ -50,7 +50,9 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 配置 `AI_NODE_SSH_TARGET` 只代表控制面能够纳管节点，不证明隧道凭据匹配，也不会安全地产生 relay URL。启用控制面备用 relay 时，必须显式提供与 AI inbound 匹配的 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`；否则保持 relay 能力关闭。
 
-管理器会按顺序做 TCP 探测，首个不可达时切换到下一个可达上游。
+管理器优先从普通数据面探测 AI 上游。模板或分享链接提供 REALITY SNI 时执行握手探测，否则使用 TCP 探测；首个不可达时切换到下一个可达上游。
+
+远端数据面模式必须配置 `DATAPLANE_SSH_KEY_FILE`。Compose 默认将运维密钥挂载到 `/run/secrets/fleet_ssh_key`，并强制使用 `IdentitiesOnly=yes`，避免 SSH 因尝试过多身份而无法同步配置。
 
 如果所有 AI 上游都不可达：
 
@@ -60,6 +62,10 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 - 报表中的 `route_status` 会标记为 `fallback_to_primary`
 - 回退判断由 `should_fallback_to_primary_route()`（`ai_domain_manager.py:1183`）完成
 - **此回退不涉及 DNS 切换**
+
+管理员也可以在控制台总览中主动执行“强制回退”。该模式会写入控制面数据库的 `app_state`，由 AI 管理器每轮读取并保持 `dynamic-routing.json` 不存在；点击“恢复自动”后，下一轮管理器重新按照 AI 上游探测结果决定是否生成动态路由。API 形式见 [API 与页面路径](api.md)。
+
+如果普通数据面管理通道本身探测失败，报告会标记 `probe_error`，并停止继续下发 AI 动态路由；修复 SSH 后下一轮会重新探测并恢复或回退。
 
 AI 节点恢复后，下一轮探测到可达，重新生成 `dynamic-routing.json`，AI 流量恢复转发到 AI 节点。
 

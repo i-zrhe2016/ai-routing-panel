@@ -213,6 +213,16 @@ Grafana host   -> tag:log-store:3100
 {job="platform-logs",node_role="control_plane",category="business"} | json
 ```
 
+前端请求错误记录为 `event="frontend.fetch_failed"`，Vue/浏览器运行时错误记录为 `event="frontend.runtime_error"`；两者都包含接口路径、HTTP 方法、状态码、错误来源和脱敏堆栈：
+
+```logql
+{job="platform-logs",node_role="control_plane",category="business"} | json | event="frontend.fetch_failed"
+```
+
+```logql
+{job="platform-logs",node_role="control_plane",category="business"} | json | event="frontend.runtime_error"
+```
+
 ```logql
 {job="platform-logs",node_role="control_plane"} | json | event=~"auth\\..*|port\\..*|order\\..*|dns_failover\\..*"
 ```

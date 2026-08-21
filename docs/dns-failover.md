@@ -448,6 +448,30 @@ curl -u admin:secret -X POST http://127.0.0.1:18080/api/dns-failover/switch \
 - 高峰窗口状态（如已启用）
 - 操作按钮：立即检测、切到主、切到备
 
+首页总览的「三节点流量切换拓扑」也提供 DNS 主备操作。成功切换或后台轮询发现路径变化后，拓扑链路播放一次性流动动画；浏览器启用减少动态效果时不播放位移动画。
+
+### AI 人工回退
+
+AI 节点不参与 DNS 切换。需要立即保证 AI 流量不再经过故障上游时，可调用：
+
+```bash
+curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+  -H 'Content-Type: application/json' \
+  -X POST \
+  -d '{"mode":"forced_fallback"}'
+```
+
+控制面会删除动态 AI 路由并在可用时重启数据面；`forced_fallback` 状态会持久化。恢复自动：
+
+```bash
+curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+  -H 'Content-Type: application/json' \
+  -X POST \
+  -d '{"mode":"auto"}'
+```
+
+恢复自动只清除人工覆盖，不立即运行 AI 管理器；下一轮管理器探测成功后才重新应用 AI 动态路由。
+
 ## 监控指标
 
 `/metrics` 端点暴露以下 DNS failover 相关 Prometheus 指标：

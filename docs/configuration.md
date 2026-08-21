@@ -22,6 +22,7 @@
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
 | `DATAPLANE_SSH_TARGET` | 远端数据面 SSH 目标，例如 `root@node-a` |
 | `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；远端生产环境建议包含 `-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1` |
+| `DATAPLANE_SSH_KEY_FILE` | 远端数据面 SSH 私钥路径；Compose 默认使用只读挂载的 `/run/secrets/fleet_ssh_key`，会自动强制 `IdentitiesOnly=yes` |
 | `DATAPLANE_REMOTE_COMMAND_TIMEOUT` | 单次远程 SSH/Docker 命令的控制面超时，默认 `8` 秒；避免数据面失联拖住控制面任务 |
 | `DATAPLANE_API_SERVER` | 数据面 Xray API 地址，默认 `127.0.0.1:10085` |
 | `DATAPLANE_CONFIG_PATH` | 远端或本地数据面使用的 `config.json` 路径 |
@@ -32,6 +33,8 @@
 | `DATAPLANE_ACCESS_LOG_PATH` | 远端 `access.log` 路径 |
 | `DATAPLANE_RESTART_COMMAND` | 远端数据面重启命令 |
 | `DATAPLANE_PROBE_HOST` | TCP 探针连接目标；远端模式下应指向远端入口 IP 或域名 |
+
+AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链接包含 REALITY SNI，管理器会执行 REALITY 握手；否则回退到 TCP 探测。可通过 `AI_UPSTREAM_PROBE_SERVER_NAME` 为模板显式指定 SNI。
 
 常见但通常不需要手动覆盖的运行时变量：
 
