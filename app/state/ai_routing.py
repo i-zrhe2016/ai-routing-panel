@@ -7,6 +7,7 @@ from ..config import (
 from ..helpers import (
     utc_iso_now,
 )
+from ..errors import ValidationError
 from ..observability.logging import emit_business_event
 from ..xray.ai_domain_manager import ensure_ai_domain_schema
 
@@ -113,12 +114,58 @@ class AiRoutingService:
         if mode in {"local", "docker"}:
             return "本地运行"
         return "本地缓存"
+
+    def ai_routing_manual_state(self):
+        with self._panel.connect() as conn:
+            mode = str(self._panel.get_state(conn, "ai_routing_manual_mode", "auto") or "auto").strip().lower()
+            updated_at = str(self._panel.get_state(conn, "ai_routing_manual_updated_at", "") or "").strip()
+        if mode not in {"auto", "forced_fallback"}:
+            mode = "auto"
+        return {
+            "mode": mode,
+            "mode_label": "人工强制回退" if mode == "forced_fallback" else "自动探测",
+            "updated_at": updated_at,
+            "updated_at_display": self._panel.format_optional_display_time(updated_at) if updated_at else "暂无",
+        }
+
+    def set_ai_routing_manual_mode(self, mode):
+        mode = str(mode or "").strip().lower()
+        if mode not in {"auto", "forced_fallback"}:
+            raise ValidationError("AI 路由模式仅支持 auto 或 forced_fallback。")
+        if not AI_ROUTING_ENABLED:
+            raise ValidationError("AI 路由未启用。")
+
+        updated_at = utc_iso_now()
+
+        def operation(conn):
+            self._panel.set_state(conn, "ai_routing_manual_mode", mode)
+            self._panel.set_state(conn, "ai_routing_manual_updated_at", updated_at)
+
+        self._panel.apply_state_update(operation)
+        if mode == "forced_fallback":
+            if not self._panel.data_plane.is_configured():
+                raise ValidationError("数据面未配置，无法应用 AI 回退。")
+            self._panel.data_plane.remove_dynamic_routing()
+            if self._panel.data_plane.supports_restart() and not self._panel.data_plane.restart():
+                raise RuntimeError("数据面未能重启，AI 回退可能尚未生效。")
+        emit_business_event(
+            "ai_routing.manual_switched",
+            actor_type="admin",
+            resource_type="ai_routing",
+            metadata={"mode": mode},
+        )
+        return self.ai_routing_manual_state()
+
     def ai_route_status_label(self, status, reason=""):
         status_text = str(status or "").strip().lower()
         if status_text == "applied":
             return "已应用 AI 路由"
         if status_text == "fallback_to_primary":
             return "AI 节点不可达，已回退主链路"
+        if status_text == "probe_error":
+            return "AI 节点探测失败，已停用动态 AI 路由"
+        if status_text == "manual_fallback":
+            return "人工强制回退到主链路"
         if status_text == "idle":
             return "当前窗口无 AI 域名"
         if status_text == "pending_proxy_template":
@@ -132,7 +179,7 @@ class AiRoutingService:
         status_text = str(status or "").strip().lower()
         if status_text == "applied":
             return "ok"
-        if status_text in {"fallback_to_primary", "idle", "disabled"}:
+        if status_text in {"fallback_to_primary", "probe_error", "manual_fallback", "idle", "disabled"}:
             return "warn"
         return "bad"
     def ai_source_label(self, value):
@@ -319,8 +366,13 @@ class AiRoutingService:
     def ai_routing_status(self, sync_error=""):
         report = self._panel.read_ai_domain_report()
         aggregate = self._panel.query_ai_domain_aggregate()
+        manual = self.ai_routing_manual_state()
         configured = AI_ROUTING_ENABLED
-        if not configured:
+        if manual["mode"] == "forced_fallback" and configured:
+            status_code = "manual_fallback"
+            status_label = "人工强制回退到主链路"
+            tone = "warn"
+        elif not configured:
             status_code = "disabled"
             status_label = "AI 路由未启用"
             tone = "warn"
@@ -345,6 +397,10 @@ class AiRoutingService:
             "report_generated_at_display": report["generated_at_display"] if report else "暂无",
             "current_ai_domains": report["ai_domain_count"] if report else 0,
             "total_ai_domains": aggregate["total_ai_domains"],
+            "manual_mode": manual["mode"],
+            "manual_mode_label": manual["mode_label"],
+            "manual_updated_at": manual["updated_at"],
+            "manual_updated_at_display": manual["updated_at_display"],
             "sync_error": str(sync_error or "").strip(),
         }
     def query_ai_domain_overview(self, sync_error=""):

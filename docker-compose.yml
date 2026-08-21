@@ -26,6 +26,7 @@ services:
       AI_ROUTING_ENABLED: "${AI_ROUTING_ENABLED:-1}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
+      DATAPLANE_SSH_KEY_FILE: "${DATAPLANE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
       DATAPLANE_REMOTE_COMMAND_TIMEOUT: "${DATAPLANE_REMOTE_COMMAND_TIMEOUT:-8}"
       DATAPLANE_API_SERVER: "${DATAPLANE_API_SERVER:-127.0.0.1:10085}"
       DATAPLANE_CONFIG_PATH: "${DATAPLANE_CONFIG_PATH:-}"
@@ -226,6 +227,7 @@ services:
       DATAPLANE_CONFIG_PATH: "${DATAPLANE_CONFIG_PATH:-}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
+      DATAPLANE_SSH_KEY_FILE: "${DATAPLANE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -233,6 +235,7 @@ services:
       - ./data:/panel-data
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/.ssh:/root/.ssh:ro
+      - /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
       - /root/.codex:/host-codex-home:ro
       - /root/.nvm/versions/node:/host-node-versions:ro
   xray-ai-node:

@@ -155,6 +155,48 @@ except OSError:
     raise SystemExit(1)
 """
 
+REMOTE_REALITY_PROBE_SCRIPT = """
+import json
+import socket
+import ssl
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+server_name = sys.argv[3]
+timeout = float(sys.argv[4])
+result = {
+    "ok": False,
+    "tls_handshake": False,
+    "cert_chain_valid": False,
+    "cert_matches_sni": None,
+    "error": "",
+}
+try:
+    context = ssl.create_default_context()
+    with socket.create_connection((host, port), timeout=timeout) as raw:
+        with context.wrap_socket(raw, server_hostname=server_name) as tls:
+            tls.getpeercert()
+    result.update(
+        ok=True,
+        tls_handshake=True,
+        cert_chain_valid=True,
+        cert_matches_sni=True,
+    )
+except ssl.CertificateError as exc:
+    result.update(
+        tls_handshake=True,
+        cert_chain_valid=True,
+        cert_matches_sni=False,
+        error=f"证书与 SNI 不匹配：{exc}",
+    )
+except ssl.SSLError as exc:
+    result["error"] = f"TLS 握手失败：{exc}"
+except OSError as exc:
+    result["error"] = f"TCP 连接失败：{exc}"
+print(json.dumps(result, ensure_ascii=True))
+"""
+
 PUBLIC_IP_DISCOVERY_SCRIPT = """
 import ipaddress
 import sys
@@ -318,6 +360,7 @@ class DataPlaneConfig:
     ssh_target: str = ""
     ssh_bin: str = "ssh"
     ssh_options: tuple[str, ...] = ()
+    ssh_key_file: str = ""
     remote_command_timeout: float = 8.0
     config_path: str = ""
     dynamic_routing_path: str = ""
@@ -430,17 +473,113 @@ class DataPlaneController:
         remote_command = join_shell_args(args)
         command = [
             self.config.ssh_bin,
-            *self.config.ssh_options,
+            *self._normalized_ssh_options(),
             self.config.ssh_target,
             remote_command,
         ]
         return self._run_subprocess(command, error_prefix, timeout=timeout, input_text=input_text)
+
+    def _normalized_ssh_options(self):
+        options = list(self.config.ssh_options or ())
+        key_file = str(self.config.ssh_key_file or "").strip()
+        if not key_file:
+            return tuple(options)
+
+        normalized = []
+        index = 0
+        while index < len(options):
+            token = str(options[index])
+            lowered = token.lower()
+            if token == "-i":
+                index += 2
+                continue
+            if lowered.startswith("-i") and len(token) > 2:
+                index += 1
+                continue
+            if token == "-o" and index + 1 < len(options):
+                option = str(options[index + 1])
+                option_lowered = option.lower()
+                if option_lowered.startswith("identityfile=") or option_lowered.startswith("identitiesonly="):
+                    index += 2
+                    continue
+                normalized.extend((token, option))
+                index += 2
+                continue
+            if lowered.startswith("identityfile=") or lowered.startswith("identitiesonly="):
+                index += 1
+                continue
+            normalized.append(token)
+            index += 1
+
+        normalized.extend(("-i", key_file, "-o", "IdentitiesOnly=yes"))
+        return tuple(normalized)
 
     def _run_local_shell(self, shell_command, error_prefix, timeout=None):
         return self._run_subprocess(["sh", "-lc", shell_command], error_prefix, timeout=timeout)
 
     def _run_remote_shell(self, shell_command, error_prefix, timeout=None):
         return self._run_remote(["sh", "-lc", shell_command], error_prefix, timeout=timeout)
+
+    def probe_tcp_endpoint(self, host, port, timeout_seconds):
+        result = {"ok": False, "error": "", "management_error": False, "method": "tcp"}
+        if self.mode == "ssh":
+            try:
+                self._run_remote(
+                    [
+                        "python3",
+                        "-c",
+                        REMOTE_SOCKET_CHECK_SCRIPT,
+                        str(host),
+                        str(int(port)),
+                        str(timeout_seconds),
+                    ],
+                    f"{self.config.label} AI 上游 TCP 探测失败",
+                    timeout=max(self.config.remote_command_timeout, float(timeout_seconds) + 1),
+                )
+                result["ok"] = True
+            except (OSError, RuntimeError) as exc:
+                result.update(error=str(exc), management_error=True)
+            return result
+
+        try:
+            with socket.create_connection((str(host), int(port)), timeout=timeout_seconds):
+                result["ok"] = True
+        except OSError as exc:
+            result["error"] = str(exc)[:200]
+        return result
+
+    def probe_reality_endpoint(self, host, port, server_name, timeout_seconds):
+        result = {
+            "ok": False,
+            "error": "",
+            "management_error": False,
+            "method": "reality",
+        }
+        if self.mode == "ssh":
+            try:
+                completed = self._run_remote(
+                    [
+                        "python3",
+                        "-c",
+                        REMOTE_REALITY_PROBE_SCRIPT,
+                        str(host),
+                        str(int(port)),
+                        str(server_name),
+                        str(timeout_seconds),
+                    ],
+                    f"{self.config.label} AI 上游 REALITY 探测失败",
+                    timeout=max(self.config.remote_command_timeout, float(timeout_seconds) + 1),
+                )
+                payload = json.loads(completed.stdout or "{}")
+                if not isinstance(payload, dict):
+                    raise RuntimeError("远端 REALITY 探测返回格式无效")
+                result.update(payload)
+            except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+                result.update(error=str(exc), management_error=True)
+            return result
+
+        result.update(reality_handshake_probe(host, port, server_name, timeout=timeout_seconds))
+        return result
 
     def resolve_public_ip(self, timeout_seconds=5):
         command = ["python3", "-c", PUBLIC_IP_DISCOVERY_SCRIPT, str(timeout_seconds)]
@@ -610,6 +749,20 @@ class DataPlaneController:
             local_path,
             f"{self.config.label} 动态路由读取失败",
         )
+
+    def remove_dynamic_routing(self):
+        """Remove the active AI routing fragment from the managed data plane."""
+        removed = False
+        local_path = self.config.source_dynamic_routing_path
+        if local_path is not None:
+            removed = local_path.unlink(missing_ok=True) or removed
+        if self.mode == "ssh" and self.config.dynamic_routing_path:
+            self._run_remote(
+                ["python3", "-c", REMOTE_DELETE_FILE_SCRIPT, self.config.dynamic_routing_path],
+                f"{self.config.label} 动态路由删除失败",
+            )
+            removed = True
+        return removed
 
     def sync_ai_report_from_remote(self):
         if not self.supports_ai_report_pull():

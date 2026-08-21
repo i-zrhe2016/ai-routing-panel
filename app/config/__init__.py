@@ -57,6 +57,7 @@ DATAPLANE_SSH_OPTIONS = parse_shell_words_env(
     os.environ.get("DATAPLANE_SSH_OPTIONS", ""),
     "DATAPLANE_SSH_OPTIONS",
 )
+DATAPLANE_SSH_KEY_FILE = os.environ.get("DATAPLANE_SSH_KEY_FILE", "").strip()
 DATAPLANE_REMOTE_COMMAND_TIMEOUT = parse_positive_env_float(
     os.environ.get("DATAPLANE_REMOTE_COMMAND_TIMEOUT", "8"),
     "DATAPLANE_REMOTE_COMMAND_TIMEOUT",

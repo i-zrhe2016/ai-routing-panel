@@ -36,6 +36,14 @@ _SENSITIVE_TEXT_RE = re.compile(
 _ACTOR_TYPES = {"anonymous", "admin", "customer", "tenant", "system"}
 _ALLOWED_METADATA_KEYS = {
     "automatic",
+    "client_error_name",
+    "client_source",
+    "client_stack",
+    "client_method",
+    "client_online",
+    "client_status",
+    "client_url_path",
+    "client_user_agent",
     "kind",
     "listen_port",
     "order_no",

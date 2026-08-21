@@ -20,7 +20,7 @@ from urllib.parse import parse_qsl, unquote, urlparse
 from app.xray.config import BASE_DIR, DEFAULT_RENDER_MODULE
 from app.xray.envfile import load_env_file as shared_load_env_file
 from app.xray.envfile import read_env_or_file as shared_read_env_or_file
-from app.xray.node_control import DataPlaneConfig, DataPlaneController
+from app.xray.node_control import DataPlaneConfig, DataPlaneController, reality_handshake_probe
 
 
 TIMESTAMP_RE = re.compile(r"^(?P<date>\d{4}/\d{2}/\d{2}) (?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?) ")
@@ -1053,6 +1053,9 @@ def parse_vless_fallback_url(raw, field_name="AI_UPSTREAM_FALLBACK_URL"):
         "candidate_type": "share_url",
         "candidate_label": unquote(parsed.fragment).strip(),
         "proxy_payload_override": {"outbounds": [outbound]},
+        "probe_server_name": str(
+            (outbound.get("streamSettings", {}).get("realitySettings", {}) or {}).get("serverName", "")
+        ).strip(),
     }
 
 
@@ -1128,18 +1131,58 @@ def build_ai_upstream_candidates(
     return candidates
 
 
-def probe_ai_upstream_candidate(candidate, timeout_seconds):
+def probe_ai_upstream_candidate(candidate, timeout_seconds, probe_controller=None):
     checked_at = format_timestamp(utc_now())
     reachable = False
     failure_reason = ""
-    try:
-        with socket.create_connection(
-            (candidate["upstream_host"], int(candidate["upstream_port"])),
+    probe_server_name = str(candidate.get("probe_server_name", "")).strip()
+    if probe_controller is not None:
+        if probe_server_name:
+            probe_result = probe_controller.probe_reality_endpoint(
+                candidate["upstream_host"],
+                candidate["upstream_port"],
+                probe_server_name,
+                timeout_seconds,
+            )
+        else:
+            probe_result = probe_controller.probe_tcp_endpoint(
+                candidate["upstream_host"],
+                candidate["upstream_port"],
+                timeout_seconds,
+            )
+        if not isinstance(probe_result, dict):
+            probe_result = {
+                "ok": False,
+                "error": "AI 上游探测返回格式无效",
+                "management_error": True,
+                "method": "unknown",
+            }
+        reachable = bool(probe_result.get("ok"))
+        failure_reason = str(probe_result.get("error", "")).strip()[:200]
+        probe_method = str(probe_result.get("method", "tcp")).strip() or "tcp"
+        management_error = bool(probe_result.get("management_error"))
+    elif probe_server_name:
+        probe_result = reality_handshake_probe(
+            candidate["upstream_host"],
+            candidate["upstream_port"],
+            probe_server_name,
             timeout=timeout_seconds,
-        ):
-            reachable = True
-    except OSError as exc:
-        failure_reason = str(exc)[:200]
+        )
+        reachable = bool(probe_result.get("ok"))
+        failure_reason = str(probe_result.get("error", "")).strip()[:200]
+        probe_method = "reality"
+        management_error = False
+    else:
+        try:
+            with socket.create_connection(
+                (candidate["upstream_host"], int(candidate["upstream_port"])),
+                timeout=timeout_seconds,
+            ):
+                reachable = True
+        except OSError as exc:
+            failure_reason = str(exc)[:200]
+        probe_method = "tcp"
+        management_error = False
 
     result = dict(candidate)
     result.update(
@@ -1149,6 +1192,8 @@ def probe_ai_upstream_candidate(candidate, timeout_seconds):
             "is_reachable": reachable,
             "failure_reason": failure_reason,
             "checked_at": checked_at,
+            "probe_method": probe_method,
+            "probe_management_error": management_error,
         }
     )
     return result
@@ -1162,7 +1207,10 @@ def summarize_ai_target_candidate(candidate):
         "is_reachable": bool(candidate.get("is_reachable")),
         "failure_reason": str(candidate.get("failure_reason", "")).strip(),
         "checked_at": str(candidate.get("checked_at", "")).strip(),
+        "probe_method": str(candidate.get("probe_method", "tcp")).strip() or "tcp",
     }
+    if candidate.get("probe_management_error"):
+        summary["probe_management_error"] = True
     label = str(candidate.get("candidate_label", "")).strip()
     if label:
         summary["candidate_label"] = label
@@ -1194,8 +1242,26 @@ def should_fallback_to_primary_route(ai_target):
     return str(ai_target.get("probe_status", "")).strip().lower() == "all_unreachable"
 
 
-def select_ai_target(candidates, timeout_seconds):
-    probes = [probe_ai_upstream_candidate(candidate, timeout_seconds) for candidate in candidates]
+def read_ai_routing_manual_mode(panel_db_path):
+    path = str(panel_db_path or "").strip()
+    if not path:
+        return "auto"
+    try:
+        with sqlite3.connect(path) as conn:
+            row = conn.execute(
+                "SELECT value FROM app_state WHERE key = 'ai_routing_manual_mode'"
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return "auto"
+    mode = str(row[0] if row else "auto").strip().lower()
+    return mode if mode in {"auto", "forced_fallback"} else "auto"
+
+
+def select_ai_target(candidates, timeout_seconds, probe_controller=None):
+    probes = [
+        probe_ai_upstream_candidate(candidate, timeout_seconds, probe_controller=probe_controller)
+        for candidate in candidates
+    ]
     selected_index = 0
     for index, candidate in enumerate(probes):
         if candidate["is_reachable"]:
@@ -1207,16 +1273,21 @@ def select_ai_target(candidates, timeout_seconds):
     selected = probes[selected_index]
     all_unreachable = not any(item["is_reachable"] for item in probes)
     selected_target = dict(selected)
+    management_error = any(item.get("probe_management_error") for item in probes)
     selected_target.update(
         {
             "selected_index": selected_index,
             "selected_number": selected_index + 1,
             "candidate_count": len(probes),
             "failover_active": selected_index > 0,
-            "probe_status": "all_unreachable" if all_unreachable else "reachable",
+            "probe_status": (
+                "probe_error"
+                if management_error
+                else ("all_unreachable" if all_unreachable else "reachable")
+            ),
             "probe_timeout_seconds": timeout_seconds,
             "checked_at": selected["checked_at"],
-            "failure_reason": selected["failure_reason"] if all_unreachable else "",
+            "failure_reason": selected["failure_reason"] if (all_unreachable or management_error) else "",
             "candidates": [summarize_ai_target_candidate(item) for item in probes],
         }
     )
@@ -1336,6 +1407,35 @@ def render_proxy_template(template_path, ai_target, panel_target):
         first["tag"] = "ai_proxy"
     apply_default_proxy_sockopt(outbounds)
     return {"outbounds": outbounds}, ""
+
+
+def extract_probe_server_name(proxy_payload):
+    if not isinstance(proxy_payload, dict):
+        return ""
+    for outbound in proxy_payload.get("outbounds", []):
+        if not isinstance(outbound, dict) or outbound.get("tag") != "ai_proxy":
+            continue
+        stream_settings = outbound.get("streamSettings", {})
+        reality_settings = stream_settings.get("realitySettings", {}) if isinstance(stream_settings, dict) else {}
+        if isinstance(reality_settings, dict):
+            server_name = str(reality_settings.get("serverName", "")).strip()
+            if server_name:
+                return server_name
+    return ""
+
+
+def resolve_probe_server_name(template_path, candidate, panel_target, explicit_server_name=""):
+    candidate_server_name = str(candidate.get("probe_server_name", "")).strip()
+    if candidate_server_name:
+        return candidate_server_name
+    explicit = str(explicit_server_name or "").strip()
+    if explicit:
+        return explicit
+    try:
+        proxy_payload, _reason = render_proxy_template(template_path, candidate, panel_target)
+    except (OSError, ValueError, TypeError):
+        return ""
+    return extract_probe_server_name(proxy_payload)
 
 
 def write_routing_fragment(path, ai_domains, proxy_payload):
@@ -1565,6 +1665,7 @@ def build_data_plane_controller(args):
             ssh_target=args.data_plane_ssh_target,
             ssh_bin=args.data_plane_ssh_bin,
             ssh_options=tuple(args.data_plane_ssh_options),
+            ssh_key_file=str(getattr(args, "data_plane_ssh_key_file", "") or "").strip(),
             config_path=args.data_plane_config_path,
             source_config_path=args.config_out,
             upstream_host=upstream_host,
@@ -1667,8 +1768,29 @@ def run_once(args):
     decisions = load_decisions(args.classification_state_path)
     observed_domains = {item["domain"] for item in log_state["events"]}
     sync_builtin_domain_decisions(decisions, args.classification_state_path, observed_domains)
-    ai_target = select_ai_target(args.ai_upstream_candidates, args.ai_upstream_probe_timeout_seconds)
     panel_target = read_panel_target(args.panel_db_path, args.panel_route_listen_port)
+    data_plane_controller = build_data_plane_controller(args)
+    manual_mode = read_ai_routing_manual_mode(args.panel_db_path)
+    if manual_mode == "forced_fallback":
+        ai_target = {
+            "probe_status": "manual_fallback",
+            "failure_reason": "manual_override",
+            "is_reachable": False,
+            "candidates": [],
+        }
+    else:
+        for candidate in args.ai_upstream_candidates:
+            candidate["probe_server_name"] = resolve_probe_server_name(
+                args.proxy_template_path,
+                candidate,
+                panel_target,
+                getattr(args, "ai_upstream_probe_server_name", ""),
+            )
+        ai_target = select_ai_target(
+            args.ai_upstream_candidates,
+            args.ai_upstream_probe_timeout_seconds,
+            probe_controller=data_plane_controller,
+        )
     route_status = {"status": "disabled", "reason": ""}
 
     pending_without_classifier = classify_pending_domains(
@@ -1686,9 +1808,18 @@ def run_once(args):
 
     proxy_payload = None
     if ai_domains:
-        if should_fallback_to_primary_route(ai_target):
+        if manual_mode == "forced_fallback":
+            args.dynamic_routing_path.unlink(missing_ok=True)
+            route_status = {"status": "manual_fallback", "reason": "manual_override"}
+        elif should_fallback_to_primary_route(ai_target):
             args.dynamic_routing_path.unlink(missing_ok=True)
             route_status = {"status": "fallback_to_primary", "reason": "ai_upstream_unreachable"}
+        elif str(ai_target.get("probe_status", "")).strip().lower() == "probe_error":
+            args.dynamic_routing_path.unlink(missing_ok=True)
+            route_status = {
+                "status": "probe_error",
+                "reason": ai_target.get("failure_reason", "ai_probe_management_failed"),
+            }
         else:
             proxy_payload, proxy_error = render_proxy_template(args.proxy_template_path, ai_target, panel_target)
             if proxy_payload is None:
@@ -1705,8 +1836,6 @@ def run_once(args):
         route_status = {"status": "idle", "reason": "no_ai_domains"}
 
     previous_config = args.config_out.read_text(encoding="utf-8") if args.config_out.is_file() else ""
-    data_plane_controller = build_data_plane_controller(args)
-
     rerender_config(
         args.render_script,
         args.env_file,
@@ -1794,6 +1923,7 @@ def build_args():
     args.data_plane_ssh_options = tuple(
         shlex.split(os.environ.get("DATAPLANE_SSH_OPTIONS", "").strip())
     ) if os.environ.get("DATAPLANE_SSH_OPTIONS", "").strip() else ()
+    args.data_plane_ssh_key_file = os.environ.get("DATAPLANE_SSH_KEY_FILE", "").strip()
     args.data_plane_api_server = os.environ.get("DATAPLANE_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
     args.data_plane_xray_bin = os.environ.get("DATAPLANE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
     args.data_plane_local_bin = os.environ.get("DATAPLANE_LOCAL_BIN", "").strip()
@@ -1830,6 +1960,11 @@ def build_args():
     args.ai_upstream_probe_timeout_seconds = parse_positive_float(
         read_env_or_file("AI_UPSTREAM_PROBE_TIMEOUT_SECONDS", "3", env_file_values),
         "AI_UPSTREAM_PROBE_TIMEOUT_SECONDS",
+    )
+    args.ai_upstream_probe_server_name = read_env_or_file(
+        "AI_UPSTREAM_PROBE_SERVER_NAME",
+        "",
+        env_file_values,
     )
     args.ai_upstream_candidates = build_ai_upstream_candidates(
         args.ai_upstream_host,
