@@ -16,8 +16,18 @@ function makeDashboard() {
       probe_enabled: false,
       ai_domain_dashboard_url: "/ai-domain-dashboard",
       data_plane_status: { xray_running: true, configured: true, label: "数据面", management_target: "docker" },
+      ai_node_status: { configured: true, reachable: true, label: "AI 节点", management_target: "root@ai-node" },
       ai_routing_status: { configured: true, status_tone: "ok", status_label: "正常" },
-      dns_failover_status: { enabled: false },
+      dns_failover_status: { enabled: true, configured: true, current_target: "primary", backup_label: "控制面备用 Xray" },
+      traffic_routing: {
+        path: "normal_ai",
+        label: "数据面→AI 节点直出",
+        scenario: "正常：AI 流量经 AI 节点直出",
+        entry_node: "普通数据面",
+        transit_nodes: ["AI 节点"],
+        exit_node: "AI 节点 freedom 直出",
+      },
+      backup_xray_mode: "relay",
     },
     summary: {
       total_ports: 1,
@@ -175,6 +185,19 @@ describe("AdminApp", () => {
     const wrapper = await mountAdmin();
     // total = 512 + 512 = 1024 -> "1.00 KB"
     expect(wrapper.text()).toContain("1.00 KB");
+  });
+
+  it("renders the failover topology and switches AI routing manually", async () => {
+    const wrapper = await mountAdmin();
+    expect(wrapper.text()).toContain("三节点流量切换拓扑");
+    const fallbackButton = wrapper.findAll("button").find((button) => button.text().includes("强制回退"));
+    expect(fallbackButton).toBeTruthy();
+    await fallbackButton.trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai-routing/switch",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "forced_fallback" }) }),
+    );
   });
 
   it("fulfills an order via POST /api/orders/<id>/fulfill", async () => {

@@ -58,6 +58,8 @@ export default {
       isMobile: false,
       mobileNavOpen: false,
       loading: true,
+      dashboardPollTimer: null,
+      dashboardRefreshBusy: false,
       authEnabled: Boolean(typeof window !== "undefined" && window.__BOOT__ && window.__BOOT__.auth_enabled),
       menuOptions: [
         { label: "总览", key: "overview" },
@@ -83,6 +85,9 @@ export default {
     try {
       const data = await this.requestJson("/api/dashboard");
       this.applyDashboard(data.dashboard || {});
+      if (import.meta.env.MODE !== "test") {
+        this.dashboardPollTimer = window.setInterval(this.refreshDashboard, 15000);
+      }
     } catch (error) {
       this.setFlash(error.message || "加载失败。", "error");
     } finally {
@@ -90,6 +95,14 @@ export default {
     }
   },
   beforeUnmount() {
+    if (this.dashboardPollTimer) {
+      window.clearInterval(this.dashboardPollTimer);
+      this.dashboardPollTimer = null;
+    }
+    if (this.topologyTransitionTimer) {
+      window.clearTimeout(this.topologyTransitionTimer);
+      this.topologyTransitionTimer = null;
+    }
     if (typeof window !== "undefined") {
       window.removeEventListener("resize", this.updateIsMobile);
     }
@@ -103,6 +116,18 @@ export default {
     selectSection(key) {
       this.activeSection = key;
       this.mobileNavOpen = false;
+    },
+    async refreshDashboard() {
+      if (this.dashboardRefreshBusy || this.loading) return;
+      this.dashboardRefreshBusy = true;
+      try {
+        const data = await this.requestJson("/api/dashboard");
+        this.applyDashboard(data.dashboard || {});
+      } catch (_error) {
+        // Keep the last known topology visible when a background refresh fails.
+      } finally {
+        this.dashboardRefreshBusy = false;
+      }
     },
     logout() {
       const form = document.createElement("form");

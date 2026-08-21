@@ -1,4 +1,5 @@
 import { fallbackCopyText } from "../utils.js";
+import { reportClientError } from "../shared/apiClient.js";
 
 export function sameOriginLoginUrl(value, location = window.location) {
   try {
@@ -18,9 +19,25 @@ export const CoreMixin = {
       meta: {},
       summary: {},
       subscription: {},
+      dataPlaneStatus: {},
+      aiNodeStatus: {},
+      aiRoutingStatus: {},
+      dnsFailoverStatus: {},
+      nodes: [],
+      trafficRouting: {},
+      commerceSummary: {},
+      commerceSettings: {},
+      ports: [],
+      plans: [],
+      orders: [],
       flash: { message: "", level: "info" },
       busyActions: {},
       copiedKey: "",
+      dashboardReady: false,
+      routingSignature: "",
+      topologyTransitionKey: 0,
+      topologyTransitioning: false,
+      topologyTransitionTimer: null,
     };
   },
 
@@ -40,6 +57,28 @@ export const CoreMixin = {
 
   methods: {
     applyDashboard(dashboard) {
+      const nextRouting = dashboard.meta?.traffic_routing || {};
+      const nextDns = dashboard.meta?.dns_failover_status || {};
+      const nextAi = dashboard.meta?.ai_routing_status || {};
+      const nextSignature = JSON.stringify({
+        path: nextRouting.path || "unknown",
+        dnsTarget: nextDns.current_target || "",
+        aiMode: nextAi.manual_mode || "auto",
+        backupMode: dashboard.meta?.backup_xray_mode || "",
+      });
+      if (this.dashboardReady && this.routingSignature && this.routingSignature !== nextSignature) {
+        this.topologyTransitionKey += 1;
+        this.topologyTransitioning = true;
+        if (this.topologyTransitionTimer) {
+          window.clearTimeout(this.topologyTransitionTimer);
+        }
+        this.topologyTransitionTimer = window.setTimeout(() => {
+          this.topologyTransitioning = false;
+          this.topologyTransitionTimer = null;
+        }, 1500);
+      }
+      this.routingSignature = nextSignature;
+      this.dashboardReady = true;
       this.meta = dashboard.meta || {};
       this.summary = dashboard.summary || {};
       this.subscription = dashboard.subscription || {};
@@ -111,31 +150,49 @@ export const CoreMixin = {
       if (options.body !== undefined) {
         headers["Content-Type"] = "application/json";
       }
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: options.body,
-        credentials: "same-origin",
-      });
-      const rawText = await response.text();
+      let response;
+      try {
+        response = await fetch(url, {
+          method,
+          headers,
+          body: options.body,
+          credentials: "same-origin",
+        });
+      } catch (error) {
+        reportClientError({ url, method, error, csrfToken: this.meta?.csrf_token, source: "fetch" });
+        throw error;
+      }
+      let rawText;
+      try {
+        rawText = await response.text();
+      } catch (error) {
+        reportClientError({ url, method, error, csrfToken: this.meta?.csrf_token, status: response.status, source: "response.read" });
+        throw error;
+      }
       let data = {};
       if (rawText) {
         try {
           data = JSON.parse(rawText);
         } catch (_error) {
+          const error = new Error(`服务返回了无法解析的响应（${response.status}）。`);
+          reportClientError({ url, method, error, csrfToken: this.meta?.csrf_token, status: response.status, source: "response.parse" });
           if (response.status === 401) {
             window.location.assign("/login");
             throw new Error("登录已失效，请重新登录。");
           }
-          throw new Error(`服务返回了无法解析的响应（${response.status}）。`);
+          throw error;
         }
       }
       if (response.status === 401) {
         window.location.assign(sameOriginLoginUrl(data.login_url));
-        throw new Error(data.message || "登录已失效，请重新登录。");
+        const error = new Error(data.message || "登录已失效，请重新登录。");
+        reportClientError({ url, method, error, csrfToken: this.meta?.csrf_token, status: 401, source: "http" });
+        throw error;
       }
       if (!response.ok || data.ok === false) {
-        throw new Error(data.message || `请求失败（${response.status}）。`);
+        const error = new Error(data.message || `请求失败（${response.status}）。`);
+        reportClientError({ url, method, error, csrfToken: this.meta?.csrf_token, status: response.status, source: "http" });
+        throw error;
       }
       return data;
     },

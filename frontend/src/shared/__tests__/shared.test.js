@@ -1,7 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createApiClient, ApiError } from "../apiClient.js";
+import { createApiClient, ApiError, installClientErrorLogging, installVueErrorLogging } from "../apiClient.js";
 import { copyText, fallbackCopyText } from "../clipboard.js";
 import { humanBytes, usageFraction } from "../formatters.js";
 import { naiveThemeOverrides, statusTone, tokens } from "../tokens.js";
@@ -95,6 +95,75 @@ describe("apiClient", () => {
     const api = createApiClient({ onUnauthorized });
     await expect(api.get("/api/customer/me")).rejects.toBeInstanceOf(ApiError);
     expect(onUnauthorized).toHaveBeenCalledWith("/customer/login");
+  });
+
+  it("reports browser fetch failures without replacing the original error", async () => {
+    const networkError = new TypeError("Failed to fetch");
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(networkError)
+      .mockResolvedValueOnce(jsonResponse(202, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("navigator", { onLine: true, userAgent: "test-agent" });
+    const api = createApiClient({ csrfToken: "csrf-123" });
+
+    await expect(api.get("/api/dashboard?token=secret")).rejects.toBe(networkError);
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/client-errors",
+      expect.objectContaining({ method: "POST", keepalive: true }),
+    );
+    const report = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(report.message).toBe("Failed to fetch");
+    expect(report.url_path).toBe("/api/dashboard");
+    expect(fetchMock.mock.calls[1][1].headers["X-CSRF-Token"]).toBe("csrf-123");
+  });
+
+  it("reports HTTP failures with status and source", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(503, { ok: false, message: "服务暂不可用。" }))
+      .mockResolvedValueOnce(jsonResponse(202, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createApiClient({ csrfToken: "csrf-123" });
+
+    await expect(api.get("/api/dashboard")).rejects.toMatchObject({ name: "ApiError", status: 503 });
+    await Promise.resolve();
+
+    const report = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(report.source).toBe("http");
+    expect(report.status).toBe(503);
+    expect(report.url_path).toBe("/api/dashboard");
+  });
+
+  it("reports uncaught window errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(202, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const cleanup = installClientErrorLogging({ csrfToken: "csrf-123" });
+    const error = new Error("render failed");
+    window.dispatchEvent(new ErrorEvent("error", { error, message: error.message }));
+    await Promise.resolve();
+    cleanup();
+
+    const report = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(report.source).toBe("window.error");
+    expect(report.message).toBe("render failed");
+  });
+
+  it("reports Vue handler errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(202, { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = { config: {} };
+    installVueErrorLogging(app, { csrfToken: "csrf-123" });
+    const error = new Error("component failed");
+    app.config.errorHandler(error, null, "render");
+    await Promise.resolve();
+
+    const report = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(report.source).toBe("vue.render");
+    expect(report.message).toBe("component failed");
   });
 });
 

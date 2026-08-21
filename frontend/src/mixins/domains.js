@@ -53,5 +53,16 @@ export const AiDomainsMixin = {
         this.applyResponse(data);
       });
     },
+
+    async switchAiRoutingMode(mode) {
+      const action = mode === "forced_fallback" ? "force-ai-fallback" : "restore-ai-auto";
+      await this.runAction(action, async () => {
+        const data = await this.requestJson("/api/ai-routing/switch", {
+          method: "POST",
+          body: JSON.stringify({ mode }),
+        });
+        this.applyResponse(data);
+      });
+    },
   },
 };

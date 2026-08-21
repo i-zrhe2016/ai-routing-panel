@@ -1,10 +1,11 @@
 <script>
 import StatusPill from "../../shared/ui/StatusPill.vue";
+import FailoverTopology from "../components/FailoverTopology.vue";
 
 // Read-only KPI overview. Injects the root `panel` for all state/helpers.
 export default {
   name: "OverviewSection",
-  components: { StatusPill },
+  components: { StatusPill, FailoverTopology },
   inject: ["panel"],
 };
 </script>
@@ -45,6 +46,8 @@ export default {
         </div>
       </div>
     </div>
+
+    <failover-topology />
 
     <div class="a-card">
       <div class="a-card-head">
