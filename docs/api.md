@@ -18,7 +18,7 @@
 - `/probe-dashboard`：TCP 探针监控页
 - `/ai-domain-dashboard`：AI 域名统计页
 - `/portal`、`/portal/<path>`：订阅者门户 SPA（vue-router history）
-- `/plans`、`/checkout/<plan_slug>`：公共套餐页与结账页
+- `/plans`：公共套餐信息页（只读；新购套餐不提供结账/预订单页）
 - `/customer/login`、`/customer/register`：客户认证页
 - `/tenant/<tenant_token>`：门户的单订阅只读模式壳（原“租户面板”，未认证时显示内联租户登录卡）
 - `/tenant-subscriptions/<subscription_token>`：默认订阅
@@ -67,7 +67,6 @@
 | `GET` | `/api/customer/subscriptions[/<id>]` | 订阅列表 / 详情（含 Clash/V2Ray/VLESS 链接、用量）|
 | `POST` | `/api/customer/subscriptions/<id>/renew` | 续费下单 |
 | `GET` | `/api/customer/orders[/<order_no>]` | 订单列表 / 详情 |
-| `POST` | `/api/customer/orders` | 新购下单（`{plan_slug}`）|
 | `POST` | `/api/customer/orders/<order_no>/payment-proof` | 上传支付凭证（multipart）|
 | `GET` | `/api/customer/plans` | 公开套餐列表（无需登录）|
 | `POST` | `/api/customer/auth/{login,register,logout}` | 客户认证 |

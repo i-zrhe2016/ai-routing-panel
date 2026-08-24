@@ -5,7 +5,7 @@
 ## 核心能力
 
 - 管理后台（Vue + Naive UI 单页应用）和 JSON API 统一管理监听端口、备注、到期时间、流量上限、租户凭据和订阅链接。
-- 面向终端用户的**订阅者门户**：客户注册/登录、浏览套餐、下单、上传支付凭证、人工审核开通、查看订阅与续费。每个端口租户即客户，原“租户面板”统一为门户中的订阅详情（Clash/V2Ray/VLESS 订阅链接、流量用量、凭据）。
+- 面向终端用户的**订阅者门户**：客户注册/登录、浏览套餐、查看订阅、续费和提交支付凭证。新购套餐不再通过面板创建预订单；每个端口租户即客户，原“租户面板”统一为门户中的订阅详情（Clash/V2Ray/VLESS 订阅链接、流量用量、凭据）。
 - 根据数据库状态生成 `app/xray/runtime/panel-ports.json` 和 `app/xray/runtime/config.json`。
 - 通过 Docker、本地二进制或 SSH 管理唯一 `data_plane`，并读取 Xray API / `access.log` 做统计。
 - 按小时分析访问域名，生成动态 AI 路由规则、报表和数据库聚合结果。
@@ -17,7 +17,7 @@
 ## 当前架构
 
 - `xray-routing-panel`（控制面）
-  - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`、`/checkout`）以及探针/AI 仪表盘
+  - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`）以及探针/AI 仪表盘
   - 前端发布资源位于 `app/static/admin/*`、`app/static/portal/*` 与 `app/static/landing/*`；`frontend/src` 仅作为源码快照保留
   - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
   - 通过 Tailscale SSH 纳管普通数据面；AI 节点当前是控制面本机 Docker `xray-ai-node`，也支持显式切换为远端 SSH 模式
@@ -285,7 +285,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 - `GET /portal`、`GET /portal/<path>`: 门户 SPA 壳（vue-router history）
 - `GET /api/customer/{me,overview,subscriptions[/<id>],orders[/<no>],plans}`: 门户数据
-- `POST /api/customer/orders`、`.../payment-proof`、`.../<id>/renew`: 下单、传支付凭证、续费
+- `POST /api/customer/orders/<order_no>/payment-proof`、`.../<id>/renew`: 为已有订单传支付凭证、续费；新购套餐不提供客户侧预订单接口
 - `POST /api/customer/auth/{login,register,logout}`: 客户认证
 
 租户直达（token / 每端口凭据）：
