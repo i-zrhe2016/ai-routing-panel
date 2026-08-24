@@ -1,16 +1,8 @@
 FROM ghcr.io/xtls/xray-core:26.5.3 AS xray-core
 
-# Build the admin + portal SPA bundles in a Node stage so the built JS/CSS is not
-# committed to the repo. Vite emits to ../app/static/{admin,portal} (see
-# frontend/vite.config.js + vite.portal.config.js), i.e. /build/app/static/* here.
-FROM node:20-bookworm-slim AS frontend-builder
-WORKDIR /build
-COPY frontend/package.json frontend/package-lock.json ./frontend/
-RUN cd frontend && npm ci --no-audit --no-fund
-COPY frontend/ ./frontend/
-RUN cd frontend && npm run build
-
 FROM debian:bookworm-slim
+
+ARG CODEX_CLI_VERSION=0.145.0
 
 # Runtime deps. python3-pip replaces the apt python3-flask package (the Python
 # deps are pinned in requirements.txt and installed with pip).
@@ -32,11 +24,16 @@ RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 COPY app /app
 COPY components /app/components
 COPY scripts /app/scripts
-# Built SPA bundles come from the frontend builder, not from the repo.
-COPY --from=frontend-builder /build/app/static/admin /app/static/admin
-COPY --from=frontend-builder /build/app/static/portal /app/static/portal
-COPY --from=frontend-builder /build/app/static/landing /app/static/landing
+# SPA bundles are versioned deployment artifacts. The control plane has no
+# frontend build toolchain at runtime.
+COPY app/static/admin /app/static/admin
+COPY app/static/portal /app/static/portal
+COPY app/static/landing /app/static/landing
 COPY --from=xray-core /usr/local/bin/xray /usr/local/bin/xray
+# The AI-domain manager uses the standalone Codex binary. No Node runtime or
+# package manager is needed in the application image.
+ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex /usr/local/bin/codex
+RUN chmod 0755 /usr/local/bin/codex
 
 ENV DATA_DIR=/data \
     DB_PATH=/data/panel.db \

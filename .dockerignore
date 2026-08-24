@@ -19,13 +19,6 @@ monitoring/prometheus/secrets
 docker-compose.override.yml
 *.egg-info
 
-# Built SPA bundles are produced by the frontend-builder stage, not copied from
-# the build context.
-app/static/.DS_Store
-app/static/admin
-app/static/portal
-app/static/landing
-
-# Keep local frontend dependencies out of both application and ops builds.
+# Local frontend dependencies must never enter an image build context.
 frontend/node_modules
 node_modules

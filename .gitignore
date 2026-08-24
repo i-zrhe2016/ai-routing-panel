@@ -9,14 +9,10 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
-# Built SPA bundles — produced by `npm run build` (and the Docker frontend-builder
-# stage). Not committed; run the build for local non-Docker serving.
-app/static/admin/
-app/static/portal/
-app/static/landing/
+# Built SPA release artifacts are deployment inputs and are intentionally not
+# ignored.
 
-# Frontend toolchain deps/cache. The BUILT app/static/panel.js IS committed
-# (runtime Docker has no build step), so do not ignore that.
+# Local-only frontend toolchain output.
 frontend/node_modules/
 frontend/.vite/
 node_modules/

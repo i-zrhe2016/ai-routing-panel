@@ -24,9 +24,10 @@ services:
       XRAY_ACCESS_LOG_PATH: "/app/xray/logs/access.log"
       XRAY_CLIENT_CONFIG_PATH: "/app/xray/runtime/client-test.json"
       AI_ROUTING_ENABLED: "${AI_ROUTING_ENABLED:-1}"
-      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"
+      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@100.65.108.93}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
       DATAPLANE_SSH_KEY_FILE: "${DATAPLANE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
+      DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DATAPLANE_REMOTE_COMMAND_TIMEOUT: "${DATAPLANE_REMOTE_COMMAND_TIMEOUT:-8}"
       DATAPLANE_API_SERVER: "${DATAPLANE_API_SERVER:-127.0.0.1:10085}"
       DATAPLANE_CONFIG_PATH: "${DATAPLANE_CONFIG_PATH:-}"
@@ -40,17 +41,20 @@ services:
       # 容器内 docker CLI(20.10/API1.41) 比宿主 daemon(最低API1.44)旧，强制协商版本，否则 docker inspect 失败导致数据面被误判为未运行
       DOCKER_API_VERSION: "${DOCKER_API_VERSION:-1.44}"
       DATAPLANE_PROBE_HOST: "${DATAPLANE_PROBE_HOST:-127.0.0.1}"
-      AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
+      AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET-}"
       AI_NODE_SSH_BIN: "${AI_NODE_SSH_BIN:-ssh}"
       AI_NODE_SSH_OPTIONS: "${AI_NODE_SSH_OPTIONS:-}"
       AI_NODE_SSH_KEY_FILE: "${AI_NODE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
-      AI_NODE_CONTAINER_NAME: "${AI_NODE_CONTAINER_NAME:-xray-ai-node}"
+      AI_NODE_SSH_KNOWN_HOSTS: "${AI_NODE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
+      AI_NODE_CONTAINER_NAME: "${AI_NODE_CONTAINER_NAME:-}"
       AI_NODE_RESTART_COMMAND: "${AI_NODE_RESTART_COMMAND:-}"
-      AI_NODE_CONFIG_PATH: "${AI_NODE_CONFIG_PATH-/etc/xray/config.json}"
+      AI_NODE_CONFIG_PATH: "${AI_NODE_CONFIG_PATH:-}"
       AI_NODE_API_SERVER: "${AI_NODE_API_SERVER:-127.0.0.1:10085}"
       AI_NODE_PROBE_HOST: "${AI_NODE_PROBE_HOST:-}"
       AI_NODE_XRAY_BIN: "${AI_NODE_XRAY_BIN:-/usr/local/bin/xray}"
       AI_NODE_DOCKER_BIN: "${AI_NODE_DOCKER_BIN:-docker}"
+      AI_DOMAIN_MANAGER_CONTAINER_NAME: "${AI_DOMAIN_MANAGER_CONTAINER_NAME:-xray-routing-panel-xray-ai-domain-manager-1}"
+      AI_DOMAIN_MANAGER_DOCKER_BIN: "${AI_DOMAIN_MANAGER_DOCKER_BIN:-docker}"
       DNS_FAILOVER_ENABLED: "${DNS_FAILOVER_ENABLED:-0}"
       DNS_FAILOVER_INTERVAL: "${DNS_FAILOVER_INTERVAL:-15}"
       DNS_FAILOVER_TIMEOUT: "${DNS_FAILOVER_TIMEOUT:-3}"
@@ -93,9 +97,9 @@ services:
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/healthz', timeout=3).read()"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/healthz', timeout=15).read()"]
       interval: 30s
-      timeout: 5s
+      timeout: 15s
       retries: 3
   xray-routing-panel-db-backup:
     build: .
@@ -123,8 +127,8 @@ services:
       DB_BACKUP_BUNDLE_KEEP_DAYS: "${DB_BACKUP_BUNDLE_KEEP_DAYS:-7}"
       DB_BACKUP_BUNDLE_PREFIX: "${DB_BACKUP_BUNDLE_PREFIX:-xray-routing-panel}"
       DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/k8s,/project/app/xray/.env,/project/app/xray/runtime,/project/scripts}"
-      # Read the actual normal/AI node files over SSH before bundling.  The AI
-      # NAT entry is intentionally explicit: production SSH is on port 27160.
+      # Read the actual normal/AI node files over the Tailscale SSH network
+      # before bundling. Both management endpoints use the standard SSH port.
       DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-1}"
       DB_BACKUP_SSH_COLLECTION_REQUIRED: "${DB_BACKUP_SSH_COLLECTION_REQUIRED:-0}"
       DB_BACKUP_SSH_KEY_PATH: "${DB_BACKUP_SSH_KEY_PATH:-/run/secrets/fleet_ssh_key}"
@@ -132,23 +136,26 @@ services:
       DB_BACKUP_SSH_OPTIONS: "${DB_BACKUP_SSH_OPTIONS:-}"
       DB_BACKUP_SSH_TIMEOUT_SECONDS: "${DB_BACKUP_SSH_TIMEOUT_SECONDS:-20}"
       DB_BACKUP_SSH_MAX_FILE_BYTES: "${DB_BACKUP_SSH_MAX_FILE_BYTES:-5242880}"
-      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-root@64.186.224.96}"
+      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-root@100.65.108.93}"
       DB_BACKUP_DATAPLANE_SSH_PORT: "${DB_BACKUP_DATAPLANE_SSH_PORT:-22}"
       DB_BACKUP_DATAPLANE_KNOWN_HOSTS: "${DB_BACKUP_DATAPLANE_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DB_BACKUP_DATAPLANE_SSH_OPTIONS: "${DB_BACKUP_DATAPLANE_SSH_OPTIONS:-}"
       DB_BACKUP_DATAPLANE_CONFIG_PATH: "${DB_BACKUP_DATAPLANE_CONFIG_PATH:-}"
       DB_BACKUP_DATAPLANE_REMOTE_PATHS: "${DB_BACKUP_DATAPLANE_REMOTE_PATHS:-/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env}"
-      DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET:-root@nat.qq.pw}"
-      DB_BACKUP_AI_NODE_SSH_PORT: "${DB_BACKUP_AI_NODE_SSH_PORT:-27160}"
+      DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET-}"
+      DB_BACKUP_AI_NODE_SSH_PORT: "${DB_BACKUP_AI_NODE_SSH_PORT:-22}"
       DB_BACKUP_AI_NODE_KNOWN_HOSTS: "${DB_BACKUP_AI_NODE_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
       DB_BACKUP_AI_NODE_SSH_OPTIONS: "${DB_BACKUP_AI_NODE_SSH_OPTIONS:-}"
       DB_BACKUP_AI_NODE_CONFIG_PATH: "${DB_BACKUP_AI_NODE_CONFIG_PATH:-}"
-      DB_BACKUP_AI_NODE_REMOTE_PATHS: "${DB_BACKUP_AI_NODE_REMOTE_PATHS:-/etc/xray/config.json,/etc/xray/.env}"
+      DB_BACKUP_AI_NODE_REMOTE_PATHS: "${DB_BACKUP_AI_NODE_REMOTE_PATHS-}"
       DB_BACKUP_CRON_SCHEDULE: "0 3 * * *"
     volumes:
       - ./data:/data
       - ./backups:/backups
       - ./app/xray:/app/xray:ro
+      # Keep the scheduled backup code aligned with the checked-out deployment
+      # even when a full image rebuild is deferred on a disk-constrained host.
+      - ./scripts:/app/scripts:ro
       - ./:/project:ro
       - /srv/xray-ops:/ops-data:ro
       - /root/ssh-keys/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
@@ -199,14 +206,16 @@ services:
       retries: 3
   xray-ai-domain-manager:
     profiles: ["xray"]
-    build:
-      context: .
-      dockerfile: app/xray/Dockerfile.ai-manager
+    # Reuse the already built application image. The manager runs on the
+    # control plane and manages the remote data plane over SSH; it does not
+    # require a local xray-reality service.
+    image: xray-routing-panel-xray-routing-panel:latest
     restart: unless-stopped
-    depends_on:
-      xray-reality:
-        condition: service_started
-    command: ["python", "-m", "app.xray.ai_domain_manager"]
+    # AI upstream probes must traverse the control plane's Tailscale network.
+    # The default bridge network cannot reach the host's Tailscale routes.
+    network_mode: host
+    working_dir: /workspace
+    command: ["python3", "-m", "app.xray.ai_domain_manager"]
     env_file:
       - ./app/xray/.env
     environment:
@@ -218,16 +227,19 @@ services:
       CODEX_SOURCE_HOME: "/host-codex-home"
       CODEX_RUNTIME_HOME: "/workspace/app/xray/runtime/codex-home"
       CODEX_WORKDIR: "/tmp/codex-domain-classifier"
-      CODEX_NODE_BIN: "/usr/bin/node"
-      CODEX_NODE_VERSIONS_ROOT: "/host-node-versions"
+      CODEX_BIN: "/usr/local/bin/codex"
+      AI_DOMAIN_MANAGER_CONTAINER_NAME: "${AI_DOMAIN_MANAGER_CONTAINER_NAME:-xray-routing-panel-xray-ai-domain-manager-1}"
+      AI_DOMAIN_MANAGER_DOCKER_BIN: "${AI_DOMAIN_MANAGER_DOCKER_BIN:-docker}"
       DATAPLANE_CONTAINER_NAME: "${DATAPLANE_CONTAINER_NAME:-xray-reality-local}"
       DOCKER_API_VERSION: "${DOCKER_API_VERSION:-1.44}"
       DATAPLANE_RESTART_CONTAINER: "${DATAPLANE_RESTART_CONTAINER:-xray-reality-local}"
       DATAPLANE_RESTART_COMMAND: "${DATAPLANE_RESTART_COMMAND:-}"
       DATAPLANE_CONFIG_PATH: "${DATAPLANE_CONFIG_PATH:-}"
-      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"
+      DATAPLANE_DYNAMIC_ROUTING_PATH: "${DATAPLANE_DYNAMIC_ROUTING_PATH:-}"
+      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@100.65.108.93}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
       DATAPLANE_SSH_KEY_FILE: "${DATAPLANE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
+      DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -237,7 +249,6 @@ services:
       - /root/.ssh:/root/.ssh:ro
       - /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
       - /root/.codex:/host-codex-home:ro
-      - /root/.nvm/versions/node:/host-node-versions:ro
   xray-ai-node:
     profiles: ["ai-node"]
     image: ghcr.io/xtls/xray-core:26.5.3
