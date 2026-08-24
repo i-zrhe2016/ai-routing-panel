@@ -24,6 +24,40 @@ class _FakeHttpResponse:
 
 
 class AiDomainManagerTest(unittest.TestCase):
+    def test_sqlite_lock_retry_retries_transient_lock(self):
+        attempts = []
+
+        def operation():
+            attempts.append(True)
+            if len(attempts) < 3:
+                raise sqlite3.OperationalError("database is locked")
+            return "ok"
+
+        with mock.patch.object(ai_domain_manager.time, "sleep") as sleep:
+            result = ai_domain_manager.run_with_sqlite_lock_retry(operation)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_save_ai_domains_reports_locked_database_after_retries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "panel.db"
+            db_path.touch()
+            with mock.patch.object(
+                ai_domain_manager,
+                "_save_ai_domains_to_panel_db_once",
+                side_effect=sqlite3.OperationalError("database is locked"),
+            ), mock.patch.object(ai_domain_manager.time, "sleep"):
+                status = ai_domain_manager.save_ai_domains_to_panel_db(
+                    db_path,
+                    {"domains": []},
+                    {"domains": {}},
+                )
+
+        self.assertEqual(status["status"], "skipped")
+        self.assertEqual(status["reason"], "database_locked")
+
     def test_read_ai_routing_manual_mode_defaults_and_reads_persisted_value(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "panel.db"
@@ -37,6 +71,71 @@ class AiDomainManagerTest(unittest.TestCase):
 
             self.assertEqual(ai_domain_manager.read_ai_routing_manual_mode(db_path), "forced_fallback")
             self.assertEqual(ai_domain_manager.read_ai_routing_manual_mode(Path(tmpdir) / "missing.db"), "auto")
+
+    @mock.patch.object(ai_domain_manager, "probe_ai_upstream_candidate")
+    def test_select_ai_target_can_manually_select_backup(self, mocked_probe):
+        mocked_probe.side_effect = [
+            {
+                "upstream_host": "primary.example.com",
+                "upstream_port": 27166,
+                "is_reachable": True,
+                "failure_reason": "",
+                "checked_at": "2026-08-23T00:00:00+00:00",
+            },
+            {
+                "upstream_host": "backup.example.com",
+                "upstream_port": 27166,
+                "is_reachable": True,
+                "failure_reason": "",
+                "checked_at": "2026-08-23T00:00:00+00:00",
+            },
+        ]
+
+        result = ai_domain_manager.select_ai_target(
+            [
+                {"upstream_host": "primary.example.com", "upstream_port": 27166},
+                {"upstream_host": "backup.example.com", "upstream_port": 27166},
+            ],
+            2.0,
+            preferred_index=1,
+        )
+
+        self.assertEqual(result["selected_index"], 1)
+        self.assertEqual(result["upstream_host"], "backup.example.com")
+        self.assertEqual(result["probe_status"], "manual_selected")
+        self.assertEqual(result["selection_mode"], "manual")
+
+    @mock.patch.object(ai_domain_manager, "probe_ai_upstream_candidate")
+    def test_select_ai_target_reports_manual_unreachable_for_unreachable_selection(self, mocked_probe):
+        mocked_probe.side_effect = [
+            {
+                "upstream_host": "primary.example.com",
+                "upstream_port": 27166,
+                "is_reachable": True,
+                "failure_reason": "",
+                "checked_at": "2026-08-23T00:00:00+00:00",
+            },
+            {
+                "upstream_host": "backup.example.com",
+                "upstream_port": 27166,
+                "is_reachable": False,
+                "failure_reason": "timed out",
+                "checked_at": "2026-08-23T00:00:00+00:00",
+            },
+        ]
+
+        result = ai_domain_manager.select_ai_target(
+            [
+                {"upstream_host": "primary.example.com", "upstream_port": 27166},
+                {"upstream_host": "backup.example.com", "upstream_port": 27166},
+            ],
+            2.0,
+            preferred_index=1,
+        )
+
+        self.assertEqual(result["selected_index"], 1)
+        self.assertEqual(result["probe_status"], "manual_unreachable")
+        self.assertEqual(result["failure_reason"], "timed out")
 
     def test_gemini_session_domains_are_forced_to_ai_route(self):
         for domain in (

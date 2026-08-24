@@ -57,7 +57,12 @@ DATAPLANE_SSH_OPTIONS = parse_shell_words_env(
     os.environ.get("DATAPLANE_SSH_OPTIONS", ""),
     "DATAPLANE_SSH_OPTIONS",
 )
-DATAPLANE_SSH_KEY_FILE = os.environ.get("DATAPLANE_SSH_KEY_FILE", "").strip()
+DATAPLANE_SSH_KEY_FILE = os.environ.get(
+    "DATAPLANE_SSH_KEY_FILE", "/run/secrets/fleet_ssh_key"
+).strip()
+DATAPLANE_SSH_KNOWN_HOSTS = os.environ.get(
+    "DATAPLANE_SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts"
+).strip()
 DATAPLANE_REMOTE_COMMAND_TIMEOUT = parse_positive_env_float(
     os.environ.get("DATAPLANE_REMOTE_COMMAND_TIMEOUT", "8"),
     "DATAPLANE_REMOTE_COMMAND_TIMEOUT",
@@ -76,12 +81,20 @@ DATAPLANE_PANEL_PORTS_PATH = os.environ.get("DATAPLANE_PANEL_PORTS_PATH", "").st
 DATAPLANE_ACCESS_LOG_PATH = os.environ.get("DATAPLANE_ACCESS_LOG_PATH", "").strip()
 DATAPLANE_PROBE_HOST = os.environ.get("DATAPLANE_PROBE_HOST", "127.0.0.1").strip() or "127.0.0.1"
 
-AI_NODE_SSH_TARGET = os.environ.get("AI_NODE_SSH_TARGET", "").strip()
+AI_NODE_SSH_TARGET = os.environ.get(
+    "AI_NODE_SSH_TARGET", ""
+).strip()
 AI_NODE_SSH_BIN = os.environ.get("AI_NODE_SSH_BIN", "ssh").strip() or "ssh"
 AI_NODE_SSH_OPTIONS = parse_shell_words_env(
     os.environ.get("AI_NODE_SSH_OPTIONS", ""),
     "AI_NODE_SSH_OPTIONS",
 )
+AI_NODE_SSH_KEY_FILE = os.environ.get(
+    "AI_NODE_SSH_KEY_FILE", "/run/secrets/fleet_ssh_key"
+).strip()
+AI_NODE_SSH_KNOWN_HOSTS = os.environ.get(
+    "AI_NODE_SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts_ai"
+).strip()
 AI_NODE_XRAY_BIN = os.environ.get("AI_NODE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
 AI_NODE_CONTAINER_NAME = os.environ.get("AI_NODE_CONTAINER_NAME", "xray-ai-node").strip()
 AI_NODE_DOCKER_BIN = os.environ.get("AI_NODE_DOCKER_BIN", "docker").strip() or "docker"
@@ -92,6 +105,10 @@ AI_NODE_PROBE_HOST = os.environ.get("AI_NODE_PROBE_HOST", "").strip()
 AI_NODE_CONFIG_OUT = Path(
     os.environ.get("AI_NODE_CONFIG_OUT", XRAY_CONFIG_PATH.parent / "config-ai-node.json")
 )
+AI_DOMAIN_MANAGER_CONTAINER_NAME = os.environ.get(
+    "AI_DOMAIN_MANAGER_CONTAINER_NAME", "xray-routing-panel-xray-ai-domain-manager-1"
+).strip()
+AI_DOMAIN_MANAGER_DOCKER_BIN = os.environ.get("AI_DOMAIN_MANAGER_DOCKER_BIN", "docker").strip() or "docker"
 
 PANEL_HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))

@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 from ..config import (
     AI_NODE_CONFIG_OUT,
+    AI_NODE_CONTAINER_NAME,
     AI_NODE_PROBE_HOST,
     AI_NODE_SSH_TARGET,
     CONTROL_PLANE_BACKUP_UPSTREAM_URL,
@@ -600,7 +601,7 @@ class CoreService:
                 ]
         # When the AI node is managed via SSH, also render config-ai-node.json
         # so the control plane can push it to the remote AI node.
-        if AI_NODE_SSH_TARGET:
+        if AI_NODE_SSH_TARGET or AI_NODE_CONTAINER_NAME:
             command += [
                 "--ai-node-config-out",
                 str(AI_NODE_CONFIG_OUT),

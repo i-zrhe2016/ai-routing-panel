@@ -29,6 +29,9 @@ DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.
 PLACEHOLDER_RE = re.compile(r"__([A-Z0-9_]+)__")
 UPSTREAM_LIST_SEPARATOR_RE = re.compile(r"[\n,;]+")
 UNSET_PROXY_PROTOCOL = "replace_me"
+SQLITE_BUSY_TIMEOUT_MS = 30000
+SQLITE_LOCK_RETRY_ATTEMPTS = 4
+SQLITE_LOCK_RETRY_DELAY_SECONDS = 0.25
 FORCED_AI_ROUTE_DOMAIN_SUFFIXES = (
     # Keep Gemini's authenticated web session and API calls on the same AI
     # egress. Routing only gemini.google.com is insufficient because the web
@@ -141,6 +144,28 @@ def utc_now():
 
 def format_timestamp(dt):
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def connect_panel_db(panel_db_path):
+    conn = sqlite3.connect(panel_db_path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
+    conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+    return conn
+
+
+def run_with_sqlite_lock_retry(operation):
+    last_error = None
+    for attempt in range(SQLITE_LOCK_RETRY_ATTEMPTS):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            if "database is locked" not in message and "database is busy" not in message:
+                raise
+            last_error = exc
+            if attempt + 1 < SQLITE_LOCK_RETRY_ATTEMPTS:
+                time.sleep(SQLITE_LOCK_RETRY_DELAY_SECONDS * (attempt + 1))
+    raise last_error
 
 
 def split_target_host(target):
@@ -512,47 +537,12 @@ def sync_codex_home(source_home, runtime_home):
         raise RuntimeError(f"codex source home is missing config/auth files: {source_home}")
 
 
-def resolve_codex_cli_js(codex_cli_js, codex_node_versions_root):
-    explicit = Path(codex_cli_js) if codex_cli_js else None
-    if explicit and explicit.is_file():
-        return explicit
-
-    root = Path(codex_node_versions_root) if codex_node_versions_root else None
-    if root and root.is_dir():
-        matches = sorted(root.glob("*/lib/node_modules/@openai/codex/bin/codex.js"))
-        if matches:
-            return matches[-1]
-    return None
-
-
-def resolve_node_bin(node_bin, codex_node_versions_root):
-    explicit = str(node_bin or "").strip()
-    if explicit and Path(explicit).is_file():
-        return explicit
-
-    from_path = shutil.which(explicit or "node")
-    if from_path:
-        return from_path
-
-    root = Path(codex_node_versions_root) if codex_node_versions_root else None
-    if root and root.is_dir():
-        matches = sorted(root.glob("*/bin/node"))
-        if matches:
-            return str(matches[-1])
-    raise RuntimeError("node binary not found; install nodejs or set CODEX_NODE_BIN")
-
-
 def build_codex_command(args):
-    if args.codex_bin:
-        resolved = shutil.which(args.codex_bin) or args.codex_bin
-        return [resolved]
-
-    cli_js = resolve_codex_cli_js(args.codex_cli_js, args.codex_node_versions_root)
-    if cli_js is None:
-        raise RuntimeError("codex cli js not found; mount host node modules or set CODEX_CLI_JS/CODEX_BIN")
-
-    node_bin = resolve_node_bin(args.codex_node_bin, args.codex_node_versions_root)
-    return [node_bin, str(cli_js)]
+    configured = str(getattr(args, "codex_bin", "") or "").strip() or "codex"
+    resolved = shutil.which(configured) or configured
+    if not Path(resolved).is_file() and shutil.which(resolved) is None:
+        raise RuntimeError("native Codex binary was not found; set CODEX_BIN")
+    return [resolved]
 
 
 def classify_domains_via_codex(domains, args):
@@ -673,33 +663,36 @@ def classify_domains_via_openai(domains, api_key, model, base_url, timeout_secon
 def read_panel_target(panel_db_path, preferred_listen_port):
     if not panel_db_path.is_file():
         return None
-    conn = sqlite3.connect(panel_db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        if preferred_listen_port:
+
+    def read_target():
+        conn = connect_panel_db(panel_db_path)
+        try:
+            if preferred_listen_port:
+                row = conn.execute(
+                    """
+                    SELECT listen_port, upstream_host, upstream_port, note, updated_at
+                    FROM ports
+                    WHERE enabled = 1 AND listen_port = ?
+                    LIMIT 1
+                    """,
+                    (preferred_listen_port,),
+                ).fetchone()
+                if row:
+                    return dict(row)
             row = conn.execute(
                 """
                 SELECT listen_port, upstream_host, upstream_port, note, updated_at
                 FROM ports
-                WHERE enabled = 1 AND listen_port = ?
+                WHERE enabled = 1
+                ORDER BY updated_at DESC, listen_port ASC
                 LIMIT 1
-                """,
-                (preferred_listen_port,),
+                """
             ).fetchone()
-            if row:
-                return dict(row)
-        row = conn.execute(
-            """
-            SELECT listen_port, upstream_host, upstream_port, note, updated_at
-            FROM ports
-            WHERE enabled = 1
-            ORDER BY updated_at DESC, listen_port ASC
-            LIMIT 1
-            """
-        ).fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    return run_with_sqlite_lock_retry(read_target)
 
 
 def ensure_ai_domain_schema(conn):
@@ -745,7 +738,7 @@ def ensure_ai_domain_schema(conn):
     )
 
 
-def save_ai_domains_to_panel_db(panel_db_path, report, decisions):
+def _save_ai_domains_to_panel_db_once(panel_db_path, report, decisions):
     status = {
         "status": "skipped",
         "reason": "",
@@ -764,9 +757,7 @@ def save_ai_domains_to_panel_db(panel_db_path, report, decisions):
         for domain, item in decisions["domains"].items()
         if item.get("classification") == "ai"
     )
-    conn = sqlite3.connect(panel_db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout = 5000")
+    conn = connect_panel_db(panel_db_path)
     try:
         ensure_ai_domain_schema(conn)
 
@@ -905,8 +896,29 @@ def save_ai_domains_to_panel_db(panel_db_path, report, decisions):
         conn.commit()
         status["status"] = "written"
         return status
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
+
+
+def save_ai_domains_to_panel_db(panel_db_path, report, decisions):
+    try:
+        return run_with_sqlite_lock_retry(
+            lambda: _save_ai_domains_to_panel_db_once(panel_db_path, report, decisions)
+        )
+    except sqlite3.OperationalError as exc:
+        message = str(exc).lower()
+        if "database is locked" not in message and "database is busy" not in message:
+            raise
+        return {
+            "status": "skipped",
+            "reason": "database_locked",
+            "path": str(panel_db_path),
+            "domains_upserted": 0,
+            "observations_upserted": 0,
+        }
 
 
 def join_host_port(host, port):
@@ -1225,6 +1237,7 @@ def summarize_ai_target_for_report(ai_target):
         "candidate_count",
         "failover_active",
         "probe_status",
+        "selection_mode",
         "probe_timeout_seconds",
     ):
         if key in ai_target:
@@ -1246,29 +1259,42 @@ def read_ai_routing_manual_mode(panel_db_path):
     path = str(panel_db_path or "").strip()
     if not path:
         return "auto"
-    try:
-        with sqlite3.connect(path) as conn:
-            row = conn.execute(
+
+    def read_mode():
+        conn = connect_panel_db(path)
+        try:
+            return conn.execute(
                 "SELECT value FROM app_state WHERE key = 'ai_routing_manual_mode'"
             ).fetchone()
+        finally:
+            conn.close()
+
+    try:
+        row = run_with_sqlite_lock_retry(read_mode)
     except (OSError, sqlite3.Error):
         return "auto"
     mode = str(row[0] if row else "auto").strip().lower()
-    return mode if mode in {"auto", "forced_fallback"} else "auto"
+    return mode if mode in {"auto", "primary", "backup", "forced_fallback"} else "auto"
 
 
-def select_ai_target(candidates, timeout_seconds, probe_controller=None):
+def select_ai_target(candidates, timeout_seconds, probe_controller=None, preferred_index=None):
     probes = [
         probe_ai_upstream_candidate(candidate, timeout_seconds, probe_controller=probe_controller)
         for candidate in candidates
     ]
-    selected_index = 0
-    for index, candidate in enumerate(probes):
-        if candidate["is_reachable"]:
-            selected_index = index
-            break
+    if preferred_index is not None:
+        try:
+            selected_index = int(preferred_index)
+        except (TypeError, ValueError):
+            selected_index = 0
+        if selected_index < 0 or selected_index >= len(probes):
+            selected_index = 0
     else:
         selected_index = 0
+        for index, candidate in enumerate(probes):
+            if candidate["is_reachable"]:
+                selected_index = index
+                break
 
     selected = probes[selected_index]
     all_unreachable = not any(item["is_reachable"] for item in probes)
@@ -1283,11 +1309,24 @@ def select_ai_target(candidates, timeout_seconds, probe_controller=None):
             "probe_status": (
                 "probe_error"
                 if management_error
-                else ("all_unreachable" if all_unreachable else "reachable")
+                else (
+                    "manual_selected"
+                    if preferred_index is not None and selected["is_reachable"]
+                    else (
+                        "manual_unreachable"
+                        if preferred_index is not None
+                        else ("all_unreachable" if all_unreachable else "reachable")
+                    )
+                )
             ),
+            "selection_mode": "manual" if preferred_index is not None else "auto",
             "probe_timeout_seconds": timeout_seconds,
             "checked_at": selected["checked_at"],
-            "failure_reason": selected["failure_reason"] if (all_unreachable or management_error) else "",
+            "failure_reason": selected["failure_reason"] if (
+                all_unreachable
+                or management_error
+                or (preferred_index is not None and not selected["is_reachable"])
+            ) else "",
             "candidates": [summarize_ai_target_candidate(item) for item in probes],
         }
     )
@@ -1666,8 +1705,11 @@ def build_data_plane_controller(args):
             ssh_bin=args.data_plane_ssh_bin,
             ssh_options=tuple(args.data_plane_ssh_options),
             ssh_key_file=str(getattr(args, "data_plane_ssh_key_file", "") or "").strip(),
+            ssh_known_hosts_file=str(getattr(args, "data_plane_ssh_known_hosts_file", "") or "").strip(),
             config_path=args.data_plane_config_path,
+            dynamic_routing_path=args.data_plane_dynamic_routing_path,
             source_config_path=args.config_out,
+            source_dynamic_routing_path=args.dynamic_routing_path,
             upstream_host=upstream_host,
             upstream_port=upstream_port,
         )
@@ -1786,10 +1828,12 @@ def run_once(args):
                 panel_target,
                 getattr(args, "ai_upstream_probe_server_name", ""),
             )
+        preferred_index = {"primary": 0, "backup": 1}.get(manual_mode)
         ai_target = select_ai_target(
             args.ai_upstream_candidates,
             args.ai_upstream_probe_timeout_seconds,
             probe_controller=data_plane_controller,
+            preferred_index=preferred_index,
         )
     route_status = {"status": "disabled", "reason": ""}
 
@@ -1811,9 +1855,12 @@ def run_once(args):
         if manual_mode == "forced_fallback":
             args.dynamic_routing_path.unlink(missing_ok=True)
             route_status = {"status": "manual_fallback", "reason": "manual_override"}
-        elif should_fallback_to_primary_route(ai_target):
+        elif should_fallback_to_primary_route(ai_target) or str(ai_target.get("probe_status", "")).strip().lower() == "manual_unreachable":
             args.dynamic_routing_path.unlink(missing_ok=True)
-            route_status = {"status": "fallback_to_primary", "reason": "ai_upstream_unreachable"}
+            route_status = {
+                "status": "manual_target_unreachable" if manual_mode in {"primary", "backup"} else "fallback_to_primary",
+                "reason": "manual_ai_target_unreachable" if manual_mode in {"primary", "backup"} else "ai_upstream_unreachable",
+            }
         elif str(ai_target.get("probe_status", "")).strip().lower() == "probe_error":
             args.dynamic_routing_path.unlink(missing_ok=True)
             route_status = {
@@ -1846,16 +1893,18 @@ def run_once(args):
     )
     current_config = args.config_out.read_text(encoding="utf-8") if args.config_out.is_file() else ""
     config_changed = current_config != previous_config
-    if config_changed:
-        if data_plane_controller.is_configured():
-            if data_plane_controller.supports_sync():
-                data_plane_controller.sync_generated_files(validate_config=True)
-            if data_plane_controller.supports_restart():
-                data_plane_controller.restart()
-        elif args.restart_command:
-            restart_xray_command(args.restart_command, args.docker_timeout_seconds)
-        elif args.restart_container_name:
-            restart_xray_container(args.restart_container_name, args.docker_timeout_seconds)
+    if data_plane_controller.is_configured():
+        # Sync on every management cycle. The rendered config can be unchanged
+        # while the remote source fragment was deleted or replaced manually;
+        # keeping both artifacts synchronized makes the next panel render safe.
+        if data_plane_controller.supports_sync():
+            data_plane_controller.sync_generated_files(validate_config=True)
+        if config_changed and data_plane_controller.supports_restart():
+            data_plane_controller.restart()
+    elif config_changed and args.restart_command:
+        restart_xray_command(args.restart_command, args.docker_timeout_seconds)
+    elif config_changed and args.restart_container_name:
+        restart_xray_container(args.restart_container_name, args.docker_timeout_seconds)
 
     report = build_domain_report(log_state, cutoff, now, decisions, ai_target, panel_target, route_status)
     if pending_without_classifier:
@@ -1918,12 +1967,19 @@ def build_args():
     env_file_values = load_env_file_values(args.env_file)
     args.restart_container_name = os.environ.get("DATAPLANE_RESTART_CONTAINER", "").strip()
     args.restart_command = os.environ.get("DATAPLANE_RESTART_COMMAND", "").strip()
-    args.data_plane_ssh_target = os.environ.get("DATAPLANE_SSH_TARGET", "").strip()
+    args.data_plane_ssh_target = os.environ.get(
+        "DATAPLANE_SSH_TARGET", ""
+    ).strip()
     args.data_plane_ssh_bin = os.environ.get("DATAPLANE_SSH_BIN", "ssh").strip() or "ssh"
     args.data_plane_ssh_options = tuple(
         shlex.split(os.environ.get("DATAPLANE_SSH_OPTIONS", "").strip())
     ) if os.environ.get("DATAPLANE_SSH_OPTIONS", "").strip() else ()
-    args.data_plane_ssh_key_file = os.environ.get("DATAPLANE_SSH_KEY_FILE", "").strip()
+    args.data_plane_ssh_key_file = os.environ.get(
+        "DATAPLANE_SSH_KEY_FILE", "/run/secrets/fleet_ssh_key"
+    ).strip()
+    args.data_plane_ssh_known_hosts_file = os.environ.get(
+        "DATAPLANE_SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts"
+    ).strip()
     args.data_plane_api_server = os.environ.get("DATAPLANE_API_SERVER", "127.0.0.1:10085").strip() or "127.0.0.1:10085"
     args.data_plane_xray_bin = os.environ.get("DATAPLANE_XRAY_BIN", "/usr/local/bin/xray").strip() or "/usr/local/bin/xray"
     args.data_plane_local_bin = os.environ.get("DATAPLANE_LOCAL_BIN", "").strip()
@@ -1931,16 +1987,14 @@ def build_args():
     args.data_plane_docker_bin = os.environ.get("DATAPLANE_DOCKER_BIN", "docker").strip() or "docker"
     args.data_plane_restart_command = os.environ.get("DATAPLANE_RESTART_COMMAND", "").strip()
     args.data_plane_config_path = os.environ.get("DATAPLANE_CONFIG_PATH", "").strip()
+    args.data_plane_dynamic_routing_path = os.environ.get("DATAPLANE_DYNAMIC_ROUTING_PATH", "").strip()
     args.codex_classifier_enabled = env_bool("CODEX_CLASSIFIER_ENABLED", "1")
     args.codex_source_home = Path(os.environ.get("CODEX_SOURCE_HOME", "/host-codex-home"))
     args.codex_runtime_home = Path(
         os.environ.get("CODEX_RUNTIME_HOME", str(workspace / "runtime" / "codex-home"))
     )
     args.codex_workdir = Path(os.environ.get("CODEX_WORKDIR", "/tmp/codex-domain-classifier"))
-    args.codex_node_bin = os.environ.get("CODEX_NODE_BIN", "/usr/bin/node").strip()
-    args.codex_cli_js = os.environ.get("CODEX_CLI_JS", "").strip()
-    args.codex_node_versions_root = os.environ.get("CODEX_NODE_VERSIONS_ROOT", "/host-node-versions").strip()
-    args.codex_bin = os.environ.get("CODEX_BIN", "").strip()
+    args.codex_bin = os.environ.get("CODEX_BIN", "codex").strip() or "codex"
     args.codex_model = os.environ.get("CODEX_MODEL", "").strip()
     args.openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     args.openai_model = os.environ.get("OPENAI_MODEL", "gpt-5.5").strip() or "gpt-5.5"

@@ -1,9 +1,14 @@
 FROM python:3.12-alpine
 
-RUN apk add --no-cache ca-certificates docker-cli nodejs openssh-client
+ARG CODEX_CLI_VERSION=0.145.0
+
+RUN apk add --no-cache ca-certificates docker-cli openssh-client
 
 WORKDIR /workspace
 
 COPY app /workspace/app
+
+ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex /usr/local/bin/codex
+RUN chmod 0755 /usr/local/bin/codex
 
 CMD ["python", "-m", "app.xray.ai_domain_manager"]

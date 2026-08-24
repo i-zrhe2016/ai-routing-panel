@@ -155,6 +155,23 @@ except OSError:
     raise SystemExit(1)
 """
 
+REMOTE_SOCKET_PROBE_SCRIPT = """
+import json
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+timeout = float(sys.argv[3])
+result = {"ok": False, "error": "", "method": "tcp"}
+try:
+    with socket.create_connection((host, port), timeout=timeout):
+        result["ok"] = True
+except OSError as exc:
+    result["error"] = str(exc)[:200]
+print(json.dumps(result, ensure_ascii=True))
+"""
+
 REMOTE_REALITY_PROBE_SCRIPT = """
 import json
 import socket
@@ -361,6 +378,7 @@ class DataPlaneConfig:
     ssh_bin: str = "ssh"
     ssh_options: tuple[str, ...] = ()
     ssh_key_file: str = ""
+    ssh_known_hosts_file: str = ""
     remote_command_timeout: float = 8.0
     config_path: str = ""
     dynamic_routing_path: str = ""
@@ -482,8 +500,20 @@ class DataPlaneController:
     def _normalized_ssh_options(self):
         options = list(self.config.ssh_options or ())
         key_file = str(self.config.ssh_key_file or "").strip()
-        if not key_file:
-            return tuple(options)
+        known_hosts_file = str(self.config.ssh_known_hosts_file or "").strip()
+
+        # These options are appended after user-provided options so a stale
+        # SSH config cannot re-enable password or keyboard-interactive auth.
+        forced_keys = {
+            "batchmode",
+            "challengeresponseauthentication",
+            "identitiesonly",
+            "kbdinteractiveauthentication",
+            "passwordauthentication",
+            "preferredauthentications",
+            "stricthostkeychecking",
+            "userknownhostsfile",
+        }
 
         normalized = []
         index = 0
@@ -499,19 +529,42 @@ class DataPlaneController:
             if token == "-o" and index + 1 < len(options):
                 option = str(options[index + 1])
                 option_lowered = option.lower()
-                if option_lowered.startswith("identityfile=") or option_lowered.startswith("identitiesonly="):
+                option_key = option_lowered.split("=", 1)[0].strip()
+                if option_key == "identityfile" or option_key in forced_keys:
                     index += 2
                     continue
                 normalized.extend((token, option))
                 index += 2
                 continue
-            if lowered.startswith("identityfile=") or lowered.startswith("identitiesonly="):
+            option_key = lowered.split("=", 1)[0].strip()
+            if option_key == "identityfile" or option_key in forced_keys:
                 index += 1
                 continue
             normalized.append(token)
             index += 1
 
-        normalized.extend(("-i", key_file, "-o", "IdentitiesOnly=yes"))
+        if key_file:
+            normalized.extend(("-i", key_file))
+        normalized.extend(
+            (
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "PreferredAuthentications=publickey",
+                "-o",
+                "PasswordAuthentication=no",
+                "-o",
+                "KbdInteractiveAuthentication=no",
+                "-o",
+                "ChallengeResponseAuthentication=no",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+            )
+        )
+        if known_hosts_file:
+            normalized.extend(("-o", f"UserKnownHostsFile={known_hosts_file}"))
         return tuple(normalized)
 
     def _run_local_shell(self, shell_command, error_prefix, timeout=None):
@@ -524,11 +577,11 @@ class DataPlaneController:
         result = {"ok": False, "error": "", "management_error": False, "method": "tcp"}
         if self.mode == "ssh":
             try:
-                self._run_remote(
+                completed = self._run_remote(
                     [
                         "python3",
                         "-c",
-                        REMOTE_SOCKET_CHECK_SCRIPT,
+                        REMOTE_SOCKET_PROBE_SCRIPT,
                         str(host),
                         str(int(port)),
                         str(timeout_seconds),
@@ -536,8 +589,11 @@ class DataPlaneController:
                     f"{self.config.label} AI 上游 TCP 探测失败",
                     timeout=max(self.config.remote_command_timeout, float(timeout_seconds) + 1),
                 )
-                result["ok"] = True
-            except (OSError, RuntimeError) as exc:
+                payload = json.loads(completed.stdout or "{}")
+                if not isinstance(payload, dict):
+                    raise RuntimeError("远端 TCP 探测返回格式无效")
+                result.update(payload)
+            except (OSError, RuntimeError, json.JSONDecodeError) as exc:
                 result.update(error=str(exc), management_error=True)
             return result
 
@@ -715,9 +771,34 @@ class DataPlaneController:
             )
             uploaded.append(self.config.panel_ports_path)
 
+        # The generated config embeds this fragment, while the panel keeps the
+        # fragment as the source of truth for its next render. Keep both copies
+        # in sync so a panel restart cannot silently drop AI routing.
+        if self.config.dynamic_routing_path and self.config.source_dynamic_routing_path:
+            source = self.config.source_dynamic_routing_path
+            if source.is_file():
+                content = source.read_text(encoding="utf-8")
+                self._run_remote(
+                    ["python3", "-c", REMOTE_WRITE_FILE_SCRIPT, self.config.dynamic_routing_path],
+                    f"{self.config.label} 动态路由上传失败",
+                    input_text=content,
+                )
+            else:
+                self._run_remote(
+                    ["python3", "-c", REMOTE_DELETE_FILE_SCRIPT, self.config.dynamic_routing_path],
+                    f"{self.config.label} 动态路由删除失败",
+                )
+            uploaded.append(self.config.dynamic_routing_path)
+
         return uploaded
 
-    def sync_text_file_from_remote(self, remote_path, local_path, error_prefix):
+    def sync_text_file_from_remote(
+        self,
+        remote_path,
+        local_path,
+        error_prefix,
+        preserve_local_when_missing=False,
+    ):
         completed = self._run_remote(
             ["python3", "-c", REMOTE_READ_FILE_SCRIPT, remote_path],
             error_prefix,
@@ -730,7 +811,8 @@ class DataPlaneController:
             raise RuntimeError(f"{self.config.label} 远端文件返回格式无效")
 
         if not payload.get("exists"):
-            local_path.unlink(missing_ok=True)
+            if not preserve_local_when_missing:
+                local_path.unlink(missing_ok=True)
             return False
 
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -774,6 +856,7 @@ class DataPlaneController:
             self.config.ai_report_path,
             local_path,
             f"{self.config.label} AI 域名报告读取失败",
+            preserve_local_when_missing=True,
         )
 
     def read_ai_domains_snapshot_from_remote(self):

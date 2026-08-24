@@ -95,7 +95,26 @@ def load_panel_module(temp_root, panel_username="", panel_password="", probe_ena
     os.environ["PROBE_ENABLED"] = "1" if probe_enabled else "0"
     os.environ["PROBE_TEST_LISTEN_PORT"] = str(probe_test_listen_port or "")
 
-    sys.modules.pop("app.panel", None)
+    # app.panel imports configuration and the web singleton at module import
+    # time. Remove the whole application graph so each test gets its own
+    # temporary database and runtime paths instead of stale constants from the
+    # previous test case.
+    for module_name in sorted(
+        (
+            name
+            for name in sys.modules
+            if name == "app.panel"
+            or name == "app.config"
+            or name.startswith("app.config.")
+            or name == "app.state"
+            or name.startswith("app.state.")
+            or name == "app.web"
+            or name.startswith("app.web.")
+        ),
+        key=len,
+        reverse=True,
+    ):
+        sys.modules.pop(module_name, None)
     module = importlib.import_module("app.panel")
     module = importlib.reload(module)
     module.state.render_xray_config = lambda: None

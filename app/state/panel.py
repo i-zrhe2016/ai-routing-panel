@@ -10,6 +10,8 @@ from ..config import (
     AI_NODE_PROBE_HOST,
     AI_NODE_RESTART_COMMAND,
     AI_NODE_SSH_BIN,
+    AI_NODE_SSH_KEY_FILE,
+    AI_NODE_SSH_KNOWN_HOSTS,
     AI_NODE_SSH_OPTIONS,
     AI_NODE_SSH_TARGET,
     AI_NODE_XRAY_BIN,
@@ -33,6 +35,7 @@ from ..config import (
     DATAPLANE_RESTART_COMMAND,
     DATAPLANE_SSH_BIN,
     DATAPLANE_SSH_KEY_FILE,
+    DATAPLANE_SSH_KNOWN_HOSTS,
     DATAPLANE_SSH_OPTIONS,
     DATAPLANE_SSH_TARGET,
     DATAPLANE_XRAY_BIN,
@@ -124,6 +127,7 @@ class PanelState:
                 ssh_bin=DATAPLANE_SSH_BIN,
                 ssh_options=DATAPLANE_SSH_OPTIONS,
                 ssh_key_file=DATAPLANE_SSH_KEY_FILE,
+                ssh_known_hosts_file=DATAPLANE_SSH_KNOWN_HOSTS,
                 remote_command_timeout=DATAPLANE_REMOTE_COMMAND_TIMEOUT,
                 config_path=self.data_plane_config_path(),
                 dynamic_routing_path=DATAPLANE_DYNAMIC_ROUTING_PATH.strip(),
@@ -147,6 +151,8 @@ class PanelState:
                 ssh_target=AI_NODE_SSH_TARGET,
                 ssh_bin=AI_NODE_SSH_BIN,
                 ssh_options=AI_NODE_SSH_OPTIONS,
+                ssh_key_file=AI_NODE_SSH_KEY_FILE,
+                ssh_known_hosts_file=AI_NODE_SSH_KNOWN_HOSTS,
                 xray_bin=AI_NODE_XRAY_BIN,
                 docker_bin=AI_NODE_DOCKER_BIN,
                 container_name=AI_NODE_CONTAINER_NAME,
@@ -155,7 +161,7 @@ class PanelState:
                 source_config_path=AI_NODE_CONFIG_OUT,
                 upstream_host=AI_NODE_PROBE_HOST,
             )
-        ) if AI_NODE_SSH_TARGET else None
+        ) if (AI_NODE_SSH_TARGET or AI_NODE_CONTAINER_NAME) else None
         self.dns_failover_manager = DnsFailoverManager(
             DnsFailoverConfig(
                 enabled=DNS_FAILOVER_ENABLED,

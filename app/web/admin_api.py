@@ -152,8 +152,13 @@ def api_ai_routing_switch():
     try:
         mode = str(request_payload().get("mode") or "").strip().lower()
         state.set_ai_routing_manual_mode(mode)
-        message = "AI 路由已强制回退到数据面直出。" if mode == "forced_fallback" else "AI 路由已恢复自动探测。"
-        return json_success_response(message)
+        message = {
+            "forced_fallback": "AI 路由已强制回退到数据面直出。",
+            "primary": "AI 路由已切换到主 AI 节点。",
+            "backup": "AI 路由已切换到备用 AI 节点。",
+            "auto": "AI 路由已恢复自动探测。",
+        }.get(mode, "AI 路由模式已更新。")
+        return json_snapshot_success_response(message)
     except (ValidationError, RuntimeError) as exc:
         log_business_event(
             "ai_routing.manual_switched",

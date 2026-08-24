@@ -317,17 +317,51 @@ def build_server_config(
     return merge_dynamic_routing(config, dynamic_payload)
 
 
-def build_ai_node_config(values: dict[str, str]) -> dict:
-    """Build a minimal VLESS+REALITY config for the AI node.
+def build_ai_node_values(values: dict[str, str]) -> dict[str, str]:
+    """Build AI-node values without falling back to data-plane credentials."""
+    required = {
+        "AI_NODE_CLIENT_UUID": "XRAY_CLIENT_UUID",
+        "AI_NODE_FLOW": "XRAY_FLOW",
+        "AI_NODE_REALITY_PRIVATE_KEY": "XRAY_REALITY_PRIVATE_KEY",
+        "AI_NODE_REALITY_PUBLIC_KEY": "XRAY_REALITY_PUBLIC_KEY",
+        "AI_NODE_REALITY_SHORT_ID": "XRAY_REALITY_SHORT_ID",
+        "AI_NODE_SERVER_NAME": "XRAY_SERVER_NAME",
+        "AI_NODE_DEST": "XRAY_DEST",
+        "AI_NODE_FINGERPRINT": "XRAY_FINGERPRINT",
+    }
+    missing = [key for key in required if not str(values.get(key, "")).strip()]
+    if missing:
+        raise ValueError(f"missing required AI node values: {', '.join(missing)}")
 
-    The AI node reuses the data-plane REALITY parameters (same UUID, keys, SNI,
-    dest) so the same subscription connects. It exits with ``freedom`` directly,
-    never carries dynamic routing, panel ports, QUIC block, or stats API.
-    """
-    listen_port = int(values.get("AI_UPSTREAM_PORT", "").strip() or values["XRAY_LISTEN_PORT"])
+    ai_values = dict(values)
+    ai_values.update(
+        {
+            "XRAY_CLIENT_UUID": values["AI_NODE_CLIENT_UUID"],
+            "XRAY_FLOW": values["AI_NODE_FLOW"],
+            "XRAY_REALITY_PRIVATE_KEY": values["AI_NODE_REALITY_PRIVATE_KEY"],
+            "XRAY_REALITY_PUBLIC_KEY": values["AI_NODE_REALITY_PUBLIC_KEY"],
+            "XRAY_REALITY_SHORT_ID": values["AI_NODE_REALITY_SHORT_ID"],
+            "XRAY_SERVER_NAME": values["AI_NODE_SERVER_NAME"],
+            "XRAY_DEST": values["AI_NODE_DEST"],
+            "XRAY_FINGERPRINT": values["AI_NODE_FINGERPRINT"],
+            "XRAY_LISTEN_HOST": values.get("AI_NODE_LISTEN_HOST", "0.0.0.0"),
+            "XRAY_LOGLEVEL": values.get("AI_NODE_LOGLEVEL", values["XRAY_LOGLEVEL"]),
+        }
+    )
+    return ai_values
+
+
+def build_ai_node_config(values: dict[str, str]) -> dict:
+    """Build a minimal VLESS+REALITY config with independent AI credentials."""
+    ai_values = build_ai_node_values(values)
+    listen_port = int(
+        values.get("AI_NODE_LISTEN_PORT", "").strip()
+        or values.get("AI_UPSTREAM_PORT", "").strip()
+        or "27166"
+    )
     return {
-        "log": {"loglevel": values["XRAY_LOGLEVEL"]},
-        "inbounds": [build_reality_inbound(values, listen_port)],
+        "log": {"loglevel": ai_values["XRAY_LOGLEVEL"]},
+        "inbounds": [build_reality_inbound(ai_values, listen_port)],
         "outbounds": [{"protocol": "freedom", "tag": "direct"}],
     }
 

@@ -477,11 +477,43 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
 def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, dns_failover_status):
     """Describe the current traffic-routing path for the dashboard flow diagram."""
     dp_ok = bool(data_plane_status.get("reachable"))
-    ai_ok = bool(ai_node_status.get("reachable"))
+    ai_candidates = ai_routing_status.get("ai_candidates")
+    if not isinstance(ai_candidates, list):
+        ai_candidates = []
+    selected_ai_candidate = next(
+        (
+            candidate
+            for candidate in ai_candidates
+            if isinstance(candidate, dict) and candidate.get("selected") is True
+        ),
+        None,
+    )
+    selected_ai_has_probe = selected_ai_candidate is not None and selected_ai_candidate.get("is_reachable") in {
+        True,
+        False,
+    }
+    # The AI routing report is the source of truth for the traffic path. The
+    # SSH-managed node status only describes the control channel and may be
+    # unavailable while the selected REALITY candidate is serving traffic.
+    ai_ok = (
+        bool(selected_ai_candidate.get("is_reachable"))
+        if selected_ai_has_probe
+        else bool(ai_node_status.get("reachable"))
+    )
+    ai_label = str(
+        (selected_ai_candidate or {}).get("label")
+        or (selected_ai_candidate or {}).get("candidate_label")
+        or "AI 节点"
+    ).strip() or "AI 节点"
     ai_route_status = str(
         ai_routing_status.get("route_status") or ai_routing_status.get("status") or ""
     ).strip()
-    ai_fallback = ai_route_status in {"fallback_to_primary", "manual_fallback"}
+    ai_fallback = ai_route_status in {
+        "fallback_to_primary",
+        "manual_fallback",
+        "manual_target_unreachable",
+        "probe_error",
+    }
     dns_target = str(dns_failover_status.get("current_target") or "primary").strip()
     backup_enabled = bool(dns_failover_status.get("enabled") and dns_failover_status.get("configured"))
     backup_xray_enabled = bool(dns_failover_status.get("control_plane_backup_xray_enabled"))
@@ -502,17 +534,38 @@ def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, 
 
     if dns_target == "backup" and backup_enabled:
         if backup_mode == "relay" and ai_ok:
-            return route("dns_backup_relay_ai", "DNS→控制面备用→AI 节点", "数据面故障，控制面备用 relay 到 AI 节点", "控制面备用", ["AI 节点"], "AI 节点 freedom 直出", "备用 relay", True)
+            return route(
+                "dns_backup_relay_ai",
+                f"DNS→控制面备用→{ai_label}",
+                f"数据面故障，控制面备用 relay 到{ai_label}",
+                "控制面备用",
+                [ai_label],
+                f"{ai_label} freedom 直出",
+                "备用 relay",
+                True,
+            )
         return route("dns_backup_direct", "DNS→控制面备用→freedom 直出", "双节点故障，控制面备用 freedom 直出", "控制面备用", [], "控制面备用 freedom 直出", "备用直出", True)
 
     if not dp_ok and backup_enabled:
         return route("dns_backup_pending", "DNS 待切换到控制面备用", "数据面故障，等待 DNS 切换", "当前 DNS 入口", [], "等待切换", "待切换", True, True)
 
     if dp_ok and ai_ok and not ai_fallback:
-        return route("normal_ai", "数据面→AI 节点直出", "正常：AI 流量经 AI 节点直出", "普通数据面", ["AI 节点"], "AI 节点 freedom 直出", "正常")
+        return route(
+            "normal_ai",
+            f"数据面→{ai_label}直出",
+            f"正常：AI 流量经{ai_label}直出",
+            "普通数据面",
+            [ai_label],
+            f"{ai_label} freedom 直出",
+            "正常",
+        )
 
     if dp_ok and (not ai_ok or ai_fallback):
-        reason = "AI 路由被人工强制回退，AI 流量改走数据面直出" if ai_route_status == "manual_fallback" else "AI 节点不可达，AI 流量回退到数据面直出"
+        reason = (
+            "AI 路由被人工强制回退，AI 流量改走数据面直出"
+            if ai_route_status == "manual_fallback"
+            else f"{ai_label}不可达，AI 流量回退到数据面直出"
+        )
         status = "人工回退" if ai_route_status == "manual_fallback" else "AI 回退"
         return route("normal_fallback", "数据面→freedom 直出", reason, "普通数据面", [], "普通数据面 freedom 直出", status, True)
 

@@ -1,8 +1,12 @@
 import json
+import subprocess
 
 
 from ..config import (
+    AI_DOMAIN_MANAGER_CONTAINER_NAME,
+    AI_DOMAIN_MANAGER_DOCKER_BIN,
     AI_ROUTING_ENABLED,
+    XRAY_ENV_FILE_PATH,
 )
 from ..helpers import (
     utc_iso_now,
@@ -10,6 +14,8 @@ from ..helpers import (
 from ..errors import ValidationError
 from ..observability.logging import emit_business_event
 from ..xray.ai_domain_manager import ensure_ai_domain_schema
+from ..xray.ai_domain_manager import build_ai_upstream_candidates
+from ..xray.envfile import load_env_file
 
 
 
@@ -116,24 +122,110 @@ class AiRoutingService:
         return "本地缓存"
 
     def ai_routing_manual_state(self):
+        report = self._panel.read_ai_domain_report()
+        candidates = []
+        if isinstance(report, dict):
+            target = report.get("ai_target")
+            if isinstance(target, dict):
+                candidates = [item for item in target.get("candidates", []) if isinstance(item, dict)]
+        if not candidates:
+            candidates = self._configured_ai_candidates()
+        report_selected_index = None
+        if isinstance(report, dict):
+            target = report.get("ai_target")
+            if isinstance(target, dict):
+                try:
+                    report_selected_index = int(target.get("selected_index"))
+                except (TypeError, ValueError):
+                    report_selected_index = None
         with self._panel.connect() as conn:
             mode = str(self._panel.get_state(conn, "ai_routing_manual_mode", "auto") or "auto").strip().lower()
             updated_at = str(self._panel.get_state(conn, "ai_routing_manual_updated_at", "") or "").strip()
-        if mode not in {"auto", "forced_fallback"}:
+        if mode not in {"auto", "primary", "backup", "forced_fallback"}:
             mode = "auto"
+        selected_index = {"primary": 0, "backup": 1}.get(mode, report_selected_index)
+        for index, candidate in enumerate(candidates):
+            candidate["index"] = index
+            candidate["number"] = index + 1
+            candidate["selected"] = selected_index == index
+            candidate["label"] = (
+                "主 AI 节点" if index == 0 else
+                ("备用 AI 节点" if index == 1 else f"AI 节点 {index + 1}")
+            )
         return {
             "mode": mode,
-            "mode_label": "人工强制回退" if mode == "forced_fallback" else "自动探测",
+            "mode_label": {
+                "auto": "自动探测",
+                "primary": "人工指定主 AI",
+                "backup": "人工指定备用 AI",
+                "forced_fallback": "人工强制回退",
+            }[mode],
             "updated_at": updated_at,
             "updated_at_display": self._panel.format_optional_display_time(updated_at) if updated_at else "暂无",
+            "candidates": candidates,
+            "candidate_count": len(candidates),
         }
+
+    def _configured_ai_candidates(self):
+        try:
+            values = load_env_file(XRAY_ENV_FILE_PATH)
+            candidates = build_ai_upstream_candidates(
+                values.get("AI_UPSTREAM_HOST", ""),
+                int(values.get("AI_UPSTREAM_PORT", "27166")),
+                upstreams_raw=values.get("AI_UPSTREAMS", ""),
+                fallbacks_raw=values.get("AI_UPSTREAM_FALLBACKS", ""),
+                fallback_share_url=values.get("AI_UPSTREAM_FALLBACK_URL", ""),
+            )
+        except (OSError, ValueError, TypeError):
+            return []
+        return [
+            {
+                "upstream_host": item.get("upstream_host", ""),
+                "upstream_port": int(item.get("upstream_port", 0) or 0),
+                "candidate_type": item.get("candidate_type", "template"),
+                "candidate_label": item.get("candidate_label", ""),
+                "is_reachable": None,
+                "selected": False,
+            }
+            for item in candidates
+        ]
+
+    def _trigger_ai_domain_manager(self):
+        if not AI_DOMAIN_MANAGER_CONTAINER_NAME:
+            raise RuntimeError("AI 域名管理器容器未配置。")
+        try:
+            completed = subprocess.run(
+                [
+                    AI_DOMAIN_MANAGER_DOCKER_BIN,
+                    "exec",
+                    AI_DOMAIN_MANAGER_CONTAINER_NAME,
+                    "python3",
+                    "-m",
+                    "app.xray.ai_domain_manager",
+                    "--once",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=240,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("AI 路由重算超时，保持原有实际路由。") from exc
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "AI 域名管理器执行失败").strip()
+            raise RuntimeError(detail[-500:])
 
     def set_ai_routing_manual_mode(self, mode):
         mode = str(mode or "").strip().lower()
-        if mode not in {"auto", "forced_fallback"}:
-            raise ValidationError("AI 路由模式仅支持 auto 或 forced_fallback。")
+        if mode not in {"auto", "primary", "backup", "forced_fallback"}:
+            raise ValidationError("AI 路由模式仅支持 auto、primary、backup 或 forced_fallback。")
         if not AI_ROUTING_ENABLED:
             raise ValidationError("AI 路由未启用。")
+
+        if mode in {"primary", "backup"}:
+            candidate_state = self.ai_routing_manual_state()
+            if len(candidate_state["candidates"]) < 2:
+                raise ValidationError("当前只配置了一个 AI 节点，无法执行双节点切换。")
 
         updated_at = utc_iso_now()
 
@@ -141,13 +233,23 @@ class AiRoutingService:
             self._panel.set_state(conn, "ai_routing_manual_mode", mode)
             self._panel.set_state(conn, "ai_routing_manual_updated_at", updated_at)
 
+        previous_mode = self.ai_routing_manual_state()["mode"]
         self._panel.apply_state_update(operation)
-        if mode == "forced_fallback":
-            if not self._panel.data_plane.is_configured():
-                raise ValidationError("数据面未配置，无法应用 AI 回退。")
-            self._panel.data_plane.remove_dynamic_routing()
-            if self._panel.data_plane.supports_restart() and not self._panel.data_plane.restart():
-                raise RuntimeError("数据面未能重启，AI 回退可能尚未生效。")
+        try:
+            if mode == "forced_fallback":
+                if not self._panel.data_plane.is_configured():
+                    raise ValidationError("数据面未配置，无法应用 AI 回退。")
+                self._panel.data_plane.remove_dynamic_routing()
+                if self._panel.data_plane.supports_restart() and not self._panel.data_plane.restart():
+                    raise RuntimeError("数据面未能重启，AI 回退可能尚未生效。")
+            else:
+                self._trigger_ai_domain_manager()
+        except Exception:
+            def restore(conn):
+                self._panel.set_state(conn, "ai_routing_manual_mode", previous_mode)
+                self._panel.set_state(conn, "ai_routing_manual_updated_at", utc_iso_now())
+            self._panel.apply_state_update(restore)
+            raise
         emit_business_event(
             "ai_routing.manual_switched",
             actor_type="admin",
@@ -166,6 +268,8 @@ class AiRoutingService:
             return "AI 节点探测失败，已停用动态 AI 路由"
         if status_text == "manual_fallback":
             return "人工强制回退到主链路"
+        if status_text == "manual_target_unreachable":
+            return "人工指定 AI 不可达，已停用动态路由"
         if status_text == "idle":
             return "当前窗口无 AI 域名"
         if status_text == "pending_proxy_template":
@@ -177,9 +281,9 @@ class AiRoutingService:
         return "未知状态"
     def ai_route_status_tone(self, status):
         status_text = str(status or "").strip().lower()
-        if status_text == "applied":
+        if status_text in {"applied", "manual_selected"}:
             return "ok"
-        if status_text in {"fallback_to_primary", "probe_error", "manual_fallback", "idle", "disabled"}:
+        if status_text in {"fallback_to_primary", "probe_error", "manual_fallback", "manual_target_unreachable", "idle", "disabled"}:
             return "warn"
         return "bad"
     def ai_source_label(self, value):
@@ -401,6 +505,8 @@ class AiRoutingService:
             "manual_mode_label": manual["mode_label"],
             "manual_updated_at": manual["updated_at"],
             "manual_updated_at_display": manual["updated_at_display"],
+            "ai_candidates": manual["candidates"],
+            "ai_candidate_count": manual["candidate_count"],
             "sync_error": str(sync_error or "").strip(),
         }
     def query_ai_domain_overview(self, sync_error=""):

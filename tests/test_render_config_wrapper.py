@@ -24,6 +24,14 @@ XRAY_DEST=www.microsoft.com:443
 XRAY_FINGERPRINT=chrome
 XRAY_LOGLEVEL=warning
 XRAY_NODE_TAG=test-node
+AI_NODE_CLIENT_UUID=22222222-2222-2222-2222-222222222222
+AI_NODE_FLOW=xtls-rprx-vision
+AI_NODE_REALITY_PRIVATE_KEY=ai-private-key-example
+AI_NODE_REALITY_PUBLIC_KEY=ai-public-key-example
+AI_NODE_REALITY_SHORT_ID=fedcba9876543210
+AI_NODE_SERVER_NAME=www.amazon.com
+AI_NODE_DEST=www.amazon.com:443
+AI_NODE_FINGERPRINT=chrome
 """
 
 
@@ -214,6 +222,14 @@ class AiNodeConfigTest(unittest.TestCase):
             "XRAY_LOGLEVEL": "warning",
             "XRAY_NODE_TAG": "test-node",
             "XRAY_API_SERVER": "127.0.0.1:10085",
+            "AI_NODE_CLIENT_UUID": "22222222-2222-2222-2222-222222222222",
+            "AI_NODE_FLOW": "xtls-rprx-vision",
+            "AI_NODE_REALITY_PRIVATE_KEY": "ai-private-key-example",
+            "AI_NODE_REALITY_PUBLIC_KEY": "ai-public-key-example",
+            "AI_NODE_REALITY_SHORT_ID": "fedcba9876543210",
+            "AI_NODE_SERVER_NAME": "www.amazon.com",
+            "AI_NODE_DEST": "www.amazon.com:443",
+            "AI_NODE_FINGERPRINT": "chrome",
         }
 
     def test_ai_node_config_has_freedom_direct_only(self):
@@ -238,10 +254,49 @@ class AiNodeConfigTest(unittest.TestCase):
 
         values = self._values()
         values["AI_UPSTREAM_PORT"] = "27166"
+        values.update(
+            {
+                "AI_NODE_CLIENT_UUID": "22222222-2222-2222-2222-222222222222",
+                "AI_NODE_FLOW": "xtls-rprx-vision",
+                "AI_NODE_REALITY_PRIVATE_KEY": "ai-private-key-example",
+                "AI_NODE_REALITY_PUBLIC_KEY": "ai-public-key-example",
+                "AI_NODE_REALITY_SHORT_ID": "fedcba9876543210",
+                "AI_NODE_SERVER_NAME": "www.amazon.com",
+                "AI_NODE_DEST": "www.amazon.com:443",
+                "AI_NODE_FINGERPRINT": "chrome",
+            }
+        )
         config = build_ai_node_config(values)
-        expected_inbound = build_reality_inbound(values, 27166)
+        ai_values = dict(values)
+        ai_values.update(
+            {
+                "XRAY_CLIENT_UUID": values["AI_NODE_CLIENT_UUID"],
+                "XRAY_FLOW": values["AI_NODE_FLOW"],
+                "XRAY_REALITY_PRIVATE_KEY": values["AI_NODE_REALITY_PRIVATE_KEY"],
+                "XRAY_REALITY_PUBLIC_KEY": values["AI_NODE_REALITY_PUBLIC_KEY"],
+                "XRAY_REALITY_SHORT_ID": values["AI_NODE_REALITY_SHORT_ID"],
+                "XRAY_SERVER_NAME": values["AI_NODE_SERVER_NAME"],
+                "XRAY_DEST": values["AI_NODE_DEST"],
+                "XRAY_FINGERPRINT": values["AI_NODE_FINGERPRINT"],
+            }
+        )
+        expected_inbound = build_reality_inbound(ai_values, 27166)
 
         self.assertEqual(config["inbounds"][0], expected_inbound)
+        self.assertNotEqual(
+            config["inbounds"][0]["settings"]["clients"][0]["id"],
+            values["XRAY_CLIENT_UUID"],
+        )
+
+    def test_ai_node_requires_independent_credentials(self):
+        from app.xray.render_config import build_ai_node_config
+
+        values = self._values()
+        for key in tuple(values):
+            if key.startswith("AI_NODE_"):
+                values.pop(key)
+        with self.assertRaisesRegex(ValueError, "missing required AI node values"):
+            build_ai_node_config(values)
 
     def test_backup_config_without_upstream_url_uses_freedom_direct(self):
         from app.xray.render_config import build_server_config

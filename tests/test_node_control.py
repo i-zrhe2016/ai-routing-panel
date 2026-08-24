@@ -41,12 +41,21 @@ def load_state_module(temp_root):
         flask_stub.url_for = lambda *args, **kwargs: "/"
         sys.modules["flask"] = flask_stub
 
-    for module_name in ["app.config", "app.state"]:
-        if module_name in sys.modules:
-            importlib.reload(sys.modules[module_name])
-        else:
-            importlib.import_module(module_name)
-    return importlib.reload(importlib.import_module("app.state"))
+    if "app.config" in sys.modules:
+        importlib.reload(sys.modules["app.config"])
+    else:
+        importlib.import_module("app.config")
+
+    # PanelState is composed from app.state.* modules that import configuration
+    # constants at module load time. Remove the whole package before each test
+    # environment reload so stale node paths cannot leak between cases.
+    for module_name in sorted(
+        (name for name in sys.modules if name == "app.state" or name.startswith("app.state.")),
+        key=len,
+        reverse=True,
+    ):
+        sys.modules.pop(module_name, None)
+    return importlib.import_module("app.state")
 
 
 class NodeControlTest(unittest.TestCase):
@@ -107,6 +116,7 @@ class NodeControlTest(unittest.TestCase):
                 ssh_target="root@example.com",
                 ssh_options=("-i", "/wrong/key", "-o", "IdentitiesOnly=no", "-o", "ConnectTimeout=5"),
                 ssh_key_file="/run/secrets/fleet_ssh_key",
+                ssh_known_hosts_file="/root/.ssh/known_hosts",
             )
         )
 
@@ -118,6 +128,12 @@ class NodeControlTest(unittest.TestCase):
         self.assertNotIn("/wrong/key", command)
         self.assertIn("/run/secrets/fleet_ssh_key", command)
         self.assertIn("IdentitiesOnly=yes", command)
+        self.assertIn("BatchMode=yes", command)
+        self.assertIn("PreferredAuthentications=publickey", command)
+        self.assertIn("PasswordAuthentication=no", command)
+        self.assertIn("KbdInteractiveAuthentication=no", command)
+        self.assertIn("StrictHostKeyChecking=yes", command)
+        self.assertIn("UserKnownHostsFile=/root/.ssh/known_hosts", command)
         self.assertIn("ConnectTimeout=5", command)
 
     def test_remote_reality_probe_returns_remote_payload(self):
@@ -149,6 +165,35 @@ class NodeControlTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["method"], "reality")
         controller._run_remote.assert_called_once()
+
+    def test_remote_tcp_probe_returns_unreachable_payload_without_management_error(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+            )
+        )
+        controller._run_remote = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                ["ssh"],
+                0,
+                stdout=json.dumps(
+                    {
+                        "ok": False,
+                        "error": "timed out",
+                        "method": "tcp",
+                    }
+                ),
+                stderr="",
+            )
+        )
+
+        result = controller.probe_tcp_endpoint("ai.example.com", 443, 2)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "timed out")
+        self.assertFalse(result["management_error"])
 
     def test_restart_data_plane_returns_summary(self):
         os.environ["DATAPLANE_SSH_TARGET"] = "root@data-plane"
@@ -248,6 +293,62 @@ class NodeControlTest(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(local_path.read_text(encoding="utf-8"), '{"routing": {"rules": []}}')
 
+    def test_remote_generated_sync_uploads_dynamic_routing_fragment(self):
+        source_config = self.root / "config.json"
+        source_dynamic = self.root / "dynamic-routing.json"
+        source_config.write_text("{}", encoding="utf-8")
+        source_dynamic.write_text('{"outbounds": [{"tag": "ai_proxy"}]}', encoding="utf-8")
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                config_path="/etc/xray/config.json",
+                source_config_path=source_config,
+                dynamic_routing_path="/etc/xray/dynamic-routing.json",
+                source_dynamic_routing_path=source_dynamic,
+            )
+        )
+        remote_calls = []
+
+        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
+            remote_calls.append((args, input_text))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        controller._run_remote = fake_run_remote
+
+        uploaded = controller.sync_generated_files()
+
+        self.assertEqual(uploaded, ["/etc/xray/config.json", "/etc/xray/dynamic-routing.json"])
+        self.assertEqual(remote_calls[-1][0][-1], "/etc/xray/dynamic-routing.json")
+        self.assertEqual(remote_calls[-1][1], source_dynamic.read_text(encoding="utf-8"))
+
+    def test_remote_generated_sync_deletes_missing_dynamic_routing_fragment(self):
+        source_config = self.root / "config.json"
+        source_dynamic = self.root / "dynamic-routing.json"
+        source_config.write_text("{}", encoding="utf-8")
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                config_path="/etc/xray/config.json",
+                source_config_path=source_config,
+                dynamic_routing_path="/etc/xray/dynamic-routing.json",
+                source_dynamic_routing_path=source_dynamic,
+            )
+        )
+        remote_calls = []
+        controller._run_remote = lambda args, error_prefix, timeout=None, input_text=None: (
+            remote_calls.append((args, input_text))
+            or SimpleNamespace(returncode=0, stdout="", stderr="")
+        )
+
+        controller.sync_generated_files()
+
+        self.assertEqual(remote_calls[-1][0][-1], "/etc/xray/dynamic-routing.json")
+        self.assertIsNone(remote_calls[-1][1])
+
     def test_remote_ai_report_sync_updates_local_copy(self):
         local_path = self.root / "reports" / "hourly-domains" / "latest.json"
         controller = DataPlaneController(
@@ -269,6 +370,38 @@ class NodeControlTest(unittest.TestCase):
         changed = controller.sync_ai_report_from_remote()
 
         self.assertTrue(changed)
+        self.assertEqual(
+            local_path.read_text(encoding="utf-8"),
+            '{"generated_at": "2026-06-18T00:00:00+00:00"}',
+        )
+
+    def test_remote_ai_report_sync_keeps_local_copy_when_remote_missing(self):
+        local_path = self.root / "reports" / "hourly-domains" / "latest.json"
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(
+            '{"generated_at": "2026-06-18T00:00:00+00:00"}',
+            encoding="utf-8",
+        )
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                ai_report_path="/srv/xray/reports/hourly-domains/latest.json",
+                source_ai_report_path=local_path,
+            )
+        )
+
+        controller._run_remote = lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout='{"exists": false, "data": ""}',
+            stderr="",
+        )
+
+        changed = controller.sync_ai_report_from_remote()
+
+        self.assertFalse(changed)
+        self.assertTrue(local_path.is_file())
         self.assertEqual(
             local_path.read_text(encoding="utf-8"),
             '{"generated_at": "2026-06-18T00:00:00+00:00"}',
