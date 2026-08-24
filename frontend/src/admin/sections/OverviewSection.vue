@@ -1,17 +1,20 @@
 <script>
 import StatusPill from "../../shared/ui/StatusPill.vue";
+import AiRouteControl from "../components/AiRouteControl.vue";
 import FailoverTopology from "../components/FailoverTopology.vue";
 
 // Read-only KPI overview. Injects the root `panel` for all state/helpers.
 export default {
   name: "OverviewSection",
-  components: { StatusPill, FailoverTopology },
+  components: { AiRouteControl, StatusPill, FailoverTopology },
   inject: ["panel"],
 };
 </script>
 
 <template>
   <div class="a-section">
+    <ai-route-control />
+
     <div class="a-card">
       <div class="a-card-head">
         <p class="eyebrow">OVERVIEW</p>

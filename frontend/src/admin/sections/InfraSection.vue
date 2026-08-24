@@ -1,6 +1,7 @@
 <script>
 // Infrastructure: DNS failover status + manual check/switch, data-plane restart,
 // AI routing summary, and the tenant-access overview.
+
 export default {
   name: "InfraSection",
   inject: ["panel"],
@@ -544,4 +545,5 @@ export default {
 .diag .warn {
   color: #d97706;
 }
+
 </style>

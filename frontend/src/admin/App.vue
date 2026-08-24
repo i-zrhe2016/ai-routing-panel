@@ -1,15 +1,9 @@
 <script>
-import {
-  NConfigProvider,
-  NDrawer,
-  NDrawerContent,
-  NLayout,
-  NLayoutContent,
-  NLayoutHeader,
-  NLayoutSider,
-  NMenu,
-  NSpin,
-} from "naive-ui";
+import { NConfigProvider } from "naive-ui/es/config-provider";
+import { NDrawer, NDrawerContent } from "naive-ui/es/drawer";
+import { NLayout, NLayoutContent, NLayoutHeader, NLayoutSider } from "naive-ui/es/layout";
+import { NMenu } from "naive-ui/es/menu";
+import { NSpin } from "naive-ui/es/spin";
 
 import { naiveThemeOverrides } from "../shared/tokens.js";
 import StatusPill from "../shared/ui/StatusPill.vue";

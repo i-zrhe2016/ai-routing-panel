@@ -17,7 +17,17 @@ function makeDashboard() {
       ai_domain_dashboard_url: "/ai-domain-dashboard",
       data_plane_status: { xray_running: true, configured: true, label: "数据面", management_target: "docker" },
       ai_node_status: { configured: true, reachable: true, label: "AI 节点", management_target: "root@ai-node" },
-      ai_routing_status: { configured: true, status_tone: "ok", status_label: "正常" },
+      ai_routing_status: {
+        configured: true,
+        status_tone: "ok",
+        status_label: "正常",
+        manual_mode: "auto",
+        manual_mode_label: "自动探测",
+        ai_candidates: [
+          { index: 0, label: "主 AI 节点", candidate_label: "nat.qq.pw:27166", upstream_host: "nat.qq.pw", upstream_port: 27166, is_reachable: true, selected: true },
+          { index: 1, label: "备用 AI 节点", candidate_label: "100.87.76.6:27166", upstream_host: "100.87.76.6", upstream_port: 27166, is_reachable: true, selected: false },
+        ],
+      },
       dns_failover_status: { enabled: true, configured: true, current_target: "primary", backup_label: "控制面备用 Xray" },
       traffic_routing: {
         path: "normal_ai",
@@ -187,17 +197,99 @@ describe("AdminApp", () => {
     expect(wrapper.text()).toContain("1.00 KB");
   });
 
-  it("renders the failover topology and switches AI routing manually", async () => {
+  it("renders the AI primary/backup control and switches to the backup after confirmation", async () => {
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    expect(control.text()).toContain("主 AI 节点");
+    expect(control.text()).toContain("备用 AI 节点");
+    expect(control.text()).toContain("nat.qq.pw:27166");
+    expect(control.text()).toContain("100.87.76.6:27166");
+    await control.get('[data-testid="ai-switch-backup"]').trigger("click");
+    expect(control.text()).toContain("确认备用 AI 节点");
+    await control.get('[data-testid="ai-confirm-submit"]').trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai-routing/switch",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "backup" }) }),
+    );
+  });
+
+  it("keeps the topology focused on the current path without duplicating AI actions", async () => {
     const wrapper = await mountAdmin();
     expect(wrapper.text()).toContain("三节点流量切换拓扑");
-    const fallbackButton = wrapper.findAll("button").find((button) => button.text().includes("强制回退"));
-    expect(fallbackButton).toBeTruthy();
-    await fallbackButton.trigger("click");
+    expect(wrapper.find('[data-testid="ai-route-control-overview"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="ai-route-control-detail"]').exists()).toBe(false);
+    expect(wrapper.findAll('[data-testid="ai-force-direct"]')).toHaveLength(1);
+  });
+
+  it("requires confirmation before enabling the advanced data-plane direct fallback", async () => {
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    await control.get('[data-testid="ai-force-direct"]').trigger("click");
+    expect(control.text()).toContain("启用应急直出");
+    await control.get('[data-testid="ai-confirm-submit"]').trigger("click");
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/ai-routing/switch",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "forced_fallback" }) }),
     );
+  });
+
+  it("keeps an unreachable AI candidate selectable and shows the risk in confirmation", async () => {
+    const unreachableDashboard = structuredClone(dashboard);
+    unreachableDashboard.meta.ai_routing_status.ai_candidates[1].is_reachable = false;
+    fetchMock.mockImplementation((url) => jsonResp({
+      ok: true,
+      message: "ok",
+      dashboard: unreachableDashboard,
+    }));
+
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    const switchButton = control.get('[data-testid="ai-switch-backup"]');
+    expect(switchButton.attributes("disabled")).toBeUndefined();
+    await switchButton.trigger("click");
+    expect(control.text()).toContain("不可达");
+  });
+
+  it("restores automatic probing from a manually fixed backup", async () => {
+    const manualDashboard = structuredClone(dashboard);
+    manualDashboard.meta.ai_routing_status.manual_mode = "backup";
+    manualDashboard.meta.ai_routing_status.manual_mode_label = "人工固定备用 AI";
+    manualDashboard.meta.ai_routing_status.ai_candidates[0].selected = false;
+    manualDashboard.meta.ai_routing_status.ai_candidates[1].selected = true;
+    fetchMock.mockImplementation((url) => jsonResp({
+      ok: true,
+      message: "ok",
+      dashboard: manualDashboard,
+    }));
+
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    await control.get('[data-testid="ai-restore-auto"]').trigger("click");
+    await control.get('[data-testid="ai-confirm-submit"]').trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai-routing/switch",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "auto" }) }),
+    );
+  });
+
+  it("does not render a fake backup action when only one AI candidate is configured", async () => {
+    const singleCandidateDashboard = structuredClone(dashboard);
+    singleCandidateDashboard.meta.ai_routing_status.ai_candidates = [
+      singleCandidateDashboard.meta.ai_routing_status.ai_candidates[0],
+    ];
+    fetchMock.mockImplementation((url) => jsonResp({
+      ok: true,
+      message: "ok",
+      dashboard: singleCandidateDashboard,
+    }));
+
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    expect(control.find('[data-testid="ai-switch-backup"]').exists()).toBe(false);
+    expect(control.text()).toContain("主 AI 节点");
   });
 
   it("fulfills an order via POST /api/orders/<id>/fulfill", async () => {

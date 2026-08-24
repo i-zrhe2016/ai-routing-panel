@@ -54,8 +54,18 @@ export const AiDomainsMixin = {
       });
     },
 
-    async switchAiRoutingMode(mode) {
-      const action = mode === "forced_fallback" ? "force-ai-fallback" : "restore-ai-auto";
+    async switchAiRoutingMode(mode, options = {}) {
+      const action = `switch-ai-${mode}`;
+      const labels = {
+        primary: "主 AI 节点",
+        backup: "备用 AI 节点",
+        auto: "自动探测",
+        forced_fallback: "数据面直出",
+      };
+      const safeOptions = options || {};
+      if (!safeOptions.skipConfirm && !window.confirm(`确认切换到${labels[mode] || "该 AI 路由模式"}吗？`)) {
+        return;
+      }
       await this.runAction(action, async () => {
         const data = await this.requestJson("/api/ai-routing/switch", {
           method: "POST",

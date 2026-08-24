@@ -12,6 +12,26 @@ export default {
     aiRouting() {
       return this.panel.aiRoutingStatus || {};
     },
+    aiCandidates() {
+      return Array.isArray(this.aiRouting.ai_candidates) ? this.aiRouting.ai_candidates : [];
+    },
+    selectedAiCandidate() {
+      return this.aiCandidates.find((candidate) => candidate && candidate.selected === true) || null;
+    },
+    selectedAiHasProbe() {
+      return Boolean(
+        this.selectedAiCandidate
+        && (this.selectedAiCandidate.is_reachable === true || this.selectedAiCandidate.is_reachable === false),
+      );
+    },
+    selectedAiReachable() {
+      return this.selectedAiHasProbe
+        ? this.selectedAiCandidate.is_reachable === true
+        : Boolean(this.ai.reachable);
+    },
+    selectedAiLabel() {
+      return this.selectedAiCandidate?.label || this.selectedAiCandidate?.candidate_label || "AI 节点";
+    },
     route() {
       return this.panel.trafficRouting || {};
     },
@@ -25,7 +45,22 @@ export default {
       return this.dns.current_target === "backup";
     },
     aiActive() {
-      return this.route.path === "normal_ai" && Boolean(this.ai.reachable);
+      return ["normal_ai", "dns_backup_relay_ai"].includes(this.route.path) && this.selectedAiReachable;
+    },
+    aiStatus() {
+      if (this.selectedAiHasProbe) return this.selectedAiReachable ? "运行中" : "不可达";
+      return this.ai.reachable ? "运行中" : (this.ai.configured ? "不可达" : "未纳管");
+    },
+    aiTone() {
+      if (this.aiActive) return "ok";
+      if (this.aiRouting.manual_mode === "forced_fallback") return "warn";
+      if (this.selectedAiHasProbe && !this.selectedAiReachable) return "bad";
+      return this.ai.configured ? "bad" : "warn";
+    },
+    aiNote() {
+      if (this.aiRouting.manual_mode === "forced_fallback") return "人工回退到数据面直出";
+      const mode = this.aiRouting.manual_mode_label || "自动探测";
+      return `${this.selectedAiLabel} · ${mode}`;
     },
     controlPlaneStatus() {
       return this.backupActive ? "备用 Xray 接管中" : "管理面在线";
@@ -65,11 +100,11 @@ export default {
           key: "ai_node",
           label: "AI 节点",
           subtitle: "AI 流量出口",
-          status: this.ai.reachable ? "运行中" : (this.ai.configured ? "不可达" : "未纳管"),
-          tone: this.aiActive ? "ok" : (this.ai.configured ? "bad" : "warn"),
+          status: this.aiStatus,
+          tone: this.aiTone,
           active: this.aiActive,
-          note: this.aiRouting.manual_mode === "forced_fallback" ? "人工回退到数据面直出" : (this.ai.management_target || "未纳管"),
-          action: "ai",
+          note: this.aiNote,
+          action: "none",
         },
       ];
     },
@@ -91,9 +126,6 @@ export default {
     },
     async switchDns(target) {
       await this.panel.switchDnsTarget(target);
-    },
-    async switchAi(mode) {
-      await this.panel.switchAiRoutingMode(mode);
     },
   },
 };
@@ -141,26 +173,6 @@ export default {
               @click="switchDns('primary')"
             >
               {{ panel.isBusy("dns-failover-switch:primary") ? "切换中" : "回到主面" }}
-            </button>
-          </div>
-          <div v-if="node.action === 'ai'" class="topology-actions">
-            <button
-              v-if="aiRouting.manual_mode !== 'forced_fallback'"
-              class="a-btn compact"
-              type="button"
-              :disabled="!aiRouting.configured || panel.isBusy('force-ai-fallback')"
-              @click="switchAi('forced_fallback')"
-            >
-              {{ panel.isBusy("force-ai-fallback") ? "切换中" : "强制回退" }}
-            </button>
-            <button
-              v-else
-              class="a-btn compact ghost"
-              type="button"
-              :disabled="panel.isBusy('restore-ai-auto')"
-              @click="switchAi('auto')"
-            >
-              {{ panel.isBusy("restore-ai-auto") ? "恢复中" : "恢复自动" }}
             </button>
           </div>
         </article>

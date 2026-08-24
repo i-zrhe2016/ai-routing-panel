@@ -1,5 +1,4 @@
 import { createApp } from "vue";
-import naive from "naive-ui";
 
 import "../shared/tokens.css";
 import App from "./App.vue";
@@ -12,5 +11,4 @@ import { installClientErrorLogging, installVueErrorLogging } from "../shared/api
 const app = createApp(App);
 installClientErrorLogging({ csrfToken: window.__BOOT__?.csrf_token || "" });
 installVueErrorLogging(app, { csrfToken: window.__BOOT__?.csrf_token || "" });
-app.use(naive);
 app.mount("#app");
