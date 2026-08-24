@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>套餐购买 - xray-routing-panel</title>
+    <title>套餐列表 - xray-routing-panel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='tokens.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='public.css') }}">
   </head>
@@ -12,8 +12,8 @@
       <div class="page-top">
         <div>
           <p class="eyebrow">PUBLIC STORE</p>
-          <h1>套餐购买</h1>
-          <p class="subtitle">时长 + 总流量套餐，审核通过后自动开通专属端口和订阅。</p>
+          <h1>套餐列表</h1>
+          <p class="subtitle">查看时长、流量和价格信息；如需开通，请联系管理员。</p>
         </div>
         <div class="account">
           {% if current_customer %}
@@ -27,10 +27,6 @@
         </div>
       </div>
 
-      {% if request.args.get('message') %}
-      <div class="banner {{ request.args.get('level', 'info') }}">{{ request.args.get('message') }}</div>
-      {% endif %}
-
       <section class="plan-grid">
         {% for plan in plans %}
         <article class="card plan-card">
@@ -38,7 +34,7 @@
           <div class="price">{{ plan.price_display }}</div>
           <div class="meta">{{ plan.duration_days }} 天 · {{ plan.traffic_limit_display }}</div>
           <p class="desc">{{ plan.description or '默认提供独立订阅详情、Clash/V2Ray 订阅和 VLESS 分享链接。' }}</p>
-          <a class="btn" href="{{ url_for('checkout_plan', plan_slug=plan.slug) }}">立即下单</a>
+          <p class="muted">如需开通，请联系管理员。</p>
         </article>
         {% else %}
         <article class="card">

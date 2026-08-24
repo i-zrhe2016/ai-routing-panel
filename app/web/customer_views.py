@@ -2,10 +2,9 @@
 
 The customer dashboard/orders/subscriptions VIEW pages are now the portal SPA
 (/portal/*); the routes below for those paths are kept only as 302 redirects so
-old links and bookmarks resolve. Login/register/plans/checkout stay
-server-rendered (restyled with the design tokens), and the POST action endpoints
-(create order, payment proof, renew) remain — they now send customers into the
-portal on success.
+old links and bookmarks resolve. Login/register/plans stay server-rendered
+(restyled with the design tokens), while renewal and payment-proof POST actions
+send customers into the portal on success.
 """
 
 import sqlite3
@@ -26,7 +25,6 @@ from ..errors import ValidationError
 from ..helpers import external_url_for
 from .core import (
     clear_customer_session,
-    customer_login_target,
     get_authenticated_customer,
     bind_actor,
     log_business_event,
@@ -72,7 +70,7 @@ _LANDING_FAQS = [
     {"q": "节点掉线或不稳定怎么办？", "a": "多上游冗余加 DNS 故障自动切换，节点异常会秒级切到备用线路，连通性实时探测，长期稳定在线。"},
     {"q": "支持哪些客户端？", "a": "提供 Clash、V2Ray 订阅以及 VLESS 分享链接，主流客户端都能一键导入使用。"},
     {"q": "我的数据安全吗？", "a": "全程端到端加密，最小化日志、隐私优先。专属订阅与凭证仅你可见，对话内容不留存、不分析。"},
-    {"q": "如何开始？", "a": "选择套餐下单，审核通过后系统自动开通专属端口与订阅地址，导入客户端即可使用。"},
+    {"q": "如何开始？", "a": "联系管理员确认套餐并完成开通后，系统会生成专属端口与订阅地址，导入客户端即可使用。"},
 ]
 
 
@@ -157,7 +155,6 @@ def robots_txt():
         "Allow: /plans",
         "Disallow: /api/",
         "Disallow: /portal",
-        "Disallow: /checkout",
         "Disallow: /customer/",
         "Disallow: /admin",
         "",
@@ -194,24 +191,6 @@ def plans_page():
         "plans.html",
         plans=state.query_plans(public_only=True),
         current_customer=get_authenticated_customer(),
-        commerce_settings=state.get_commerce_settings(),
-    )
-
-
-@route("/checkout/<plan_slug>", methods=["GET"])
-def checkout_plan(plan_slug):
-    customer = get_authenticated_customer()
-    if customer is None:
-        return redirect(customer_login_target(next_target=request.path), code=303)
-    plan = state.get_plan_by_slug(plan_slug, public_only=True)
-    if plan is None:
-        abort(404)
-    return render_template(
-        "checkout.html",
-        customer=customer,
-        plan=plan,
-        commerce_settings=state.get_commerce_settings(),
-        csrf_token=ensure_csrf_token(),
     )
 
 
@@ -386,41 +365,3 @@ def customer_subscription_renew(service_subscription_id):
         log_business_event("subscription.renewed", result="failure", actor_type="customer", actor_id=customer["id"], resource_type="subscription", resource_id=service_subscription_id, error_code="rejected", message=str(exc))
         query = urlencode({"message": str(exc), "level": "error"})
         return redirect(f"{PORTAL_HOME}/subscriptions/{service_subscription_id}?{query}", code=303)
-
-
-@route("/orders", methods=["POST"])
-def create_order():
-    customer = get_authenticated_customer()
-    if customer is None:
-        return customer_auth_required_response()
-    require_csrf()
-
-    kind = str(request.form.get("kind", "new_purchase") or "new_purchase").strip()
-    try:
-        if kind == "renewal":
-            service_subscription_id = int(str(request.form.get("service_subscription_id", "") or "").strip())
-            service = state.get_customer_service_subscription(customer["id"], service_subscription_id)
-            if service is None:
-                raise ValidationError("服务实例不存在。")
-            order_no = state.create_order(
-                customer["id"],
-                service["plan_id"],
-                kind="renewal",
-                service_subscription_id=service_subscription_id,
-            )
-        else:
-            plan = state.get_plan_by_slug(request.form.get("plan_slug", ""), public_only=True)
-            if plan is None:
-                raise ValidationError("套餐不存在或已下架。")
-            order_no = state.create_order(customer["id"], plan["id"], kind="new_purchase")
-        log_business_event("order.created", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no, metadata={"kind": kind})
-        return redirect(_portal_order_url(order_no), code=303)
-    except ValidationError as exc:
-        log_business_event("order.created", result="failure", actor_type="customer", actor_id=customer["id"], error_code="rejected", message=str(exc), metadata={"kind": kind})
-        fallback_slug = str(request.form.get("plan_slug", "") or "").strip()
-        if fallback_slug:
-            return redirect(
-                url_for("checkout_plan", plan_slug=fallback_slug, message=str(exc), level="error"),
-                code=303,
-            )
-        return redirect(PORTAL_HOME, code=303)

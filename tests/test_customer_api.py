@@ -50,15 +50,11 @@ class CustomerApiTest(unittest.TestCase):
         )
 
     def fulfilled_subscription(self):
-        # Drive the full purchase to a fulfilled subscription via the JSON API
-        # for the customer side and the existing admin API for fulfillment.
+        # Seed an existing package order, then exercise the remaining customer
+        # payment flow and the existing admin fulfillment API.
         self.register()
-        create = self.client.post(
-            "/api/customer/orders",
-            data=json.dumps({"plan_slug": "basic-30d-100g"}),
-            headers=self.json_headers(),
-        )
-        order_no = create.get_json()["data"]["order_no"]
+        plan = self.panel.state.get_plan_by_slug("basic-30d-100g")
+        order_no = self.panel.state.create_order(1, plan["id"], kind="new_purchase")
         self.client.post(
             f"/api/customer/orders/{order_no}/payment-proof",
             data={"payer_note": "已付", "proof_image": (io.BytesIO(PNG_BYTES), "p.png")},
@@ -107,28 +103,24 @@ class CustomerApiTest(unittest.TestCase):
     def test_plans_endpoint_is_public(self):
         response = self.client.get("/api/customer/plans")
         self.assertEqual(response.status_code, 200)
-        slugs = [p["slug"] for p in response.get_json()["data"]["plans"]]
+        body = response.get_json()
+        slugs = [p["slug"] for p in body["data"]["plans"]]
         self.assertIn("basic-30d-100g", slugs)
+        self.assertNotIn("commerce_settings", body["data"])
 
-    def test_csrf_rejected_on_create_order(self):
+    def test_package_preorder_endpoint_is_removed(self):
         self.register()
         response = self.client.post(
             "/api/customer/orders",
             data=json.dumps({"plan_slug": "basic-30d-100g"}),
-            headers={"Content-Type": "application/json"},  # no X-CSRF-Token
-        )
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("CSRF", response.get_json()["message"])
-
-    def test_create_order_then_submit_payment_proof(self):
-        self.register()
-        create = self.client.post(
-            "/api/customer/orders",
-            data=json.dumps({"plan_slug": "basic-30d-100g"}),
             headers=self.json_headers(),
         )
-        self.assertEqual(create.status_code, 200)
-        order_no = create.get_json()["data"]["order_no"]
+        self.assertEqual(response.status_code, 405)
+
+    def test_existing_order_can_submit_payment_proof(self):
+        self.register()
+        plan = self.panel.state.get_plan_by_slug("basic-30d-100g")
+        order_no = self.panel.state.create_order(1, plan["id"], kind="new_purchase")
         self.assertEqual(self.panel.state.get_customer_order(1, order_no)["status"], "pending_payment")
 
         proof = self.client.post(
@@ -167,11 +159,8 @@ class CustomerApiTest(unittest.TestCase):
 
     def test_orders_listing_includes_status_label(self):
         self.register()
-        self.client.post(
-            "/api/customer/orders",
-            data=json.dumps({"plan_slug": "basic-30d-100g"}),
-            headers=self.json_headers(),
-        )
+        plan = self.panel.state.get_plan_by_slug("basic-30d-100g")
+        self.panel.state.create_order(1, plan["id"], kind="new_purchase")
         response = self.client.get("/api/customer/orders")
         self.assertEqual(response.status_code, 200)
         orders = response.get_json()["data"]["orders"]

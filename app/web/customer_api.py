@@ -1,11 +1,11 @@
 """JSON API for the subscriber portal SPA.
 
-Mirrors the server-rendered customer flow in customer_views.py but speaks JSON:
-the customer-session endpoints self-gate (returning a JSON 401 instead of an HTML
-redirect), mutating endpoints validate CSRF via the X-CSRF-Token header, and
-responses use the { ok, message, data } envelope. The legacy server-rendered
-routes stay live until P6. Endpoint names are allowlisted in
-core.ensure_basic_auth so admin Basic auth does not intercept them.
+The customer-session endpoints self-gate (returning a JSON 401 instead of an
+HTML redirect), mutating endpoints validate CSRF via the X-CSRF-Token header,
+and responses use the { ok, message, data } envelope. Package plans are
+read-only here; customer mutations are limited to subscription renewal and
+payment-proof submission for an existing order. Endpoint names are allowlisted
+in core.ensure_basic_auth so admin Basic auth does not intercept them.
 """
 
 import sqlite3
@@ -222,28 +222,6 @@ def api_customer_order_detail(order_no):
     )
 
 
-@route("/api/customer/orders", methods=["POST"])
-def api_customer_create_order():
-    customer = get_authenticated_customer()
-    if customer is None:
-        return json_customer_auth_required()
-    csrf_error = json_validate_csrf()
-    if csrf_error is not None:
-        return csrf_error
-    payload = request_payload()
-    plan_slug = str(payload.get("plan_slug", "") or "")
-    try:
-        plan = state.get_plan_by_slug(plan_slug, public_only=True)
-        if plan is None:
-            raise ValidationError("套餐不存在或已下架。")
-        order_no = state.create_order(customer["id"], plan["id"], kind="new_purchase")
-        log_business_event("order.created", actor_type="customer", actor_id=customer["id"], resource_type="order", resource_id=order_no, metadata={"kind": "new_purchase"})
-        return json_customer_success({"order_no": order_no}, message="订单已创建。")
-    except ValidationError as exc:
-        log_business_event("order.created", result="failure", actor_type="customer", actor_id=customer["id"], error_code="rejected", message=str(exc))
-        return json_error_response(str(exc), 400)
-
-
 @route("/api/customer/orders/<order_no>/payment-proof", methods=["POST"])
 def api_customer_submit_payment_proof(order_no):
     customer = get_authenticated_customer()
@@ -280,9 +258,7 @@ def api_customer_submit_payment_proof(order_no):
 
 @route("/api/customer/plans", methods=["GET"])
 def api_customer_plans():
-    return json_customer_success(
-        {"plans": state.query_plans(public_only=True), "commerce_settings": state.get_commerce_settings()}
-    )
+    return json_customer_success({"plans": state.query_plans(public_only=True)})
 
 
 # --- tenant token deep-link (account-less single subscription) --------------

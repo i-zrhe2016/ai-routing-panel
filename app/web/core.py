@@ -159,8 +159,6 @@ _BUSINESS_EVENT_BY_ENDPOINT = {
     "rotate_subscription": "subscription.rotated",
     "api_customer_subscription_renew": "subscription.renewed",
     "customer_subscription_renew": "subscription.renewed",
-    "api_customer_create_order": "order.created",
-    "create_order": "order.created",
     "api_customer_submit_payment_proof": "order.payment_proof_submitted",
     "customer_submit_order_payment_proof": "order.payment_proof_submitted",
     "api_dns_failover_check": "dns_failover.checked",
@@ -202,8 +200,6 @@ def ensure_basic_auth():
         "robots_txt",
         "sitemap_xml",
         "plans_page",
-        "checkout_plan",
-        "create_order",
         "customer_login",
         "customer_register",
         "customer_logout",
@@ -235,7 +231,6 @@ def ensure_basic_auth():
         "api_customer_subscription_renew",
         "api_customer_orders",
         "api_customer_order_detail",
-        "api_customer_create_order",
         "api_customer_submit_payment_proof",
         "api_customer_plans",
         "api_customer_login",
@@ -278,7 +273,6 @@ def ensure_customer_portal_auth():
         "customer_subscription_detail",
         "customer_subscription_renew",
         "customer_submit_order_payment_proof",
-        "create_order",
     }
     if request.endpoint not in customer_endpoints:
         return None
@@ -633,7 +627,6 @@ def build_customer_dashboard_state(customer, message="", level="info"):
             "orders_url": url_for("customer_orders"),
             "subscriptions_url": url_for("customer_subscriptions"),
             "logout_url": url_for("customer_logout"),
-            "checkout_example_url": url_for("plans_page"),
             "subscription_available": subscription_profile is not None,
             "subscription_error": subscription_error,
             "csrf_token": ensure_csrf_token(),

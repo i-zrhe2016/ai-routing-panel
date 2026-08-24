@@ -1,5 +1,5 @@
 /* Minimal-SaaS styling for the server-rendered public/auth pages
- * (login, register, plans, checkout). Uses the design tokens from tokens.css
+ * (login, register, plans). Uses the design tokens from tokens.css
  * so these Jinja pages visually match the admin/portal SPAs. Loaded alongside
  * tokens.css; replaces the legacy style.css on these pages only. */
 
@@ -96,7 +96,7 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .banner.success { background: var(--c-success-soft); border-color: transparent; color: var(--c-success); }
 .banner.info { background: var(--c-primary-soft); border-color: transparent; color: var(--c-primary-strong); }
 
-/* ---- Public page layout (plans / checkout) ---- */
+/* ---- Public page layout (plans) ---- */
 .page { max-width: 1040px; margin: 0 auto; padding: var(--space-7) var(--space-6); }
 .page-top {
   display: flex;
@@ -130,16 +130,6 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .plan-card .price { font-size: 28px; font-weight: 700; }
 .plan-card .meta { color: var(--c-text-muted); font-size: 13px; }
 .plan-card .desc { color: var(--c-text-muted); font-size: 14px; flex: 1; }
-.plan-card .btn { width: 100%; background: var(--c-primary); color: #fff; margin-top: 8px; }
-.plan-card .btn:hover { background: var(--c-primary-strong); }
-
-.two-col { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: var(--space-5); }
-@media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
-.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--space-4); margin: var(--space-5) 0; }
-.info-tile { background: var(--c-surface-muted); border: 1px solid var(--c-line); border-radius: var(--r-md); padding: 14px; }
-.info-tile span { display: block; font-size: 12px; color: var(--c-text-muted); }
-.info-tile strong { font-size: 16px; }
-.qr img { max-width: 220px; width: 100%; border-radius: var(--r-md); border: 1px solid var(--c-line); }
 .muted { color: var(--c-text-muted); font-size: 14px; }
 
 /* ---- Phone layout: tighten paddings, scale type, stack inline rows ---- */

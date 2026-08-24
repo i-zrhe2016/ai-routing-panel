@@ -175,19 +175,10 @@ class CommerceFlowTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 303)
 
-    def create_order(self):
-        self.client.get("/checkout/basic-30d-100g")
-        response = self.client.post(
-            "/orders",
-            data={
-                "csrf_token": self.csrf_token(),
-                "kind": "new_purchase",
-                "plan_slug": "basic-30d-100g",
-            },
-            follow_redirects=False,
-        )
-        self.assertEqual(response.status_code, 303)
-        return self.panel.state.query_customer_orders(1)[0]
+    def create_existing_order(self):
+        plan = self.panel.state.get_plan_by_slug("basic-30d-100g")
+        order_no = self.panel.state.create_order(1, plan["id"], kind="new_purchase")
+        return self.panel.state.get_customer_order(1, order_no)
 
     def submit_payment_proof(self, order_no, payer_note="支付宝已付款"):
         response = self.client.post(
@@ -205,7 +196,7 @@ class CommerceFlowTest(unittest.TestCase):
     def admin_json_headers(self):
         return {"X-CSRF-Token": self.csrf_token(), "Content-Type": "application/json"}
 
-    def test_customer_registration_login_and_full_purchase_flow(self):
+    def test_existing_package_order_can_be_fulfilled(self):
         email, password = self.register_customer()
 
         dashboard = self.client.get("/customer/dashboard", follow_redirects=True)
@@ -215,7 +206,7 @@ class CommerceFlowTest(unittest.TestCase):
         self.client.get("/customer/logout", follow_redirects=False)
         self.login_customer(email, password)
 
-        order = self.create_order()
+        order = self.create_existing_order()
         self.assertEqual(order["status"], "pending_payment")
 
         self.submit_payment_proof(order["order_no"], payer_note="付款人尾号 1234")
@@ -240,9 +231,31 @@ class CommerceFlowTest(unittest.TestCase):
         self.assertTrue(service["tenant_token"])
         self.assertTrue(service["subscription_token"])
 
+    def test_package_preorder_routes_are_removed(self):
+        self.register_customer()
+
+        plans_page = self.client.get("/plans")
+        self.assertEqual(plans_page.status_code, 200)
+        self.assertNotIn("立即下单", plans_page.get_data(as_text=True))
+
+        self.assertEqual(self.client.get("/checkout/basic-30d-100g").status_code, 404)
+        response = self.client.post(
+            "/orders",
+            data={"csrf_token": self.csrf_token(), "plan_slug": "basic-30d-100g"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.post(
+            "/api/customer/orders",
+            data=json.dumps({"plan_slug": "basic-30d-100g"}),
+            headers=self.admin_json_headers(),
+        )
+        self.assertEqual(response.status_code, 405)
+
     def test_fulfill_order_rolls_back_when_render_fails(self):
         self.register_customer()
-        order = self.create_order()
+        order = self.create_existing_order()
         self.submit_payment_proof(order["order_no"])
         payment_submitted_order = self.panel.state.get_customer_order(1, order["order_no"])
 
@@ -266,7 +279,7 @@ class CommerceFlowTest(unittest.TestCase):
 
     def test_renewal_requires_quota_or_expired_and_keeps_same_port(self):
         self.register_customer()
-        order = self.create_order()
+        order = self.create_existing_order()
         self.submit_payment_proof(order["order_no"])
         payment_submitted_order = self.panel.state.get_customer_order(1, order["order_no"])
         response = self.client.post(
@@ -323,7 +336,7 @@ class CommerceFlowTest(unittest.TestCase):
 
     def test_payment_proof_requires_supported_image(self):
         self.register_customer()
-        order = self.create_order()
+        order = self.create_existing_order()
         response = self.client.post(
             f"/customer/orders/{order['order_no']}/payment-proof",
             data={
@@ -339,4 +352,3 @@ class CommerceFlowTest(unittest.TestCase):
         self.assertIn("level=error", redirected)
         updated_order = self.panel.state.get_customer_order(1, order["order_no"])
         self.assertEqual(updated_order["status"], "pending_payment")
-

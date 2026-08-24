@@ -26,7 +26,7 @@ onMounted(async () => {
 
 <template>
   <n-spin :show="loading">
-    <n-empty v-if="!loading && !subscriptions.length" description="还没有订阅，去套餐页购买一个吧。" />
+    <n-empty v-if="!loading && !subscriptions.length" description="还没有订阅，请联系管理员开通。" />
     <n-space v-else vertical :size="12">
       <RouterLink
         v-for="s in subscriptions"

@@ -15,6 +15,7 @@ vi.mock("../store.js", () => ({
 }));
 
 import OrdersView from "../views/OrdersView.vue";
+import PlansView from "../views/PlansView.vue";
 import SubscriptionDetailView from "../views/SubscriptionDetailView.vue";
 
 beforeEach(() => {
@@ -89,5 +90,31 @@ describe("OrdersView", () => {
     expect(wrapper.find('[data-testid="order-row"]').exists()).toBe(true);
     expect(wrapper.find(".status-pill").text()).toContain("待付款");
     expect(wrapper.text()).toContain("ODR9");
+  });
+});
+
+describe("PlansView", () => {
+  it("renders plan details without a package preorder action", async () => {
+    get.mockResolvedValue({
+      data: {
+        plans: [
+          {
+            slug: "basic-30d-100g",
+            name: "基础套餐",
+            description: "30 天 100G",
+            price_fen: 990,
+            duration_days: 30,
+            traffic_limit_bytes: 100 * 1024 * 1024 * 1024,
+          },
+        ],
+      },
+    });
+    const wrapper = mount(PlansView);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("基础套餐");
+    expect(wrapper.text()).toContain("如需开通请联系管理员");
+    expect(wrapper.find("button").exists()).toBe(false);
+    expect(post).not.toHaveBeenCalled();
   });
 });
