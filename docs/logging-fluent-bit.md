@@ -1,6 +1,6 @@
 # Fluent Bit 日志采集
 
-本模块在控制面、普通数据面和 AI 数据面各运行一个 Fluent Bit Agent，采集本机 Docker 容器日志和关键错误日志，经 Tailscale 发送到远端 Loki，再由控制面 Grafana 查询。
+本模块按控制面、普通数据面和 AI 备用三个角色采集 Docker 主机日志和关键错误日志，经 Tailscale 发送到远端 Loki，再由控制面 Grafana 查询。当前 AI 备用与控制面共用主机，不额外启动一台日志主机。
 
 ![Fluent Bit log collection](diagrams/logging-fluent-bit.svg)
 
@@ -15,19 +15,19 @@
 | Grafana | 控制面监控主机 | 通过 `GRAFANA_LOKI_URL` 查询远端 Loki |
 | Tailscale | 四个主机端点 | 提供 Agent 到 Loki、Grafana 到 Loki 的 tailnet 网络边界 |
 
-首期只支持 Docker Compose 三节点，不部署 Kubernetes DaemonSet。日志采集不进入用户代理流量路径，也不依赖控制面业务进程。控制面业务日志只写 stdout/stderr，不新增 SQLite 审计表；Loki 保持当前 7 天（168 小时）保留策略。
+首期只支持 Docker Compose 节点，不部署 Kubernetes DaemonSet。日志采集不进入用户代理流量路径，也不依赖控制面业务进程。控制面业务日志只写 stdout/stderr，不新增 SQLite 审计表；Loki 保持当前 7 天（168 小时）保留策略。
 
 ## 当前生产部署
 
-截至 **2026-08-20**，三节点日志链路已完成部署。控制面业务容器已加载 `app/observability/logging.py`，业务 JSON 经控制面 Fluent Bit 转发到 Loki；普通数据面和 AI 数据面只部署采集 Agent，不运行控制面业务模块。
+截至 **2026-08-20**，控制面和普通数据面日志链路已完成部署；AI 备用复用控制面主机的监控链路。控制面业务容器已加载 `app/observability/logging.py`，业务 JSON 经控制面 Fluent Bit 转发到 Loki；普通数据面和 AI 备用不运行控制面业务模块。
 
 | 节点 | Tailscale 地址 | Fluent Bit 角色 | Agent 配置目录 | Xray 日志目录 |
 | --- | --- | --- | --- | --- |
-| 控制面 | `100.92.111.68` | `control_plane` | `/root/xray-routing-panel/monitoring/fluent-bit` | `/root/xray-routing-panel/app/xray/logs` |
+| 控制面 / AI 备用 | `100.87.76.6` | `control_plane` / `ai_data_plane` | `/root/xray-routing-panel/monitoring/fluent-bit` | `/root/ai-routing-panel/app/xray/logs` |
 | 普通数据面 | `100.65.108.93` | `normal_data_plane` | `/root/xray-fluent-bit` | `/root/xray-routing-panel/app/xray/logs` |
-| AI 数据面 | `100.109.201.64` | `ai_data_plane` | `/root/xray-fluent-bit` | `/root/.codex/xray-main` |
+| AI 备用 | `100.87.76.6` | `ai_data_plane` | 控制面监控栈 | `/root/ai-routing-panel/app/xray/logs` |
 
-控制面 Loki 绑定 `100.92.111.68:3100`，Grafana 使用现有本机 `3001` 入口。三台 Agent 均使用相同的 parser 和低基数 label 配置，远端原配置会在滚动更新前保留为带时间戳的 `.bak` 文件。
+控制面 Loki 绑定 `100.87.76.6:3100`，Grafana 使用现有本机 `3001` 入口。控制面和普通数据面 Agent 使用相同的 parser 和低基数 label 配置，原配置会在滚动更新前保留为带时间戳的 `.bak` 文件。
 
 当前验收结果：控制面 `/healthz` 返回 `ok=true` 且数据面可达；Loki 可按 `category="business"` 查询到 `dns_failover.checked` 业务事件；Grafana 的 `Control Plane Business Logs` dashboard 已加载。AI 数据面当前没有可采集的 `error.log` 文件，因此暂未形成 AI 日志流，但 Agent 正常运行且没有投递错误。
 
@@ -149,14 +149,14 @@ Grafana 通过 proxy 模式访问 Loki，浏览器不需要直接访问 Loki 端
 
 ```bash
 curl -fsS http://127.0.0.1:18080/healthz
-curl -fsS http://100.92.111.68:3100/ready
+curl -fsS http://100.87.76.6:3100/ready
 curl -fsS http://127.0.0.1:2020/api/v1/metrics
 ```
 
 查询控制面业务日志：
 
 ```bash
-curl -G http://100.92.111.68:3100/loki/api/v1/query_range \
+curl -G http://100.87.76.6:3100/loki/api/v1/query_range \
   --data-urlencode 'query={job="platform-logs",node_role="control_plane",category="business"}' \
   --data-urlencode 'limit=100'
 ```

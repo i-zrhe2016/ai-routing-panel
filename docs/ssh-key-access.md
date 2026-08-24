@@ -6,9 +6,9 @@
 
 | 节点 | SSH 目标 | 认证策略 |
 | --- | --- | --- |
-| 控制面 | `root@143.198.234.31:22` | 仅指定 Ed25519 公钥 |
-| AI 数据面 | `root@nat.qq.pw:27160` | 仅指定 Ed25519 公钥 |
-| 普通数据面 | `root@64.186.224.96:22` | 仅指定 Ed25519 公钥 |
+| 控制面 | `root@100.87.76.6:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
+| AI 备用 | 本机 Docker `xray-ai-node` | 不使用 SSH；配置由控制面运行时目录提供 |
+| 普通数据面 | `root@100.65.108.93:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
 
 当前公钥指纹：
 
@@ -48,6 +48,10 @@ PasswordAuthentication=no
 KbdInteractiveAuthentication=no
 StrictHostKeyChecking=yes
 ```
+
+控制面到三个节点的自动 SSH 连接默认使用 Tailscale 地址、fleet 私钥和
+`BatchMode=yes`，不会提示或回退到密码认证。主机密钥分别通过受控的
+`/root/.ssh/known_hosts` 和 `/root/.ssh/known_hosts_ai` 校验。
 
 主机密钥仍通过独立 `known_hosts` 文件校验，禁止使用 `StrictHostKeyChecking=no`。
 

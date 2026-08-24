@@ -70,9 +70,9 @@ docker compose up -d --build
 
 - 把 `DATAPLANE_PROBE_HOST` 设置成远端入口 IP 或域名
 
-## AI 节点远端纳管
+## AI 节点纳管
 
-AI 节点是远端独立机器上的 VLESS + REALITY Xray，通过 SSH 纳管。部署与认证方式见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
+当前 AI 备用是控制面本机 Docker `xray-ai-node`；设置 `AI_NODE_SSH_TARGET` 后才切换为远端独立 Xray 的 SSH 纳管。部署与认证方式见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
 
 至少配置：
 
@@ -149,13 +149,11 @@ docker compose run --rm xray-routing-panel-db-backup \
   python3 /app/scripts/run_db_backup_cycle.py
 ```
 
-只验证备份上传逻辑，不真实 publish：
+只验证备份上传逻辑，不连接真实 R2：
 
 ```bash
 docker compose run --rm \
-  -e DB_BACKUP_R2_ENABLED=1 \
-  -e DB_BACKUP_R2_REGION=1 \
-  -e DB_BACKUP_R2_SECRET_ACCESS_KEY=test-password \
+  -e DB_BACKUP_R2_ENABLED=0 \
   xray-routing-panel-db-backup \
   python3 /app/scripts/run_db_backup_cycle.py
 ```
@@ -163,23 +161,18 @@ docker compose run --rm \
 仅直接启动面板进程（非 Docker）：
 
 ```bash
-# 直接运行前需先构建前端 SPA 产物（Docker 镜像会在构建阶段自动做这步）
-cd frontend && npm ci && npm run build && cd ..
+# 直接运行使用仓库中的 app/static/ 发布资源
 python app/panel.py
 ```
 
 这会调用 `app.web.main()`（定义在 `app/web/core.py`），启动维护线程并监听 `PANEL_HOST:PANEL_PORT`。
 
-## 前端开发与测试
+## 前端发布资源
 
-前端是 `frontend/` 下的 Vite + Vue 3 + Naive UI 工程，构建出管理后台与订阅者门户两套 SPA：
-
-```bash
-cd frontend
-npm ci
-npm run build   # 生成 app/static/{admin,portal}（这些产物不入库，由构建产生）
-npm test        # Vitest 组件/单元测试
-```
+管理后台、订阅者门户和 Landing 页的发布资源已保存在
+`app/static/{admin,portal,landing}`。控制面镜像直接复制这些静态文件，不安装
+JavaScript 构建工具。`frontend/src` 仅作为源码快照保留，
+不参与运行时和镜像构建。
 
 后端测试用 pytest 直接跑现有 unittest：
 
@@ -188,25 +181,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests -q
 ```
 
-## Landing 页面字体资源
+## Landing 页面资源
 
-Landing 页 `.display` 标题使用自托管的 Noto Serif CJK SC 子集。字体源文件位于
-`frontend/src/landing/public/fonts/noto-serif-sc-subset.woff2`，字符清单位于
-`frontend/src/landing/fonts/headlines.txt`；Vite 构建时会复制到
-`app/static/landing/fonts/`。
-
-修改 Landing 页中使用衬线字体的标题后，如果新增字符不在子集中，先把字符加入
-`headlines.txt`，再执行：
-
-```bash
-pip install fonttools brotli
-pyftsubset /usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc \
-  --font-number=0 \
-  --text-file=frontend/src/landing/fonts/headlines.txt \
-  --layout-features='*' \
-  --flavor=woff2 \
-  --output-file=frontend/src/landing/public/fonts/noto-serif-sc-subset.woff2
-```
-
-`--font-number=0` 选择 TTC 中的 SC 字体。如果遗漏字符，浏览器会回退到系统衬线字体，
-页面仍可读，但不会使用预期的自托管字体。
+Landing 页的字体、图标和分享图片已随发布资源保存在
+`app/static/landing/`，部署时由镜像直接提供。

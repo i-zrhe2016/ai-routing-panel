@@ -9,42 +9,64 @@ skinparam defaultFontName Arial
 skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
 
-title AI Domain Routing and Fallback
+title AI Domain Routing, Manual Selection and Fallback
 
 actor "Proxy Client" as client
+actor "Administrator" as admin
+participant "Panel API" as panel
+database "app_state" as state
 participant "Normal Data Plane Xray" as normal
 participant "Dynamic Routing Rules" as rules
-participant "AI Data Plane Xray" as ai
+participant "AI Upstream Selector" as selector
+participant "Primary AI\nnat.qq.pw:27166" as primary
+participant "Backup AI\n100.87.76.6:27166" as backup
 participant "AI freedom egress" as egress
 participant "Normal freedom egress" as fallback
 
+opt administrator changes AI mode
+  admin -> panel : POST /api/ai-routing/switch\nprimary | backup | auto | forced_fallback
+  panel -> state : persist manual mode
+  panel -> selector : run manager once
+end
+
 client -> normal : VLESS + REALITY connection
 normal -> rules : classify destination
+rules -> selector : read current mode and probe candidates
 
-alt destination is an AI domain and AI upstream is reachable
+alt AI domain and primary selected/reachable
+  selector --> rules : write ai_proxy -> primary
   rules --> normal : use ai_proxy outbound
-  normal -> ai : VLESS + REALITY relay
-  ai -> egress : direct outbound request
-  egress --> ai : response
-  ai --> normal : relayed response
+  normal -> primary : VLESS + REALITY relay
+  primary -> egress : direct outbound request
+  egress --> primary : response
+  primary --> normal : relayed response
+else AI domain and backup selected/reachable
+  selector --> rules : write ai_proxy -> backup
+  rules --> normal : use ai_proxy outbound
+  normal -> backup : VLESS + REALITY relay
+  backup -> egress : direct outbound request
+  egress --> backup : response
+  backup --> normal : relayed response
 else non-AI destination
   rules --> normal : use normal freedom outbound
   normal -> fallback : direct outbound request
   fallback --> normal : response
-else AI upstream unavailable
-  rules --> normal : dynamic AI route removed
+else forced fallback or selected AI unreachable
+  selector --> rules : remove dynamic AI route
+  rules --> normal : use local freedom fallback
   normal -> fallback : local freedom fallback
   fallback --> normal : response
 end
 
 normal --> client : proxy response
 
-note over normal,rules
-  AI Domain Manager maintains the dynamic routing fragment.
-  Recovery restores the AI route on a later successful probe.
+note over selector,rules
+  Automatic mode probes both candidates and chooses the first reachable one.
+  Manual primary/backup keeps the selected index; an unreachable fixed target
+  disables dynamic routing and reports manual_target_unreachable.
 end note
 
-note over normal,ai
+note over normal,backup
   Tunnel credentials are independent from normal data-plane credentials
   and are intentionally omitted from this diagram.
 end note

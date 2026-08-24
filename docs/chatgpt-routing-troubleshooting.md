@@ -19,7 +19,9 @@ ChatGPT 客户端
 ai_proxy VLESS + REALITY outbound
       │
       ▼
-nat.qq.pw:27166
+AI 上游选择器
+      ├─ 主：nat.qq.pw:27166
+      └─ 备：100.87.76.6:27166
       │
       ▼
 AI 节点 VLESS + REALITY inbound
@@ -28,7 +30,7 @@ AI 节点 VLESS + REALITY inbound
 freedom → OpenAI HTTPS
 ```
 
-禁止把 AI 流量发往旧上游 `isif.217777.xyz:42994`。当前唯一生产 AI 业务上游是 `nat.qq.pw:27166`。
+禁止把 AI 流量发往旧上游 `isif.217777.xyz:42994`。当前生产候选为主 `nat.qq.pw:27166` 和备 `100.87.76.6:27166`，实际目标以 `ai_target` 和 `manual_mode` 为准。
 
 ## 排障顺序
 
@@ -38,11 +40,12 @@ freedom → OpenAI HTTPS
 1. 控制面健康
 2. 主数据面容器
 3. 动态域名规则
-4. 主数据面 → AI 端口
-5. VLESS/REALITY 参数
-6. AI 容器真实配置
-7. AI 节点互联网出口
-8. 客户端重新建连
+4. AI 候选选择状态
+5. 主数据面 → 当前 AI 端口
+6. VLESS/REALITY 参数
+7. AI 容器真实配置
+8. AI 节点互联网出口
+9. 客户端重新建连
 ```
 
 ## 1. 检查控制面和节点状态
@@ -57,7 +60,7 @@ freedom → OpenAI HTTPS
 }
 ```
 
-注意：`ai_node_running=true` 只证明控制面通过 SSH 能检测到远端 `127.0.0.1:27166`，不证明 REALITY 凭据匹配，也不证明 ChatGPT 请求成功。
+注意：`ai_node_running=true` 只证明控制面能检测到当前 AI 节点的 `127.0.0.1:27166`（本机 Docker 模式）或远端 SSH 模式 Socket，不证明 REALITY 凭据匹配，也不证明 ChatGPT 请求成功。
 
 ## 2. 检查主数据面
 
@@ -66,7 +69,7 @@ freedom → OpenAI HTTPS
 - `xray-reality-local` 容器为 `running/healthy`；
 - 主数据面运行配置包含 `tag=ai_proxy` outbound；
 - 该 outbound 协议为 `vless`，`streamSettings.security=reality`；
-- 目标为 `nat.qq.pw:27166`；
+- 目标是当前 `ai_target` 选中的主或备用候选；
 - 不包含旧 ISIF 地址。
 
 ## 3. 检查域名覆盖
@@ -80,19 +83,28 @@ freedom → OpenAI HTTPS
 
 同时确认规则的 `outboundTag` 为 `ai_proxy`。仅检查域名列表存在还不够，还要确认动态片段已经合并进主数据面的实际运行配置。
 
-## 4. 检查网络连通
+## 4. 检查 AI 候选选择状态
 
-从主数据面测试 `nat.qq.pw:27166` TCP 连接。
+优先查看最新报表或控制台 AI 路由状态，确认：
+
+- `manual_mode` 是 `auto`、`primary`、`backup` 或 `forced_fallback`；
+- `ai_candidates` 同时列出主 `nat.qq.pw:27166` 与备 `100.87.76.6:27166`；
+- `ai_target.selected_index` 与实际 `ai_proxy` 目标一致；
+- 固定模式下若状态为 `manual_target_unreachable`，不要期待系统自动切换另一节点。
+
+## 5. 检查网络连通
+
+从主数据面分别测试当前候选的 TCP 连接；若使用 REALITY SNI，应进一步执行 REALITY 探测。
 
 ```text
 reachable  → 仅证明网络层正常，继续检查 REALITY
-refused    → 检查 AI 容器、监听端口和防火墙
+refused    → 检查对应 AI 容器、监听端口和防火墙
 超时       → 检查 DNS、路由、安全组和中间网络
 ```
 
 不要把“端口可达”当作“代理可用”。
 
-## 5. 检查 VLESS/REALITY 参数
+## 6. 检查 VLESS/REALITY 参数
 
 主数据面 outbound 和 AI inbound 必须匹配：
 
@@ -112,20 +124,19 @@ AI 节点互联网出口正常
 → ChatGPT 无法连接
 ```
 
-## 6. 核对 Docker 真实配置源
+## 7. 核对 Docker 真实配置源
 
 单文件 bind mount 与原子替换组合容易产生误判：宿主机修改了错误路径，或者替换了一个未被容器实际挂载的 inode，容器仍运行旧配置。
 
 必须执行：
 
-1. `docker inspect xray` 查看 `/etc/xray/config.json` 对应的 `Mounts[].Source`。
-2. 当前生产真实 Source 应为 `/root/.codex/xray-main/config.json`。
-3. 分别计算真实 Source 与容器内 `/etc/xray/config.json` 的 SHA-256。
-4. 重启后两者摘要必须一致。
+1. 对普通数据面执行 `docker inspect xray-reality-local`，对本机备用执行 `docker inspect xray-ai-node`，分别查看 `/etc/xray/config.json` 对应的 `Mounts[].Source`。
+2. 分别计算实际 bind source 与容器内 `/etc/xray/config.json` 的 SHA-256。
+3. 重启后两者摘要必须一致；不要只检查控制面生成文件而跳过实际挂载源。
 
 如果摘要不同，先修正管理路径，不要继续修改凭据。
 
-## 7. 检查 AI 节点出口
+## 8. 检查 AI 节点出口
 
 在 AI 节点上检查 DNS 和 HTTPS：
 
@@ -136,13 +147,13 @@ AI 节点互联网出口正常
 
 `403`、`404` 或 `421` 通常说明 DNS、TCP 和 TLS 已经到达对端，只是请求缺少浏览器状态、正确 Host 路径或 API 身份；它们不同于连接超时、DNS 失败和 TLS 握手失败。
 
-## 8. 恢复已知可用配置
+## 9. 恢复已知可用配置
 
 如果凭据在配置下发后不匹配：
 
 1. 立即停止再次自动同步。
 2. 恢复 AI 节点真实 bind source 的部署前备份。
-3. 重启 `xray`。
+3. 重启实际承载 AI inbound 的容器（本机备用为 `xray-ai-node`）。
 4. 比较主数据面 outbound 与恢复后 inbound 的字段摘要。
 5. 确认全部匹配。
 6. 检查 `27166`。
@@ -162,7 +173,8 @@ AI_NODE_CONFIG_PATH=
 - [ ] `data_plane_running=true`。
 - [ ] `ai_node_running=true`。
 - [ ] 主数据面动态路由命中 ChatGPT/OpenAI 域名。
-- [ ] AI 目标是 `nat.qq.pw:27166`。
+- [ ] `manual_mode` 和 `ai_target.selected_index` 与预期一致。
+- [ ] 当前 AI 目标是主 `nat.qq.pw:27166` 或备 `100.87.76.6:27166`。
 - [ ] 不存在旧 ISIF 上游。
 - [ ] 主数据面到 AI 节点 TCP 可达。
 - [ ] 八个隧道字段全部匹配。

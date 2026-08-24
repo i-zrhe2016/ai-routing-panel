@@ -56,7 +56,7 @@
 | `GET` | `/api/dns-failover` | 获取 DNS 故障切换状态 |
 | `POST` | `/api/dns-failover/check` | 立即执行一次 DNS 检测 |
 | `POST` | `/api/dns-failover/switch` | 手动切主备（`{"target": "primary\|backup"}`）|
-| `POST` | `/api/ai-routing/switch` | 手动切换 AI 路由（`{"mode": "auto\|forced_fallback"}`）|
+| `POST` | `/api/ai-routing/switch` | 手动切换 AI 路由（`{"mode": "primary\|backup\|auto\|forced_fallback"}`）|
 | `POST` | `/api/client-errors` | 前端上报网络、HTTP、解析和未捕获运行时错误（需 `X-CSRF-Token`；不接收请求体或敏感 Header）|
 
 ### 订阅者门户 API（客户会话 + CSRF）

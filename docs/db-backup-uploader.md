@@ -6,7 +6,7 @@
 
 ```text
 backup_db.py                 SQLite 一致性快照
-collect_remote_backup.py     只读采集两个数据面配置
+collect_remote_backup.py     只读采集普通数据面配置；远端 AI 模式可选
 build_backup_bundle.py       tar.gz + SHA-256 manifest
 upload_backup_r2.py          R2 S3 API 上传
 ```

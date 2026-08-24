@@ -2,7 +2,7 @@
 
 ## 主链路
 
-AI 路由由 `xray-ai-domain-manager` 驱动（运行在普通数据面上），默认流程如下：
+AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过 Tailscale SSH 或共享工作目录管理普通数据面，默认流程如下：
 
 ![AI 域名路由与回退流程](diagrams/ai-routing-flow.svg)
 
@@ -13,9 +13,10 @@ AI 路由由 `xray-ai-domain-manager` 驱动（运行在普通数据面上），
 3. 对未知域名优先调用本机 `codex`
 4. 如 `codex` 不可用，再回退到 OpenAI 兼容接口
 5. 生成动态路由、小时报表和数据库聚合结果
-6. 路由变化时重新渲染并重启数据面
+6. 探测主、备 AI 候选并按当前模式选择目标
+7. 路由变化时重新渲染并重启数据面
 
-AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到远端 AI 节点并由其 freedom 直出。该 outbound 必须使用与 AI 节点独立 inbound 完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。AI 节点不可达时自动回退到数据面直出，详见下方“AI 上游选择”、[AI 节点独立凭据](ai-node-credentials.md)和 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
+AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产候选为主 `nat.qq.pw:27166`、备 `100.87.76.6:27166`；截至 2026 年 8 月 23 日，主候选不可达，动态路由已选中备用候选。
 
 ## 输入与输出
 
@@ -52,18 +53,38 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 管理器优先从普通数据面探测 AI 上游。模板或分享链接提供 REALITY SNI 时执行握手探测，否则使用 TCP 探测；首个不可达时切换到下一个可达上游。
 
+选择模式：
+
+- `auto`：按候选顺序探测，优先选择第一个可达节点；当前顺序是主、备。
+- `primary`：人工固定主候选；主候选不可达时不自动改选备用，而是停用动态路由并报告 `manual_target_unreachable`。
+- `backup`：人工固定备用候选；备用候选不可达时同样停用动态路由，不静默改回主候选。
+- `forced_fallback`：人工强制删除动态 AI 路由，所有 AI 域名回到数据面 freedom 直出。
+
+控制台「AI 出口选择」面板展示两个候选的可达状态和当前选中状态。人工切换写入 `panel.db` 的 `app_state`，并立即调用 AI 管理器 `--once` 重算；失败时恢复之前的人工模式。
+
+## 控制台操作
+
+管理员首页的「AI 主备节点」控制台将当前策略、实际出口、主备候选和可达状态放在同一张卡片中：
+
+- `切换到备用 AI`：人工固定备用候选，作为 AI 主节点异常时的人工回退动作。
+- `固定主 AI`：人工固定主候选，不再依赖自动探测。
+- `恢复自动探测`：恢复按候选可达性自动选择。
+- `高级应急 / 强制直出`：移除动态 AI 路由，让 AI 域名回普通数据面 freedom 直出；该动作需要单独确认。
+
+人工固定目标即使当前不可达也允许提交，但确认框会显示不可达状态；系统不会静默改选另一候选。所有人工切换完成后，页面会依据接口返回的最新 dashboard 状态更新当前路径和策略。
+
 远端数据面模式必须配置 `DATAPLANE_SSH_KEY_FILE`。Compose 默认将运维密钥挂载到 `/run/secrets/fleet_ssh_key`，并强制使用 `IdentitiesOnly=yes`，避免 SSH 因尝试过多身份而无法同步配置。
 
-如果所有 AI 上游都不可达：
+如果自动模式下所有 AI 上游都不可达，或人工固定的目标不可达：
 
 - 不再下发 `ai_proxy` 动态路由
 - 删除 `dynamic-routing.json`（`ai_domain_manager.py:1675`）
 - 已命中的 AI 域名会回退到主链路流量（数据面 freedom 直出）
-- 报表中的 `route_status` 会标记为 `fallback_to_primary`
+- 自动模式报表中的 `route_status` 会标记为 `fallback_to_primary`；人工模式标记为 `manual_target_unreachable`
 - 回退判断由 `should_fallback_to_primary_route()`（`ai_domain_manager.py:1183`）完成
 - **此回退不涉及 DNS 切换**
 
-管理员也可以在控制台总览中主动执行“强制回退”。该模式会写入控制面数据库的 `app_state`，由 AI 管理器每轮读取并保持 `dynamic-routing.json` 不存在；点击“恢复自动”后，下一轮管理器重新按照 AI 上游探测结果决定是否生成动态路由。API 形式见 [API 与页面路径](api.md)。
+管理员也可以在控制台总览中主动执行“切到主 AI”“切到备用 AI”“恢复自动探测”或“AI 全部直出”。这些模式会写入控制面数据库的 `app_state`，由 AI 管理器读取并立即重算；API 形式见 [API 与页面路径](api.md)。
 
 如果普通数据面管理通道本身探测失败，报告会标记 `probe_error`，并停止继续下发 AI 动态路由；修复 SSH 后下一轮会重新探测并恢复或回退。
 

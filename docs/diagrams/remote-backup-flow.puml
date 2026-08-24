@@ -5,20 +5,20 @@ left to right direction
 
 rectangle "Control plane\nbackup service" as control #AED6F1
 component "collect_remote_backup.py\nSSH read-only collector" as collector #D7BDE2
-node "Normal data plane\nSSH 22\nconfigured host path" as normal #A9DFBF
-node "AI data plane\nSSH 27160\n/etc/xray/config.json" as ai #A9DFBF
+node "Normal data plane\nTailscale 100.65.108.93:22\nconfigured host path" as normal #A9DFBF
+node "Local AI standby\nDocker xray-ai-node\nconfig-ai-node.json" as ai #A9DFBF
 component "build_backup_bundle.py\nlocal tar.gz + SHA-256 manifest" as bundle #FAD7A0
-component "db-backup-uploader\nAES-GCM + shards + npm" as uploader #FAD7A0
-cloud "npm registry\nlong-term disaster channel" as npm #F9E79F
+component "upload_backup_r2.py\nAES-256-GCM + R2 upload" as uploader #FAD7A0
+cloud "Cloudflare R2\nremote disaster archive" as r2 #F9E79F
 database "SQLite snapshot\npanel.db" as db #D3D3D3
 
 control --> collector : scheduled cycle
 collector --> normal : SSH\nstat/read regular files
-collector --> ai : SSH\nstat/read regular files
+control --> ai : local read-only\nconfig/runtime files
 collector --> bundle : staged nodes/\ncollection manifest
 db --> bundle : database/
 bundle --> uploader : encrypted input archive
-uploader --> npm : immutable versions\n(no prune by default)
+uploader --> r2 : encrypted archive\nobject key + SHA-256
 
 note right of collector
   StrictHostKeyChecking=yes
@@ -29,6 +29,6 @@ end note
 
 note bottom of bundle
   Recovery is manual and offline;
-  npm is not a fast-failover dependency.
+  R2 is not a fast-failover dependency.
 end note
 @enduml

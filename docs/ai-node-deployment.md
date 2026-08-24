@@ -1,97 +1,107 @@
-# AI 节点部署与 SSH 纳管
+# AI 节点部署与纳管
 
 ## 模块职责
 
-AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI 域名流量并通过 `freedom` 直出。本文件只说明 AI 节点部署、SSH 纳管、状态探测、重启和配置同步边界。
+AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI 域名流量并通过 `freedom` 直出。本文件说明本机 Docker 备用节点，以及显式启用远端 SSH 节点时的边界。
 
 凭据匹配规则见 [AI 节点独立凭据](ai-node-credentials.md)，ChatGPT 故障处理见 [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)。
 
-## 生产拓扑
+## 当前拓扑
 
 ```text
-控制面
-  ├─ SSH 管理 ───────────────▶ nat.qq.pw:27160
-  └─ 状态检查/远程重启
+控制面 `100.87.76.6`
+  ├─ Docker: xray-ai-node ──▶ 0.0.0.0:27166
+  └─ 本机状态检查/重启
 
 主数据面
-  └─ VLESS + REALITY ────────▶ nat.qq.pw:27166
-                                  │
-                                  ▼
-                            Docker: xray
-                                  │
-                                  └─ freedom 直出
+  └─ VLESS + REALITY
+       │
+       ▼
+  AI 上游选择器
+    ├─ 主：nat.qq.pw:27166
+    └─ 备：100.87.76.6:27166
+             │
+             ▼
+       freedom 直出
 ```
 
 两个端点职责不同：
 
 | 端点 | 用途 |
 | --- | --- |
-| `nat.qq.pw:27160` | SSH 管理，只供控制面运维使用 |
+| `100.87.76.6:27166` | 控制面本机 Docker AI 备用节点，使用独立 REALITY 凭据 |
 | `nat.qq.pw:27166` | AI 业务流量，供主数据面 VLESS outbound 使用 |
 
 禁止使用已下线的旧 AI 上游 `isif.217777.xyz:42994`。
 
-## 当前远端部署
+## AI 上游选择
+
+主数据面不会同时把 AI 流量发往两个节点，而是由控制面生成的 `ai_proxy` 动态路由选择一个候选：
+
+- `auto`：按主、备顺序探测，选择第一个可达候选；
+- `primary`：人工固定主 AI，主节点不可达时报告 `manual_target_unreachable`，不静默改用备用；
+- `backup`：人工固定本机 Docker 备用 AI，备用不可达时同样停用动态 AI 路由；
+- `forced_fallback`：人工停用动态 AI 路由，AI 域名回到普通数据面 `freedom` 直出。
+
+控制台会展示两个候选的探测状态、当前选中节点和 `manual_mode`。人工切换写入控制面 `app_state`，并立即触发一轮管理器重算。
+
+## 当前本机部署
 
 | 项目 | 当前值 |
 | --- | --- |
 | 部署方式 | Docker |
-| 容器名 | `xray` |
-| 宿主机真实配置源 | `/root/.codex/xray-main/config.json` |
+| 容器名 | `xray-ai-node` |
+| 配置源 | `app/xray/runtime/config-ai-node.json` |
 | 容器内配置路径 | `/etc/xray/config.json` |
 | 业务监听端口 | `27166` |
 
-> 不能仅凭容器内路径推断宿主机配置路径。必须通过 `docker inspect xray` 的 `Mounts[].Source` 确认真实 bind source。
+AI 节点使用 `AI_NODE_*` 独立 UUID、REALITY 私钥、公钥和 Short ID，不能复用普通数据面的 `XRAY_*` 凭据。
 
 ## AI 节点监控采集
 
-AI 节点的主机和容器指标由控制面 Prometheus 通过公网监控端口采集；这些端口只用于 Prometheus `/metrics`，不承载 Xray 业务流量。
+本机 AI 容器与控制面共享主机监控；业务端口 `27166` 不承担监控流量。
 
 | 端点 | 服务 | 指标路径 | 采集目标 | 说明 |
 | --- | --- | --- | --- | --- |
-| `nat.qq.pw:27168` | Node Exporter | `/metrics` | `data-plane-node` | AI 节点 CPU、内存、磁盘、网络等主机指标 |
-| `nat.qq.pw:27169` | cAdvisor | `/metrics` | `data-plane-cadvisor` | Docker 容器 CPU、内存、网络和文件系统指标 |
+| 控制面监控端点 | Node Exporter/cAdvisor | `/metrics` | `control-plane` | 控制面与本机 AI 容器的主机、容器指标 |
 
 当前 AI 节点容器部署为：
 
 ```text
-xray-node-exporter  → host network → :27168
-xray-cadvisor       → host network → :27169
-xray                → :27166（业务端口，不得修改）
+xray-ai-node        → host network → :27166（业务端口，不得修改）
 ```
 
-部署或变更监控容器时，不得删除或重建 `xray` 业务容器。容器使用只读宿主机挂载；Node Exporter 使用宿主机 PID namespace，cAdvisor 使用 Docker、运行时和 sysfs 的只读挂载。
+部署或变更监控容器时，不得删除或重建 `xray-ai-node` 业务容器。
 
-从控制面验证采集链路：
+从控制面验证本机 AI 容器：
 
 ```bash
-curl -fsS http://nat.qq.pw:27168/metrics | grep '^node_cpu_seconds_total' | head
-curl -fsS http://nat.qq.pw:27169/metrics | grep '^container_cpu_usage_seconds_total' | head
+docker inspect xray-ai-node --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
+docker exec xray-ai-node /usr/local/bin/xray run -test -config /etc/xray/config.json
 curl -fsS http://127.0.0.1:9090/api/v1/targets
 ```
 
-Prometheus 中两个 AI targets 应为 `up`。Grafana 的 AI 主机面板按 `node_role="ai_data_plane"` 区分 AI 节点，容器面板按 `host="ai-data-plane"` 和 `name` 区分容器。生产环境应在 AI 节点防火墙中仅允许控制面访问 `27168/27169`，不要将监控端口用于公网开放服务。
+本机 Docker 模式只要求控制面共享的 Node Exporter/cAdvisor targets 为 `up`；远端 AI 模式才需要额外的两个 AI targets。Grafana 的 AI 主机面板按 `node_role="ai_data_plane"` 区分 AI 节点，容器面板按 `host="ai-data-plane"` 和 `name` 区分容器。生产环境应在远端 AI 节点防火墙中仅允许控制面访问 `27168/27169`，不要将监控端口用于公网开放服务。
 
-## SSH 认证
+## SSH 认证边界
 
-当前控制面使用专用 Ed25519 私钥访问 AI 节点，私钥只读挂载到容器：
+本机 AI 备用不需要 SSH。专用 Ed25519 私钥只用于普通数据面和其他仍显式配置的远端节点：
 
 ```text
 宿主机 0600 私钥
   └─ 只读挂载 → /run/secrets/fleet_ssh_key
                     │
-                    └─ /app/scripts/ai-node-ssh
-                         └─ ssh -o IdentitiesOnly=yes -i ...
+                    └─ SSH 纳管普通数据面
 ```
 
-同时只读挂载 AI 节点专用 `known_hosts`，并强制：
+远端 SSH 纳管时强制：
 
 ```text
 PreferredAuthentications=publickey
 PasswordAuthentication=no
 KbdInteractiveAuthentication=no
 StrictHostKeyChecking=yes
-UserKnownHostsFile=/root/.ssh/known_hosts_ai
+UserKnownHostsFile=/root/.ssh/known_hosts
 ```
 
 不要使用密码认证或 `StrictHostKeyChecking=no`。密钥轮换和恢复流程见 [SSH 密钥登录与轮换](ssh-key-access.md)。
@@ -101,31 +111,28 @@ UserKnownHostsFile=/root/.ssh/known_hosts_ai
 示例不包含密码：
 
 ```env
-AI_NODE_SSH_TARGET=root@nat.qq.pw
-AI_NODE_SSH_BIN=/app/scripts/ai-node-ssh
-AI_NODE_SSH_OPTIONS=-p 27160 -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/known_hosts_ai -o ConnectTimeout=8
-AI_NODE_SSH_KEY_FILE=/run/secrets/fleet_ssh_key
-AI_NODE_CONTAINER_NAME=xray
-AI_NODE_RESTART_COMMAND=
-AI_NODE_PROBE_HOST=nat.qq.pw
+AI_NODE_SSH_TARGET=
+AI_NODE_CONTAINER_NAME=xray-ai-node
+AI_NODE_PROBE_HOST=100.87.76.6
 AI_NODE_API_SERVER=127.0.0.1:27166
 AI_NODE_CONFIG_PATH=
 ```
 
 关键语义：
 
-- `AI_NODE_API_SERVER=127.0.0.1:27166`：控制面通过 SSH 在远端执行 TCP Socket 存活检查；当前 AI 配置不启用 Xray Stats API，因此这里不是 Stats API 地址。
+- `AI_NODE_API_SERVER=127.0.0.1:27166`：本机 Docker 模式使用的 TCP 业务端口；当前 AI 配置不启用 Xray Stats API。
 - `AI_NODE_CONFIG_PATH=`：显式留空会使 `supports_sync=false`，禁止控制面上传配置。
-- SSH 状态检查和 `AI_NODE_CONTAINER_NAME=xray` 提供的容器重启能力不依赖配置同步，因此仍然可用。
+- `AI_NODE_CONTAINER_NAME=xray-ai-node` 提供本机容器状态检查和重启能力。
 
 ## `app/xray/.env` 上游配置
 
 ```env
 AI_UPSTREAM_HOST=nat.qq.pw
 AI_UPSTREAM_PORT=27166
+# 备用候选使用 AI_UPSTREAM_FALLBACK_URL 或 AI_UPSTREAM_FALLBACKS 配置
 ```
 
-这两个变量只定义业务端点，不能替代 AI 节点独立的 UUID、REALITY 密钥、Short ID 和 SNI。
+`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 定义主候选；生产备用候选为 `100.87.76.6:27166`，应通过 `AI_UPSTREAM_FALLBACK_URL` 或 `AI_UPSTREAM_FALLBACKS` 加入候选列表。端点变量不能替代 AI 节点独立的 UUID、REALITY 密钥、Short ID 和 SNI。
 
 ## 为什么默认禁用配置上传
 
@@ -137,22 +144,16 @@ AI 节点当前使用独立 REALITY 凭据。控制面生成的 `config-ai-node.
 AI_NODE_CONFIG_PATH=
 ```
 
-只有在控制面已经支持并安全加载 AI 节点独立凭据后，才能填入真实宿主路径并恢复自动上传。
+本机 AI 容器直接挂载控制面生成的 `config-ai-node.json`；`AI_NODE_CONFIG_PATH` 留空可避免面板把配置误当作远程路径上传。
 
 ## 受控配置同步流程
 
 启用同步前必须完成以下步骤：
 
-1. 使用 `docker inspect xray` 确认真正的宿主机 bind source。
-2. 对真实配置源创建权限为 `0600` 的时间戳备份。
-3. 确认控制面生成的 outbound 与候选 inbound 的全部认证字段匹配。
-4. 本地使用同版本 Xray 执行 `run -test`。
-5. SSH 上传临时文件。
-6. 在远端容器中再次执行 `run -test`。
-7. 原子替换真实宿主配置源。
-8. 重启 `xray` 容器。
-9. 比较宿主配置与容器内 `/etc/xray/config.json` 的 SHA-256。
-10. 验证容器运行、`27166` 可达以及 ChatGPT 实际请求成功。
+1. 确认 `app/xray/.env` 中存在独立 `AI_NODE_*` 凭据。
+2. 使用同版本 Xray 执行 `run -test`。
+3. 重启 `xray-ai-node` 容器。
+4. 验证容器运行、`27166` 可达以及 ChatGPT 实际请求成功。
 
 任一步失败都应恢复备份并重启容器。
 
@@ -162,11 +163,11 @@ AI_NODE_CONFIG_PATH=
 # 控制面健康状态
 curl -fsS http://127.0.0.1:18080/healthz
 
-# AI 节点容器状态（通过已配置的安全 SSH 通道执行）
-docker inspect xray --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
+# AI 备用容器状态
+docker inspect xray-ai-node --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
 
 # 业务端口
-nc -zv nat.qq.pw 27166
+nc -zv 100.87.76.6 27166
 ```
 
 预期 `/healthz`：
@@ -181,12 +182,12 @@ nc -zv nat.qq.pw 27166
 
 ## 回滚
 
-回滚必须恢复真实 bind source，而不是假定的 `/etc/xray/config.json` 宿主路径：
+回滚使用控制面运行时配置，不涉及远端宿主机路径：
 
 ```text
 备份文件
-  → /root/.codex/xray-main/config.json
-  → docker restart xray
+  → app/xray/runtime/config-ai-node.json
+  → docker restart xray-ai-node
   → 比较宿主/容器哈希
   → 验证 27166 和完整 REALITY 握手
 ```

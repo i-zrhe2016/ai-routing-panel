@@ -1,6 +1,6 @@
 @startuml
 !theme plain
-title 三节点人工故障切换拓扑
+title 三节点与双 AI 上游人工切换拓扑
 
 left to right direction
 skinparam componentStyle rectangle
@@ -12,20 +12,25 @@ skinparam componentBackgroundColor #F7F9FC
 actor "客户端" as client
 component "控制面\n管理与编排" as panel
 component "普通数据面\n主入口" as data
-component "AI 节点\nAI 流量出口" as ai
+component "主 AI 上游\nnat.qq.pw:27166" as primary
+component "备用 AI 上游\n100.87.76.6:27166" as backupAi
 component "控制面备用 Xray\n数据面故障时接管" as backup
 
 client --> data : 正常代理流量
-data --> ai : AI 域名
+data --> primary : AI 域名\nauto / 人工主
+data --> backupAi : AI 域名\nauto / 人工备
 data --> data : 直出 / AI 人工回退
 client --> backup : DNS 手动或自动切换
-backup --> ai : relay
+backup --> backupAi : relay
 backup --> backup : AI 同时故障时直出
 panel ..> data : 探测 / 配置 / 重启
-panel ..> ai : SSH 探测 / 强制回退
+panel ..> primary : 探测主候选
+panel ..> backupAi : 探测备用候选
 panel ..> backup : 渲染 relay / direct
 
 note bottom of panel
+AI 路由支持 auto、primary、backup、forced_fallback；
+人工切换写入 app_state 并立即触发一次管理器重算。
 控制面故障时本期不做第二控制面接管；
 已有客户端继续使用已下发的数据面配置。
 end note

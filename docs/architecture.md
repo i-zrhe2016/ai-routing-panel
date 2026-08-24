@@ -2,19 +2,19 @@
 
 ## 总览
 
-控制面通过 SSH 纳管两个远端节点；用户代理流量的正常路径不依赖控制面在线：
+控制面负责编排普通数据面，并通过 Tailscale SSH 纳管远端节点；当前 AI 备用运行在控制面本机。AI 路由维护主、备两个候选，支持自动探测和控制台人工固定选择。用户代理流量的正常路径不依赖控制面在线：
 
 ![生产架构图](diagrams/system-architecture.svg)
 
 [查看 PlantUML 源文件](diagrams/system-architecture.puml)
 
-- **普通数据面**：承载 `VLESS + REALITY` 流量，运行 `ai_domain_manager`
-- **AI 节点**：接收数据面转发的 AI 域名流量，freedom 直出
+- **普通数据面**：承载 `VLESS + REALITY` 流量，加载控制面生成的动态 AI 路由
+- **AI 上游池**：主 `nat.qq.pw:27166`，备用 `100.87.76.6:27166`；备用节点是控制面本机 Docker `xray-ai-node`
 
 - 控制面：`xray-routing-panel`
 - 普通数据面：本地容器、本地二进制，或远端 SSH 目标上的 Xray
-- AI 节点：远端 SSH 目标上的独立 Xray
-- AI 路由子系统：`xray-ai-domain-manager`（运行在普通数据面上）
+- AI 节点：控制面本机 Docker `xray-ai-node`；如有独立远端 AI 节点也支持 SSH 纳管
+- AI 路由子系统：控制面容器中的 `xray-ai-domain-manager`，通过 Tailscale SSH 或共享工作目录管理普通数据面
 - 备份子系统：`xray-routing-panel-db-backup`
 - 备份归档上传组件：`R2 灾备上传`
 
@@ -35,13 +35,13 @@
 
 - 入口代码：`app/panel.py`（进程入口）→ `app/web/`（`create_app` 工厂 + 按域视图模块）、`app/state/`（`PanelState` facade 组合域 service）
 - `PanelState` 持有两个受管节点控制器：`data_plane`（普通数据面）和 `ai_node`（AI 节点），均复用 `DataPlaneController` / `ManagedNodeController`（`app/xray/node_control.py`）
-- Flask 同时托管：管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、公共/认证页（`/plans`、`/customer/*`）、租户订阅直达（`/tenant/<token>`）和探针/AI 仪表盘；前端是独立的 Vite 工程（`frontend/`），构建出 `app/static/{admin,portal}`
+- Flask 同时托管：管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、公共/认证页（`/plans`、`/customer/*`）、租户订阅直达（`/tenant/<token>`）和探针/AI 仪表盘；前端发布资源位于 `app/static/{admin,portal,landing}`，`frontend/src` 仅作为源码快照保留
 - 保存端口、租户、流量、AI 聚合，以及商业化数据（客户、套餐、订单、服务订阅、支付凭证）到 `data/panel.db`
 - 保存 DNS 故障切换状态和事件历史到 `data/panel.db`
 - 根据数据库内容生成 `app/xray/runtime/panel-ports.json`
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `config-backup.json`（控制面备用）
 - 对普通数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
-- 对 AI 节点做 SSH 状态检查和容器重启；配置上传能力由 `AI_NODE_CONFIG_PATH` 单独控制，生产当前保持关闭
+- 对 AI 节点做本机 Docker 状态检查和重启；显式配置远端目标时改用 SSH，配置上传能力由 `AI_NODE_CONFIG_PATH` 单独控制，生产当前保持关闭
 - 以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）；管理后台「监控」标签把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
 
 ### 普通数据面
@@ -49,16 +49,16 @@
 - 实际承载 `VLESS + REALITY` 流量
 - 通过 Xray API 暴露 `statsquery`
 - 通过 `access.log` 提供连接和域名观测输入
-- 运行 `ai_domain_manager`，生成 `dynamic-routing.json` 将 AI 域名流量转发到 AI 节点
-- AI 节点不可达时，`ai_domain_manager` 自动删除 `dynamic-routing.json`，AI 流量回退到数据面 freedom 直出
+- 接收 `xray-ai-domain-manager` 生成并同步的 `dynamic-routing.json`，将 AI 域名流量转发到选中的 AI 上游
+- `auto` 模式下单个 AI 上游不可达时切换到另一候选；全部候选不可达，或人工固定目标不可达时，管理器删除 `dynamic-routing.json`，AI 流量回退到数据面 freedom 直出
 
 ### AI 节点
 
-- 远端独立机器上的 VLESS + REALITY Xray
+- 当前为控制面本机 Docker `xray-ai-node` 上的独立 VLESS + REALITY Xray；也支持部署到远端独立机器
 - 监听 `AI_UPSTREAM_PORT`，通过 VLESS + REALITY 接收普通数据面 `ai_proxy` outbound 转发的 AI 域名流量
 - freedom 直出，不做域名分类、不运行 `ai_domain_manager`、无 panel-ports、无 access.log 采集
 - 使用独立于普通数据面的 REALITY 凭据；两端隧道字段必须按 [AI 节点独立凭据](ai-node-credentials.md) 保持匹配
-- 控制面通过 SSH 做可达性监控和容器重启；生产当前以空 `AI_NODE_CONFIG_PATH` 禁止自动上传配置
+- 本机模式通过 Docker 做状态检查和重启；远端模式通过 SSH 管理。生产当前以空 `AI_NODE_CONFIG_PATH` 禁止自动上传配置
 - 部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，故障处理见 [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)
 
 ### 控制面备用 Xray
@@ -73,16 +73,19 @@
 ### AI 路由子系统
 
 - 入口代码：`app/xray/ai_domain_manager.py`
-- 从 `access.log` 统计小时域名窗口
+- 从普通数据面 `access.log` 统计小时域名窗口
 - 结合内建规则、Codex 或 OpenAI 兼容接口做域名分类
+- 探测 `nat.qq.pw:27166` 和 `100.87.76.6:27166` 两个 AI 候选
+- 支持 `auto`、`primary`、`backup`、`forced_fallback` 四种选择模式；人工模式写入 `panel.db` 的 `app_state`
+- 将 `ai_candidates`、`manual_mode`、当前 `ai_target` 和不可达原因提供给控制台
 - 输出动态路由片段、小时报表、数据库聚合快照
 
-### 灾备归档与上传组件
+### 灾备归档与 R2 上传组件
 
-- 入口代码：`scripts/run_db_backup_cycle.py`、`scripts/collect_remote_backup.py`、`scripts/build_backup_bundle.py`、`components/R2 灾备上传/`
-- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件，并可通过严格只读 SSH 收集两个数据面的实际配置
-- `collect_remote_backup.py` 只负责 SSH、校验和 staging；`build_backup_bundle.py` 只负责归档和 manifest；上传器只负责加密、分片与 npm 发布
-- 按配置调用 `R2 灾备上传` 做加密、切片、上传和记录写入；npm 只作为低频异地灾备通道，不进入快速恢复或故障切换路径
+- 入口代码：`scripts/run_db_backup_cycle.py`、`scripts/collect_remote_backup.py`、`scripts/build_backup_bundle.py`、`scripts/upload_backup_r2.py`
+- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件，并通过严格只读 SSH 收集普通数据面的实际配置；本机 AI 配置随控制面运行时目录归档
+- `collect_remote_backup.py` 只负责 SSH、校验和 staging；`build_backup_bundle.py` 只负责归档和 manifest；`upload_backup_r2.py` 只负责加密、R2 上传和记录写入
+- 按配置调用 Cloudflare R2 做加密归档的异地保存，不进入快速恢复或故障切换路径
 
 ## 节点模式判定
 
@@ -101,7 +104,7 @@
    - 条件：以上都不满足
    - 能力：面板仍可维护元数据和渲染配置，但不能自动重启或同步节点
 
-AI 节点通常使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为：
+AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为：
 
 - `远端镜像`：`ssh`
 - `本地运行`：`local` 或 `docker`
@@ -115,12 +118,13 @@ AI 节点通常使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为
 4. `render_config.py` 合并 `app/xray/.env`、`panel-ports.json` 和可选 `dynamic-routing.json`，生成 `config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `client-test.json`。
 5. 控制面通过 SSH 将 `config.json` 推送到普通数据面；AI 节点配置同步由 `AI_NODE_CONFIG_PATH` 独立控制，生产当前禁用自动上传。
 6. 普通数据面加载 `config.json` 并通过 Xray API 提供 `statsquery`。
-7. `xray-ai-domain-manager` 从 `access.log` 读取域名，输出 AI 路由产物。AI 域名流量通过 `dynamic-routing.json` 转发到 AI 节点。
-8. AI 节点不可达时，`ai_domain_manager` 删除 `dynamic-routing.json`，AI 流量回退数据面 freedom 直出。
-9. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
-10. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
-11. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集两个数据面，再生成 `backups/*-disaster-*.tar.gz`；启用时调用 `R2 灾备上传` 上传加密灾备归档，默认不删除 npm 历史版本。
-12. 首页读取三节点状态、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
+7. `xray-ai-domain-manager` 从普通数据面 `access.log` 读取域名，探测双 AI 候选并输出 AI 路由产物；人工切换会立即触发一次 `--once` 重算。
+8. AI 域名流量通过 `dynamic-routing.json` 转发到选中的 AI 上游；截至 2026 年 8 月 23 日，主节点不可达，备用 `100.87.76.6:27166` 已被选中。
+9. 自动模式下所有候选不可达，或人工固定目标不可达时，管理器删除 `dynamic-routing.json`，AI 流量回退数据面 freedom 直出。
+10. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
+11. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
+12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成 `backups/*-disaster-*.tar.gz`；本机 AI 配置来自 `config/`，启用时调用 Cloudflare R2 上传加密灾备归档。
+13. 首页读取三节点状态、双 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
 ## 关键运行产物
 
@@ -128,9 +132,8 @@ AI 节点通常使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为
 - `data/panel.db` 内 `dns_failover_state` / `dns_failover_history`：DNS 切换当前态和最近事件
 - `backups/*.db`：最近几天的本地数据库备份
 - `backups/*-disaster-*.tar.gz`：包含数据库与配置文件的离线灾备归档
-- 归档 `nodes/remote-node-collection.json`：两个数据面的 SSH 目标、文件状态和 SHA-256
-- `data/R2 灾备上传/upload-records.json`：最新上传记录和历史快照
-- `data/R2 灾备上传/shards/`：最新一次备份的本地分片产物
+- 归档 `nodes/remote-node-collection.json`：普通数据面的 SSH 目标、文件状态和 SHA-256；显式启用远端 AI 采集时才会增加 AI 节点项
+- `backups/r2-upload-record.json`：最新一次 R2 上传记录
 - `app/xray/runtime/panel-ports.json`：当前有效监听端口列表
 - `app/xray/runtime/config.json`：普通数据面 Xray 服务端配置
 - `app/xray/runtime/config-ai-node.json`：AI 节点 Xray 服务端配置

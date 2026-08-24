@@ -33,8 +33,15 @@
 
 > `traffic`/`connections` 为 counter，但“重置流量并启用”/配额恢复会清零累计值——这是合法的 counter reset，`rate()`/`increase()` 能正确处理。
 
-- AI 节点监控端点：`nat.qq.pw:27168`（Node Exporter）和 `nat.qq.pw:27169`（cAdvisor）；业务端口仍为 `27166`，三者职责不可混用。
-- 控制面 Prometheus 的 `data-plane-node` 与 `data-plane-cadvisor` 两个 AI target 应显示 `up`；若出现 `timeout` 或 `connection refused`，先检查 AI 节点上的 `xray-node-exporter`、`xray-cadvisor` 容器和端口监听。
+- 本机备用 AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。远端 AI 模式才需要单独配置 AI 主机的监控 target。
+- 控制面 Prometheus 的普通数据面和控制面 targets 应显示 `up`；若远端 AI target 出现 `timeout` 或 `connection refused`，再检查远端 AI 节点的 exporter 容器和端口监听。
+
+AI 路由状态至少应同时查看：
+
+- `ai_candidates`：主、备候选及各自探测结果；
+- `manual_mode`：`auto`、`primary`、`backup` 或 `forced_fallback`；
+- `route_status`：例如 `applied`、`fallback_to_primary`、`manual_target_unreachable`；
+- `ai_target.selected_index`：实际写入 `ai_proxy` 的候选。
 
 
 Prometheus `scrape_config` 示例：
@@ -61,7 +68,7 @@ scrape_configs:
 1. 启动 `monitoring/` 监控栈（Prometheus + Grafana + node_exporter）。其中 Grafana 已开启匿名只读（`GF_AUTH_ANONYMOUS_ENABLED=true` + `Viewer`）与内嵌（`GF_SECURITY_ALLOW_EMBEDDING=true`），并通过 provisioning 自动加载内嵌专用 dashboard `monitoring/grafana/dashboards/xray-observability.json`（UID `xray-observability`，带显式 panel id）。
 2. 给面板设置 `GRAFANA_PUBLIC_URL=https://xray.zrhe2016.cc/grafana/`；该路径由 Cloudflare Access Email OTP 保护。
 3. Grafana 使用 `GF_SERVER_ROOT_URL=https://xray.zrhe2016.cc/grafana/` 和 `GF_SERVER_SERVE_FROM_SUB_PATH=true`，重新启动监控栈后访问 `/grafana/`。
-4. 重新构建前端（`cd frontend && npm run build`），登录后台点「监控」即可。顶部可切换 1h/6h/24h 时间范围。
+4. 重新部署包含 `app/static/` 发布资源的面板镜像，登录后台点「监控」即可。顶部可切换 1h/6h/24h 时间范围。
 
 > ✅ **当前入口**：Grafana 通过 `https://xray.zrhe2016.cc/grafana/` 访问，Cloudflare Access 是公网认证边界；Grafana 的 `3001` 仅供本机 Nginx 反代使用。Cloudflare Access 邮箱会由 Nginx 转为 Grafana Auth Proxy 用户标识，认证后不再显示 Grafana 登录页。
 
@@ -141,24 +148,24 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 - `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`，并生成一个包含配置文件的灾备归档
 - 本地 `.db` 和 `tar.gz` 备份文件均落在 `./backups`
 - 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env` 和 `app/xray/runtime`
-- Compose 还会在打包前通过严格只读 SSH 采集普通数据面（`64.186.224.96:22`）和 AI 数据面（`nat.qq.pw:27160`）的主配置，结果位于归档 `nodes/` 下
-- 远端采集默认是非必需的：节点失联不会丢弃控制面归档；要把两个数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
+- Compose 还会在打包前通过 Tailscale 上的严格只读 SSH 采集普通数据面（`100.65.108.93:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
+- 远端采集默认是非必需的：普通数据面失联不会丢弃控制面归档；要把普通数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
 - 当 `DB_BACKUP_R2_ENABLED=1` 时，归档成功后会继续调用 `R2 灾备上传`
-- npm 默认保留每一轮不可变版本（`DB_BACKUP_R2_PREFIX=0`），作为异地灾备上传通道，不承担快速恢复
+- R2 对象 key 默认包含日期、归档名称和 SHA-256 前缀；对象保留由 Cloudflare R2 生命周期策略控制，不承担快速恢复
 
 上传链路依赖：
 
-- `DB_BACKUP_R2_SECRET_ACCESS_KEY`
-- 有效的 npm 认证配置，默认读取 `./data/R2 灾备上传/Docker Secret`
-- 如需先验证流程，可设置 `DB_BACKUP_R2_REGION=1`
+- `DB_BACKUP_R2_ENDPOINT`、`DB_BACKUP_R2_BUCKET`
+- `DB_BACKUP_R2_ACCESS_KEY_ID`、`DB_BACKUP_R2_SECRET_ACCESS_KEY`
+- 独立保存的 `DB_BACKUP_ENCRYPTION_PASSWORD`
 
 排查建议：
 
 - 查看日志：`docker compose logs -f xray-routing-panel-db-backup`
 - 确认最新本地备份已生成到 `./backups`
 - 确认对应的 `*-disaster-*.tar.gz` 已生成，并检查其中 `backup-manifest.json` 的 `skippedExtraPaths`
-- 检查归档 `nodes/remote-node-collection.json`：两个节点 `status=ok` 且 `configCollected=true`；`.env` 缺失只会显示为文件级 `missing`
-- 确认 `./data/R2 灾备上传/upload-records.json` 是否已更新
+- 检查归档 `nodes/remote-node-collection.json`：普通数据面 `status=ok` 且 `configCollected=true`；`.env` 缺失只会显示为文件级 `missing`
+- 确认 `./backups/r2-upload-record.json` 是否已更新
 
 SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
 
@@ -186,14 +193,15 @@ SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端�
 - 连续失败达到 `DNS_FAILOVER_FAILURE_THRESHOLD` 时，把单条 Cloudflare DNS 记录切到备用目标
 - 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD` 时，自动回切到主数据面
 - 如果启用了高峰窗口，窗口内会把备用/专用节点视为首选目标，窗口外恢复主节点优先
-- AI 节点故障不触发 DNS 切换，由 `ai_domain_manager` 自动回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
+- AI 候选故障不触发 DNS 切换：`auto` 模式优先切换到另一候选，全部候选不可达时由 `ai_domain_manager` 回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
 
 故障场景矩阵（详见 [dns-failover.md](dns-failover.md)）：
 
 | 场景 | DNS 切换 | 流量路径 |
 | --- | --- | --- |
 | 正常 | — | 客户端→数据面→直出；AI→数据面→AI节点→直出 |
-| AI 节点故障 | 不切换 | 客户端→数据面→直出（AI 流量回退） |
+| 单个 AI 候选故障 | 不切换 | 客户端→数据面→另一 AI 候选（auto） |
+| 主、备 AI 候选同时故障 | 不切换 | 客户端→数据面→直出（AI 流量回退） |
 | 数据面故障 | → backup | 客户端→控制面备用→relay→AI节点→直出 |
 | 双节点故障 | → backup | 客户端→控制面备用→直出 |
 
@@ -271,7 +279,7 @@ SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端�
 
 ## AI 节点重启与同步能力
 
-AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / `unmanaged`），通常使用 `ssh` 模式。
+AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / `unmanaged`）。当前生产使用本机 `docker` 模式；设置 `AI_NODE_SSH_TARGET` 后才使用远端 `ssh` 模式。
 
 ### `ssh`（远端 SSH 纳管）
 
@@ -324,10 +332,10 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 
 检查：
 
-- `AI_NODE_SSH_TARGET`、SSH 端口和专用 `known_hosts` 是否正确
+- `AI_NODE_SSH_TARGET`、Tailscale SSH 端口 `22` 和专用 `known_hosts` 是否正确
 - 密码文件是否以只读方式挂载，包装器是否能读取它
-- `AI_NODE_API_SERVER` 指向的远端 Socket 是否监听
-- `AI_NODE_PROBE_HOST` 是否指向 AI 节点公网入口
+- `AI_NODE_API_SERVER` 指向的本机或远端 Socket 是否监听
+- `AI_NODE_PROBE_HOST` 是否指向当前 AI 节点入口
 - `AI_UPSTREAM_HOST:AI_UPSTREAM_PORT` 是否是当前 AI 业务端点
 - `GET /api/ai-node/status` 返回的 `last_error` 字段
 - 部署问题见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)
@@ -341,4 +349,6 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 - `docker compose --profile xray logs -f xray-ai-domain-manager`
 - `app/xray/reports/hourly-domains/latest.json` 是否生成
 - `AI_ROUTING_ENABLED` 是否为 `1`
-- AI 节点是否可达（AI 节点不可达时 `route_status` 会标记为 `fallback_to_primary`）
+- AI 候选是否可达，以及 `manual_mode` 是否意外固定在故障节点
+- 自动模式下全部候选不可达时，`route_status` 应为 `fallback_to_primary`
+- 人工固定目标不可达时，`route_status` 应为 `manual_target_unreachable`

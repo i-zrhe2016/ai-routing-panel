@@ -24,13 +24,13 @@
 
 DNS 记录指向普通数据面公网 IP，控制面备用处于待命状态。
 
-### 场景② AI 节点故障
+### 场景② AI 候选故障
 
 ```
 客户端 ──DNS──→ 普通数据面 IP (primary)  ← DNS 不变
                   │
                   ├─普通流量──→ freedom 直出
-                  └─AI 域名──→ freedom 直出（回退，dynamic-routing.json 被删除）
+                  └─AI 域名──→ 另一可达 AI 候选（auto）
 ```
 
 DNS 记录不变，AI 域名流量回退到数据面直出。由 `ai_domain_manager` 自动处理，不涉及 DNS 切换。
@@ -246,12 +246,13 @@ docker compose --profile backup-xray logs -f xray-reality-backup
 
 ## 故障场景矩阵
 
-| 场景 | 普通数据面 | AI 节点 | 控制面备用 | DNS 指向 | 流量路径 | 触发方式 |
+| 场景 | 普通数据面 | AI 候选池 | 控制面备用 | DNS 指向 | 流量路径 | 触发方式 |
 | --- | --- | --- | --- | --- | --- | --- |
  | ① 正常 | ✅ 运行中 | ✅ 运行中 | ⏸ 待命 | primary（数据面 IP）| 客户端→数据面→直出；AI→数据面→AI节点→直出 | — |
- | ② AI 节点故障 | ✅ 运行中 | ❌ 故障 | ⏸ 待命 | primary（不变）| 客户端→数据面→直出（AI 流量回退 freedom）| `ai_domain_manager` 自动回退 |
- | ③ 数据面故障 | ❌ 故障 | ✅ 运行中 | 🔵 接管（relay）| backup（控制面 IP）| 客户端→控制面备用→relay→AI节点→直出 | DNS 自动切换 |
- | ④ 双节点故障 | ❌ 故障 | ❌ 故障 | 🔵 接管（直出）| backup（控制面 IP）| 客户端→控制面备用→freedom 直出 | DNS 自动切换 + 备用模式自动切换 |
+ | ② 单个 AI 候选故障 | ✅ 运行中 | ⚠ 主或备故障 | ⏸ 待命 | primary（不变）| 客户端→数据面→另一 AI 候选（auto）| `ai_domain_manager` 自动选择 |
+ | ③ 主、备 AI 候选同时故障 | ✅ 运行中 | ❌ 全部不可达 | ⏸ 待命 | primary（不变）| 客户端→数据面→直出（AI 流量回退 freedom）| `ai_domain_manager` 自动回退 |
+ | ④ 数据面故障 | ❌ 故障 | ✅ 至少一候选可达 | 🔵 接管（relay）| backup（控制面 IP）| 客户端→控制面备用→relay→AI节点→直出 | DNS 自动切换 |
+ | ⑤ 双节点故障 | ❌ 故障 | ❌ 全部不可达 | 🔵 接管（直出）| backup（控制面 IP）| 客户端→控制面备用→freedom 直出 | DNS 自动切换 + 备用模式自动切换 |
 
 ### 各场景详细说明
 
@@ -262,44 +263,42 @@ docker compose --profile backup-xray logs -f xray-reality-backup
 - AI 域名流量通过 `dynamic-routing.json` 转发到 AI 节点，AI 节点 freedom 直出
 - 控制面备用处于待命状态，`config-backup.json` 预渲染为 relay 模式
 
-#### 场景② AI 节点故障
+#### 场景② AI 候选故障
 
 - DNS 指向不变（仍为 primary / 数据面 IP）
-- `ai_domain_manager` 的 `select_ai_target()`（`ai_domain_manager.py:1189`）探测到 AI 上游不可达
-- `should_fallback_to_primary_route()`（`ai_domain_manager.py:1183`）返回 `True`
-- 删除 `dynamic-routing.json`（`ai_domain_manager.py:1675`）
-- 重新渲染数据面配置（不含 AI 路由），重启数据面
-- AI 域名流量回退到数据面 freedom 直出
-- AI 节点恢复后，`ai_domain_manager` 下一轮探测到可达，重新生成 `dynamic-routing.json`，恢复转发
+- `ai_domain_manager` 的 `select_ai_target()`（`ai_domain_manager.py:1280`）探测主、备候选
+- `auto` 模式下选择另一可达候选并更新 `dynamic-routing.json`
+- 如果两个候选都不可达，才删除 `dynamic-routing.json`，重新渲染数据面配置并回退到 freedom 直出
+- 候选恢复后，下一轮探测重新生成 `dynamic-routing.json`，恢复转发
 
-**此场景完全由 `ai_domain_manager` 处理，不涉及 DNS 切换。**
+**此场景完全由 `ai_domain_manager` 处理，不涉及 DNS 切换。人工 `primary` / `backup` 模式下，固定目标不可达会报告 `manual_target_unreachable`，不会自动改选另一候选。**
 
 #### 场景③ 数据面故障
 
 - DNS failover 探测到 `DNS_FAILOVER_PROBE_HOST:PORT` 连续失败达到阈值
 - DNS 记录切到控制面 IP（backup）
 - 控制面备用 Xray 以 relay 模式运行，将所有流量转发到 AI 节点
-- AI 节点接收流量后 freedom 直出
-- 控制面同时探测 AI 节点可达性，确认 relay 模式可用
+- 当前可达 AI 候选接收流量后 freedom 直出
+- 控制面同时探测 AI 候选池，确认至少一个候选可用于 relay
 - 数据面恢复后，连续成功达到阈值，DNS 自动回切 primary
 
-#### 场景④ 双节点故障
+#### 场景⑤ 双节点故障
 
 - DNS failover 探测到数据面故障，DNS 切到控制面 IP（backup）
-- 控制面探测 AI 节点不可达
+- 控制面探测 AI 候选池全部不可达
 - 自动重新渲染 `config-backup.json` 为 freedom 直出模式
 - 重启控制面备用 Xray
 - 所有流量从控制面备用直接出去
-- AI 节点恢复后，自动切回 relay 模式（重新渲染 + 重启）
+- 任一 AI 候选恢复后，自动切回 relay 模式（重新渲染 + 重启）
 
-### 场景③→④ 和 ④→③ 的自动切换
+### 场景④→⑤ 和 ⑤→④ 的自动切换
 
 ```
 backup 活跃时，每轮 DNS failover 检测:
 
-  探测 AI 节点:
-    可达 → 确保 relay 模式（如果当前是直出，重新渲染为 relay + 重启）
-    不可达 → 切换为直出模式（如果当前是 relay，重新渲染为直出 + 重启）
+  探测 AI 候选池:
+    至少一个可达 → 确保 relay 模式（如果当前是直出，重新渲染为 relay + 重启）
+    全部不可达 → 切换为直出模式（如果当前是 relay，重新渲染为直出 + 重启）
 ```
 
 ## 面板节点状态展示
@@ -452,7 +451,23 @@ curl -u admin:secret -X POST http://127.0.0.1:18080/api/dns-failover/switch \
 
 ### AI 人工回退
 
-AI 节点不参与 DNS 切换。需要立即保证 AI 流量不再经过故障上游时，可调用：
+AI 节点不参与 DNS 切换。需要立即固定 AI 流量目标时，可调用以下接口。`primary` 和 `backup` 分别固定主、备候选；固定目标不可达时不会自动改选另一节点。
+
+```bash
+# 固定主 AI
+curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+  -H 'Content-Type: application/json' \
+  -X POST \
+  -d '{"mode":"primary"}'
+
+# 固定备用 AI
+curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+  -H 'Content-Type: application/json' \
+  -X POST \
+  -d '{"mode":"backup"}'
+```
+
+如果需要立即停止所有 AI 动态转发并让 AI 域名回到数据面直出：
 
 ```bash
 curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \

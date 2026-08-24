@@ -1,6 +1,6 @@
 # 远端节点配置采集
 
-本模块只说明控制面如何通过 SSH 读取普通数据面和 AI 数据面的实际配置，并把结果交给灾备归档器。它不负责配置下发、容器重启、故障切换或快速恢复。
+本模块只说明控制面如何通过 SSH 读取普通数据面的实际配置，并把结果交给灾备归档器。当前 AI 备用运行在控制面本机 `xray-ai-node`，其配置随控制面运行时目录归档，不通过 SSH 采集。
 
 ![远端节点只读配置采集流程](diagrams/remote-backup-flow.svg)
 
@@ -18,7 +18,7 @@
 
 ## 三个节点的配置来源
 
-灾备归档包含控制面本地文件、普通数据面实际宿主机文件和 AI 数据面文件：
+灾备归档包含控制面本地文件和普通数据面实际宿主机文件：
 
 ```text
 database/
@@ -26,8 +26,6 @@ config/                         # 控制面 DB_BACKUP_EXTRA_PATHS
 nodes/
   normal-data-plane/
     root/xray-routing-panel/app/xray/runtime/config.json
-  ai-data-plane/
-    etc/xray/config.json
   remote-node-collection.json
 backup-manifest.json
 ```
@@ -36,19 +34,19 @@ backup-manifest.json
 
 | 节点 | SSH 目标 | 主配置路径 | 可选环境文件 |
 | --- | --- | --- | --- |
-| 普通数据面 | `root@64.186.224.96:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `/root/xray-routing-panel/app/xray/.env` |
-| AI 数据面 | `root@nat.qq.pw:27160` | `/etc/xray/config.json` | `/etc/xray/.env` |
+| 普通数据面 | `root@100.65.108.93:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `/root/xray-routing-panel/app/xray/.env` |
+| AI 备用 | 本机 Docker `xray-ai-node` | `config/` 下的 `app/xray/runtime/config-ai-node.json` | `config/` 下的 `app/xray/.env` |
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。
 
-控制面自己的配置由 `DB_BACKUP_EXTRA_PATHS` 提供。Compose 默认把 `/app/xray/.env` 和 `/app/xray/runtime` 以只读方式挂载到备份服务，因此三节点的“配置快照”分别来自控制面本地、普通数据面 SSH 和 AI 数据面 SSH。
+控制面自己的配置由 `DB_BACKUP_EXTRA_PATHS` 提供。Compose 默认把 `/app/xray/.env` 和 `/app/xray/runtime` 以只读方式挂载到备份服务，因此普通数据面快照来自 SSH，本机 AI 备用快照来自控制面本地目录。
 
 ## 密钥与主机校验
 
 - 默认密钥：`/run/secrets/fleet_ssh_key`；Compose 从 `/root/ssh-keys/xray_fleet_ed25519_20260805` 只读挂载。
 - 普通数据面 known_hosts：`/root/.ssh/known_hosts`。
-- AI 数据面 known_hosts：`/root/.ssh/known_hosts_ai`，必须包含 `[nat.qq.pw]:27160` 的主机指纹。
-- SSH 强制 `BatchMode=yes`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes`，并设置连接和存活超时。
+- AI 备用不需要 SSH known_hosts；只有显式启用远端 AI 节点时才配置独立 known_hosts。
+- SSH 强制 `BatchMode=yes`、`PreferredAuthentications=publickey`、`PasswordAuthentication=no`、`KbdInteractiveAuthentication=no`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes`，并设置连接和存活超时。
 - `DB_BACKUP_SSH_OPTIONS` 以及节点级 options 只允许无边界风险的网络/日志选项（`-4`、`-6`、`-q`/`-v` 和连接超时/keepalive）；身份、known_hosts、代理和远端命令选项会被拒绝。
 - `/root/ssh-keys` 中的密钥文件如果权限过宽，采集器会复制到任务临时目录并改为 `0600`，避免 OpenSSH 拒绝使用；不会修改源密钥权限。
 
@@ -58,20 +56,20 @@ backup-manifest.json
 
 | 变量 | 默认值（Compose） | 作用 |
 | --- | --- | --- |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | `1` | 是否执行远端采集；关闭时仍生成控制面本地灾备归档 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `0`：节点失联只写入 manifest，不阻断控制面归档；`1`：两个节点都必须连通且主配置文件成功采集 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | `1` | 是否采集普通数据面；关闭时仍生成控制面本地灾备归档 |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `0`：普通数据面失联只写入 manifest；`1`：普通数据面主配置必须成功采集 |
 | `DB_BACKUP_SSH_KEY_PATH` | `/run/secrets/fleet_ssh_key` | 只读 SSH 私钥路径 |
 | `DB_BACKUP_SSH_TIMEOUT_SECONDS` | `20` | 单节点连接/远端读取超时上限 |
 | `DB_BACKUP_SSH_MAX_FILE_BYTES` | `5242880` | 单个远端文件大小上限，默认 5 MiB |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 实测普通数据面路径 + `.env` | 逗号或换行分隔；第一个路径是必需主配置路径 |
-| `DB_BACKUP_AI_NODE_SSH_PORT` | `27160` | AI 节点管理用 NAT SSH 端口；不要与 AI Xray 业务端口 `27166` 混用 |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json,/etc/xray/.env` | AI 节点主配置和可选环境文件 |
+| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 仅显式启用远端 AI 节点 SSH 采集时使用 |
+| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | 空 | 当前本机 AI 备用不使用远端采集 |
 
-`DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 是灾备优先的默认策略：远端暂时不可达时仍保留控制面数据库和本地配置，manifest 会记录 `failed`、`skipped_no_target` 或文件级 `missing`。需要把“两个数据面必须齐全”作为发布门禁时才设置为 `1`。
+`DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 是灾备优先的默认策略：普通数据面暂时不可达时仍保留控制面数据库和本地配置，manifest 会记录 `failed`、`skipped_no_target` 或文件级 `missing`。需要把普通数据面配置作为发布门禁时才设置为 `1`。
 
 ## manifest 与核验
 
-`nodes/remote-node-collection.json` 为每个节点和每个请求路径记录：
+`nodes/remote-node-collection.json` 为每个实际启用的远端节点和每个请求路径记录：
 
 - `status`：节点整体状态（`ok`、`partial`、`failed` 或 `skipped_no_target`）。
 - `target`、`sshPort`、`knownHosts`、`requestedPaths`：本次连接参数和请求路径（不包含密钥内容）。
@@ -87,18 +85,14 @@ backup-manifest.json
 
 ```bash
 DB_BACKUP_SSH_KEY_PATH=/root/ssh-keys/xray_fleet_ed25519_20260805 \
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@64.186.224.96 \
+DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.65.108.93 \
 DB_BACKUP_DATAPLANE_SSH_PORT=22 \
 DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts \
 DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env \
-DB_BACKUP_AI_NODE_SSH_TARGET=root@nat.qq.pw \
-DB_BACKUP_AI_NODE_SSH_PORT=27160 \
-DB_BACKUP_AI_NODE_KNOWN_HOSTS=/root/.ssh/known_hosts_ai \
-DB_BACKUP_AI_NODE_REMOTE_PATHS=/etc/xray/config.json,/etc/xray/.env \
 python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-staging --required
 ```
 
-检查输出目录中的 `remote-node-collection.json` 和 `sha256sum`，确认两个节点的 `configCollected` 均为 `true`。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
+检查输出目录中的 `remote-node-collection.json` 和 `sha256sum`，确认普通数据面 `configCollected` 为 `true`。本机 AI 备用配置应在归档 `config/` 中核验。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
 
 ## 排障顺序
 
@@ -106,6 +100,6 @@ python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-stagi
 2. `Host key verification failed`：更新受控的对应 known_hosts 文件，先人工核对指纹，再重新执行。
 3. `missing`：通过只读 `docker inspect`、`systemctl cat` 或部署清单确认宿主机真实路径，再覆盖节点的 `*_REMOTE_PATHS`。
 4. `partial`：查看文件级 status；主配置缺失时不要把 `.env` 采集成功误判为完整配置。
-5. `too_large`：提高 `DB_BACKUP_SSH_MAX_FILE_BYTES` 前先确认该文件确实属于灾备范围，并评估归档和 npm 分片成本。
+5. `too_large`：提高 `DB_BACKUP_SSH_MAX_FILE_BYTES` 前先确认该文件确实属于灾备范围，并评估归档大小和本地/R2 保留成本。
 
 SSH 采集失败不会触发节点重启、配置回滚或 DNS 切换；这些是独立运维流程。R2 上传仍只是加密后的异地灾备通道，不承担快速恢复。

@@ -12,23 +12,25 @@
 - 基于公网 TCP 探测和 Cloudflare API 做单记录 DNS 故障切换，并支持自动回切。
 - 管理后台「监控」标签内嵌 Grafana 图表（数据源自 Prometheus），展示主机系统资源与每端口流量/连接速率；配置/订单等数据仍由面板自身（SQLite）提供。详见 [operations.md](operations.md)。
 - 可选启用控制面备用 Xray，配合 DNS 切换让控制面本机接管流量。
-- 每天备份 `panel.db`，并可选地加密切片后发布到 Cloudflare R2。
+- 每天备份 `panel.db`，并可选地加密后保存到 Cloudflare R2。
 
 ## 当前架构
 
 - `xray-routing-panel`（控制面）
   - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`、`/checkout`）以及探针/AI 仪表盘
-  - 前端为独立的 Vite 工程（`frontend/`），构建出 `app/static/admin/*` 与 `app/static/portal/*`
+  - 前端发布资源位于 `app/static/admin/*`、`app/static/portal/*` 与 `app/static/landing/*`；`frontend/src` 仅作为源码快照保留
   - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
-  - 通过 SSH 纳管两个远端节点：
-    - **普通数据面**：渲染、校验、同步并重启唯一 `data_plane`
-    - **AI 节点**：检查状态并按需重启 `ai_node`；配置上传独立受控且生产当前禁用
+  - 通过 Tailscale SSH 纳管普通数据面；AI 节点当前是控制面本机 Docker `xray-ai-node`，也支持显式切换为远端 SSH 模式
   - 维护 `dns_failover_state` / `dns_failover_history`
 - 普通数据面（`xray-reality-local` 或远端数据面）
   - 实际承载 `VLESS + REALITY` 流量
   - 数据面模式由 `docker`、`local`、`ssh`、`unmanaged` 四类自动判定
-  - 运行 `ai_domain_manager`，生成 `dynamic-routing.json` 将 AI 域名流量转发到 AI 节点
-- AI 节点（远端独立机器）
+  - 运行 `ai_domain_manager`，生成 `dynamic-routing.json` 将 AI 域名流量转发到选中的 AI 候选
+- AI 路由控制器
+  - 探测主 `nat.qq.pw:27166` 与备 `100.87.76.6:27166`
+  - 支持 `auto`、`primary`、`backup`、`forced_fallback` 四种模式
+  - 将人工模式和当前候选状态持久化到 `app_state`
+- AI 节点（当前备用为控制面本机 Docker；也支持远端独立机器）
   - 运行 VLESS + REALITY Xray，监听 `AI_UPSTREAM_PORT`，接收数据面转发的 AI 流量
   - freedom 直出，不做域名分类、不运行 `ai_domain_manager`
   - 使用独立于普通数据面的 REALITY 凭据；主数据面 outbound 必须与 AI inbound 完整匹配
@@ -42,13 +44,13 @@
 - `xray-ai-domain-manager`
   - 读取 `app/xray/logs/access.log`
   - 输出 `dynamic-routing.json`、小时域名报表和 `ai_domains` 聚合
-  - AI 上游不可达时自动回退（删除 `dynamic-routing.json`，流量回退数据面直出）
+  - AI 上游不可达时按模式切换候选；全部候选不可达时删除 `dynamic-routing.json`，流量回退数据面直出
 - `xray-routing-panel-db-backup`
-  - 负责 `panel.db` 定时备份、控制面配置归档，并可在打包前调用只读 SSH 采集两个数据面的实际配置
+  - 负责 `panel.db` 定时备份、控制面配置归档，并在打包前调用只读 SSH 采集普通数据面实际配置
 - `collect_remote_backup.py`
-  - 只负责普通/AI 数据面配置的 SSH 读取、SHA-256 校验和 `nodes/` staging
+  - 只负责普通数据面配置的 SSH 读取、SHA-256 校验和 `nodes/` staging；显式配置远端 AI 时也可采集该节点
 - `R2 灾备上传`
-  - 负责将数据库备份加密、切片、发布和恢复
+  - 负责将数据库备份加密并上传到 Cloudflare R2
 
 首页当前聚合展示：
 
@@ -57,7 +59,7 @@
 - `ai_routing_status`
 - `dns_failover_status`
 
-AI 节点作为独立受管节点纳管。AI 节点故障不涉及 DNS 切换，由 `ai_domain_manager` 自动回退。数据面故障时 DNS 切到控制面备用，根据 AI 节点健康度自动选择 relay 或直出模式。
+AI 节点作为独立受管节点纳管。AI 候选故障不涉及 DNS 切换，由 `ai_domain_manager` 按自动或人工模式选择；全部候选不可达时回退到数据面直出。数据面故障时 DNS 切到控制面备用，根据 AI 节点健康度自动选择 relay 或直出模式。
 
 ## 快速开始
 
@@ -126,11 +128,8 @@ docker compose --profile xray up -d --build
 docker compose --profile backup-xray up -d xray-reality-backup
 ```
 
-> 前端构建：`docker compose --build` 使用多阶段 Dockerfile，会在 `node:20` 构建阶段自动 `npm ci && npm run build` 生成 SPA 产物并拷入运行镜像；打包产物不再提交到仓库。**本地非 Docker 运行**需先手动构建一次：
->
-> ```bash
-> cd frontend && npm ci && npm run build   # 生成 app/static/{admin,portal}
-> ```
+> 前端发布资源已随仓库保存在 `app/static/{admin,portal,landing}`，`docker compose --build`
+> 直接将其复制进镜像。运行时和镜像构建不安装 JavaScript 构建工具。
 
 默认地址：
 
@@ -166,14 +165,12 @@ docker compose --profile backup-xray up -d xray-reality-backup
 
 ### AI 节点
 
-AI 节点是远端独立机器上的 VLESS + REALITY Xray，接收数据面转发的 AI 流量并 freedom 直出。部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，凭据边界见 [AI 节点独立凭据](ai-node-credentials.md)。
+AI 节点当前是控制面本机 Docker 上的独立 VLESS + REALITY Xray，接收数据面转发的 AI 流量并 freedom 直出；也支持远端独立机器部署。部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，凭据边界见 [AI 节点独立凭据](ai-node-credentials.md)。
 
 至少配置：
 
-- `AI_NODE_SSH_TARGET`
-- `AI_NODE_SSH_BIN` / `AI_NODE_SSH_OPTIONS`
-- `AI_NODE_API_SERVER`
-- `AI_NODE_PROBE_HOST`
+- 本机模式：`AI_NODE_CONTAINER_NAME=xray-ai-node`、`AI_NODE_API_SERVER`、`AI_NODE_PROBE_HOST`
+- 远端模式：`AI_NODE_SSH_TARGET`、`AI_NODE_SSH_BIN` / `AI_NODE_SSH_OPTIONS`、`AI_NODE_API_SERVER`、`AI_NODE_PROBE_HOST`
 - `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）
 
 生产当前保持 `AI_NODE_CONFIG_PATH=`，禁用配置上传但保留状态检查与容器重启。
@@ -232,7 +229,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 - 连续失败达到阈值时切到备用，连续成功达到阈值时自动回切
 - `DNS_FAILOVER_PRIMARY_CONTENT` 留空时，控制面会自动获取当前数据面的公网 IP
 - `DNS_FAILOVER_BACKUP_CONTENT` 留空时，只有在 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 时才会自动获取控制面本机公网 IP
-- AI 路由状态只展示，不参与切换决策
+- AI 路由支持人工切换；总览展示 `ai_candidates`、`manual_mode`、当前目标和不可达原因
 - 对 REALITY 这类直连流量，建议保持 `CF_DNS_RECORD_TTL=60` 以尽快生效
 
 相关接口：
@@ -243,26 +240,24 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 ## 灾备归档与 R2 上传
 
-默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和灾备归档；Compose 同时通过严格只读 SSH 采集普通数据面 `64.186.224.96:22` 和 AI 数据面 `nat.qq.pw:27160` 的主配置，归档可包含 `app/xray/.env`、运行时配置及 `DB_BACKUP_EXTRA_PATHS` 指定的其他文件。
+默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和灾备归档；Compose 通过 Tailscale 严格只读 SSH 采集普通数据面 `100.65.108.93:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
 
-如需在备份完成后自动加密分片并上传到 npm：
+如需在备份完成后自动加密并上传到 Cloudflare R2：
 
 - 在根 `.env` 中设置 `DB_BACKUP_R2_ENABLED=1`
-- 设置 `DB_BACKUP_R2_SECRET_ACCESS_KEY`
-- 按需设置 `DB_BACKUP_R2_BUCKET`
-- 保持 `DB_BACKUP_R2_PREFIX=0`，让 npm 保存每一轮不可变版本
-- 把 npm 认证文件放到 `data/R2 灾备上传/Docker Secret`，或改写 `DB_BACKUP_R2_ENDPOINT`
+- 设置 `DB_BACKUP_R2_ENDPOINT`、`DB_BACKUP_R2_BUCKET`
+- 设置 `DB_BACKUP_R2_ACCESS_KEY_ID`、`DB_BACKUP_R2_SECRET_ACCESS_KEY`
+- 设置独立的 `DB_BACKUP_ENCRYPTION_PASSWORD`
 
-npm 在此处是低频异地灾备上传通道，不进入 DNS 故障切换和快速恢复路径。归档结构、远端采集和灾难阶段恢复见 [disaster-backup.md](disaster-backup.md) 与 [remote-node-backup.md](remote-node-backup.md)。
+R2 仅作为低频异地灾备保存通道，不进入 DNS 故障切换和快速恢复路径。归档结构、远端采集和灾难阶段恢复见 [disaster-backup.md](disaster-backup.md) 与 [remote-node-backup.md](remote-node-backup.md)。
 
-先验证链路而不真实发布：
+先验证本地归档和 R2 配置：
 
 ```bash
-DB_BACKUP_R2_ENABLED=1 DB_BACKUP_R2_REGION=1 \
-docker compose up -d --build xray-routing-panel-db-backup
+python3 -m unittest tests.test_backup_cycle tests.test_upload_backup_r2
 ```
 
-手动触发一轮“备份后上传”：
+手动触发一轮“备份后上传 R2”：
 
 ```bash
 docker compose run --rm xray-routing-panel-db-backup \
@@ -338,11 +333,11 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 前端与运维：
 
-- [../frontend/](../frontend/): Vite + Vue 3 + Naive UI + Vitest 工程；`src/shared/`（设计令牌、apiClient、共享组件）、`src/admin/`（后台 SPA）、`src/portal/`（订阅者门户 SPA）。`npm run build` 出 `app/static/{admin,portal}`，`npm test` 跑 Vitest
+- [../frontend/](../frontend/): 前端源码快照；实际部署使用已生成的 `app/static/{admin,portal,landing}` 发布资源
 - [disaster-backup.md](disaster-backup.md): 配置归档、R2 灾备保留和离线恢复边界
-- [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集两个数据面实际配置
-- [disaster-backup.md](disaster-backup.md): 加密、切片和 R2 上传组件
-- [../Dockerfile](../Dockerfile): 多阶段构建（node 构建 SPA + pip 安装 Python 依赖）
+- [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集普通数据面实际配置；本机 AI 配置随控制面归档
+- [db-backup-uploader.md](db-backup-uploader.md): 加密和 R2 上传组件
+- [../Dockerfile](../Dockerfile): 复制静态发布资源并安装 Python 依赖
 - [../docker-compose.yml](../docker-compose.yml): 本地 compose 栈
 - [../k8s/](../k8s/): K3s 清单
 
@@ -353,10 +348,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests -q
 
-# 前端：构建产物 + 组件/单元测试
-cd frontend && npm ci
-npm run build     # 生成 app/static/{admin,portal}
-npm test          # Vitest
+# 前端发布资源已在 app/static/，无需额外构建步骤
 ```
 
 ## 文档导航

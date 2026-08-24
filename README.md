@@ -36,7 +36,6 @@
 
 - Docker Engine 和 Docker Compose v2
 - Python 3.10+（仅本地运行或开发需要）
-- Node.js 20+（仅前端开发需要）
 - Xray REALITY 所需域名、密钥和客户端 UUID
 
 ### 1. 生成 REALITY 参数
@@ -100,7 +99,7 @@ docker compose -f monitoring/docker-compose.monitoring.yml up -d prometheus graf
 
 日志采集边界见 [Fluent Bit 日志采集](docs/logging-fluent-bit.md)。
 
-当前生产环境已在控制面 `100.92.111.68`、普通数据面 `100.65.108.93`、AI 数据面 `100.109.201.64` 部署 Fluent Bit；控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
+当前生产环境的控制面（Tailscale `100.87.76.6`）同时运行本机 AI 备用，普通数据面为 `100.65.108.93`；控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
 
 启用配置归档并通过 Cloudflare R2 保存异地灾备版本（不用于快速恢复）：
 
@@ -114,7 +113,7 @@ DB_BACKUP_ENCRYPTION_PASSWORD='separate-archive-password' \
 docker compose up -d --build xray-routing-panel-db-backup
 ```
 
-控制面额外文件通过 `DB_BACKUP_EXTRA_PATHS` 配置，普通/AI 数据面实际配置由只读 SSH 采集；完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)和[远端节点配置采集](docs/remote-node-backup.md)。
+控制面额外文件和本机 AI 配置通过 `DB_BACKUP_EXTRA_PATHS` 归档，普通数据面实际配置由只读 SSH 采集；完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)和[远端节点配置采集](docs/remote-node-backup.md)。
 
 ### 默认访问地址
 
@@ -156,14 +155,8 @@ ruff check .
 black --check .
 ```
 
-前端开发：
-
-```bash
-cd frontend
-npm ci
-npm run dev
-npm test
-```
+前端发布资源已随仓库保存在 `app/static/{admin,portal,landing}`，运行和部署不需要 JavaScript 构建工具。
+`frontend/src` 仅保留源码快照，不参与镜像构建。
 
 完整流程见[开发与启动](docs/development.md)。
 
@@ -201,7 +194,7 @@ npm test
 
 - [AI 路由](docs/ai-routing.md) — 域名分类、动态规则、AI 上游选择和故障回退。
 - [灾备归档与 R2 上传通道](docs/disaster-backup.md) — 配置文件等额外内容的归档、R2 异地保留和离线恢复边界。
-- [远端节点配置采集](docs/remote-node-backup.md) — 通过严格只读 SSH 采集普通数据面和 AI 数据面的实际配置。
+- [远端节点配置采集](docs/remote-node-backup.md) — 通过严格只读 SSH 采集普通数据面实际配置；本机 AI 配置随控制面归档。
 - [Cloudflare R2 灾备上传](docs/db-backup-uploader.md) — 加密上传、对象命名、安全边界和人工恢复。
 
 ### Prometheus-only 运维分析

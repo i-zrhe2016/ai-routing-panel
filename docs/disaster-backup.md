@@ -13,10 +13,11 @@
 
 ```mermaid
 flowchart LR
-    A[panel.db] --> B[SQLite 快照]
+    P[panel.db] --> B[SQLite 快照]
     C[DB_BACKUP_EXTRA_PATHS<br/>控制面配置文件/目录] --> D[灾备 tar.gz]
     B --> D
-    N[两个数据面<br/>只读 SSH] --> D
+    N[普通数据面<br/>只读 SSH] --> D
+    I[本机 AI 备用<br/>运行时目录] --> D
     D --> E[AES-256-GCM 加密]
     E --> F[Cloudflare R2<br/>异地灾备通道]
     D --> H[本地 backups 保留期]
@@ -25,7 +26,7 @@ flowchart LR
 任务入口是 `scripts/run_db_backup_cycle.py`：
 
 1. 调用 `scripts/backup_db.py`，通过 SQLite 在线备份 API 生成 `backups/<prefix>-<UTC 时间戳>.db`。
-2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，以严格只读 SSH 采集普通数据面和 AI 数据面的主配置与可选环境文件。
+2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，以严格只读 SSH 采集普通数据面的主配置与可选环境文件；本机 AI 备用由 `DB_BACKUP_EXTRA_PATHS` 归档，不发起 AI SSH。
 3. 调用 `scripts/build_backup_bundle.py`，把数据库快照放在 `database/`、控制面额外路径放在 `config/`、远端 staging 放在 `nodes/`，并写入 `backup-manifest.json`。
 4. `DB_BACKUP_R2_ENABLED=1` 时，使用 R2 S3 兼容 API 上传加密归档。
 5. 上传记录写入 `DB_BACKUP_R2_RECORD_PATH`，本地文件保留用于核验和人工恢复。
@@ -55,12 +56,12 @@ database/
 config/                       # 控制面 DB_BACKUP_EXTRA_PATHS
 nodes/
   normal-data-plane/...       # 普通数据面主机实际路径
-  ai-data-plane/etc/xray/config.json
+  app/xray/runtime/config-ai-node.json
   remote-node-collection.json
 backup-manifest.json
 ```
 
-本次实测普通数据面主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`，AI 数据面主配置是 `/etc/xray/config.json`，AI SSH 端口为 `27160`。可选 `.env` 不存在时不会阻断节点主配置归档；逐文件结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界、密钥和排障步骤见[远端节点配置采集](remote-node-backup.md)。
+普通数据面通过 Tailscale `100.65.108.93:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `100.87.76.6`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
 
 Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥和 known_hosts。若要启用，必须创建 Secret 并以只读卷挂载 key、两个 known_hosts 文件，再在备份 CronJob 的 ConfigMap/Secret 中显式设置目标和路径；不要把私钥内容提交到仓库。Kubernetes 的具体边界见[K3s 部署](kubernetes.md)。
 
@@ -74,13 +75,13 @@ Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥�
 | `DB_BACKUP_BUNDLE_DIR` | `DB_BACKUP_DIR` | 灾备归档本地目录 |
 | `DB_BACKUP_BUNDLE_KEEP_DAYS` | `DB_BACKUP_KEEP_DAYS` | 本地灾备归档保留天数，`0` 表示不清理 |
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过 SSH 读取两个数据面 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `1` 时两个节点都必须连通且主配置成功；`0` 时记录失败但继续保留控制面归档 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过 SSH 读取普通数据面 |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `1` 时普通数据面主配置必须成功；`0` 时记录失败但继续保留控制面归档 |
 | `DB_BACKUP_SSH_KEY_PATH` | `/run/secrets/fleet_ssh_key` | 只读 SSH 私钥；源文件权限过宽时采集器使用临时 `0600` 副本 |
 | `DB_BACKUP_SSH_OPTIONS` | 空 | 仅允许 `-4`/`-6`、日志级别和连接超时/keepalive 等安全选项 |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面实测宿主路径 + `.env` | 逗号/换行分隔；第一个路径是主配置 |
-| `DB_BACKUP_AI_NODE_SSH_PORT` | `27160` | AI 数据面 SSH 端口（`nat.qq.pw:27160`） |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json,/etc/xray/.env` | AI 节点主配置和可选环境文件 |
+| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 仅在显式启用远端 AI 节点 SSH 采集时使用 |
+| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | 空 | 当前本机 AI 备用不使用远端采集 |
 | `DB_BACKUP_R2_ENABLED` | `0` | 是否将加密灾备归档上传到 R2 |
 | `DB_BACKUP_R2_ENDPOINT` | 空 | Cloudflare R2 S3 endpoint |
 | `DB_BACKUP_R2_BUCKET` | 空 | R2 bucket 名称 |
