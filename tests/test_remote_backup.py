@@ -44,6 +44,9 @@ class RemoteBackupTest(unittest.TestCase):
         self.assertEqual(result, response)
         command = run.call_args.args[0]
         self.assertIn("StrictHostKeyChecking=yes", command)
+        self.assertIn("PreferredAuthentications=publickey", command)
+        self.assertIn("PasswordAuthentication=no", command)
+        self.assertIn("KbdInteractiveAuthentication=no", command)
         self.assertIn("UserKnownHostsFile=/tmp/known_hosts", command)
         self.assertIn("/tmp/identity", command)
         self.assertIn("XRAY_BACKUP_REMOTE_MAX_FILE_BYTES=2048", command[-1])
@@ -149,9 +152,9 @@ class RemoteBackupTest(unittest.TestCase):
         try:
             os.environ.update(
                 {
-                    "DB_BACKUP_DATAPLANE_SSH_TARGET": "root@64.186.224.96",
+                    "DB_BACKUP_DATAPLANE_SSH_TARGET": "root@override-data-plane",
                     "DB_BACKUP_DATAPLANE_REMOTE_PATHS": "/srv/xray/config.json",
-                    "DB_BACKUP_AI_NODE_SSH_TARGET": "root@nat.qq.pw",
+                    "DB_BACKUP_AI_NODE_SSH_TARGET": "root@override-ai-node",
                     "DB_BACKUP_AI_NODE_SSH_PORT": "2222",
                     "DB_BACKUP_AI_NODE_REMOTE_PATHS": "/etc/xray/config.json,/opt/xray/.env",
                 }
@@ -161,11 +164,32 @@ class RemoteBackupTest(unittest.TestCase):
             os.environ.clear()
             os.environ.update(original)
 
-        self.assertEqual(normal.target, "root@64.186.224.96")
+        self.assertEqual(normal.target, "root@override-data-plane")
         self.assertIn("/srv/xray/config.json", normal.paths)
-        self.assertEqual(ai.target, "root@nat.qq.pw")
+        self.assertEqual(ai.target, "root@override-ai-node")
         self.assertEqual(ai.ssh_port, "2222")
         self.assertIn("/opt/xray/.env", ai.paths)
+
+    def test_build_nodes_defaults_to_tailscale_normal_target_and_no_remote_ai_target(self):
+        original = os.environ.copy()
+        try:
+            for name in (
+                "DB_BACKUP_DATAPLANE_SSH_TARGET",
+                "DATAPLANE_SSH_TARGET",
+                "DB_BACKUP_AI_NODE_SSH_TARGET",
+                "AI_NODE_SSH_TARGET",
+                "DB_BACKUP_AI_NODE_SSH_PORT",
+            ):
+                os.environ.pop(name, None)
+            normal, ai = self.module.build_nodes()
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+        self.assertEqual(normal.target, "root@100.65.108.93")
+        self.assertEqual(normal.ssh_port, "22")
+        self.assertEqual(ai.target, "")
+        self.assertEqual(ai.ssh_port, "22")
 
 
 if __name__ == "__main__":

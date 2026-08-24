@@ -24,8 +24,6 @@ services:
       context: .
       dockerfile: components/xray_ops/Dockerfile
       target: reporter
-      args:
-        CODEX_CLI_VERSION: "${OPS_CODEX_CLI_VERSION:-0.145.0}"
     image: xray-ops-daily-reporter:local
     container_name: xray-ops-daily-reporter
     command: ["serve"]

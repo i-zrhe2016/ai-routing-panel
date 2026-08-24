@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Collect node configuration files over strict, read-only SSH.
 
-This is intentionally separate from the archive builder and npm uploader.  It
+This is intentionally separate from the archive builder and remote uploader.  It
 only reads regular files from the normal and AI data planes and writes a local
 staging directory plus a collection manifest.  The staging directory is then
 included in the encrypted disaster bundle by ``run_db_backup_cycle.py``.
@@ -114,7 +114,9 @@ DEFAULT_DATAPLANE_CONFIG_PATH = "/root/xray-routing-panel/app/xray/runtime/confi
 DEFAULT_DATAPLANE_ENV_PATH = "/root/xray-routing-panel/app/xray/.env"
 DEFAULT_AI_CONFIG_PATH = "/etc/xray/config.json"
 DEFAULT_AI_ENV_PATH = "/etc/xray/.env"
-DEFAULT_AI_SSH_PORT = "27160"
+DEFAULT_NORMAL_TARGET = "root@100.65.108.93"
+DEFAULT_AI_TARGET = ""
+DEFAULT_AI_SSH_PORT = "22"
 DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024
 
 
@@ -213,10 +215,16 @@ class RemoteNode:
 
 def build_nodes() -> tuple[RemoteNode, ...]:
     normal_target = str(
-        os.environ.get("DB_BACKUP_DATAPLANE_SSH_TARGET", os.environ.get("DATAPLANE_SSH_TARGET", ""))
+        os.environ.get(
+            "DB_BACKUP_DATAPLANE_SSH_TARGET",
+            os.environ.get("DATAPLANE_SSH_TARGET", DEFAULT_NORMAL_TARGET),
+        )
     ).strip()
     ai_target = str(
-        os.environ.get("DB_BACKUP_AI_NODE_SSH_TARGET", os.environ.get("AI_NODE_SSH_TARGET", ""))
+        os.environ.get(
+            "DB_BACKUP_AI_NODE_SSH_TARGET",
+            os.environ.get("AI_NODE_SSH_TARGET", DEFAULT_AI_TARGET),
+        )
     ).strip()
     normal_config = str(
         os.environ.get("DB_BACKUP_DATAPLANE_CONFIG_PATH", os.environ.get("DATAPLANE_CONFIG_PATH", ""))
@@ -299,6 +307,14 @@ def read_remote(node: RemoteNode, key_path: Path, timeout: int, max_bytes: int) 
         *node.options,
         "-o",
         "BatchMode=yes",
+        "-o",
+        "PreferredAuthentications=publickey",
+        "-o",
+        "PasswordAuthentication=no",
+        "-o",
+        "KbdInteractiveAuthentication=no",
+        "-o",
+        "ChallengeResponseAuthentication=no",
         "-o",
         "IdentitiesOnly=yes",
         "-o",

@@ -25,6 +25,10 @@ def load_module(module_name, path):
 
 
 class BackupCycleTest(unittest.TestCase):
+    def test_backup_cycle_has_no_legacy_uploader_configuration(self):
+        source = RUN_CYCLE_SCRIPT.read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"DB_BACKUP_UPLOADER|publish|unpublish|shard")
+
     def create_source_db(self, root):
         db_path = root / "panel.db"
         with sqlite3.connect(str(db_path)) as conn:
@@ -67,7 +71,7 @@ class BackupCycleTest(unittest.TestCase):
             self.assertTrue(latest_backup.name.startswith("panel-test-"))
             self.assertEqual(latest_backup.stat().st_mode & 0o777, 0o600)
 
-    def test_run_db_backup_cycle_keeps_backup_only_when_uploader_disabled(self):
+    def test_run_db_backup_cycle_creates_local_backup_when_r2_disabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             db_path = self.create_source_db(root)

@@ -13,7 +13,6 @@ from components.xray_ops.codex_runner import (
     _extract_usage,
     _resolve_cli,
     _select_model_input,
-    _version_key,
     validate_model_analysis,
 )
 
@@ -240,31 +239,6 @@ def test_rate_limit_retries_with_bounded_backoff(tmp_path, monkeypatch):
 
     assert caught.value.attempts == 3
     assert sleeps == [1.0, 2.0]
-
-
-def test_nvm_discovery_chooses_highest_version(tmp_path):
-    root = tmp_path / "versions" / "node"
-    for version in ("v20.19.1", "v22.14.0", "v22.9.0"):
-        cli = root / version / "lib/node_modules/@openai/codex/bin/codex.js"
-        cli.parent.mkdir(parents=True)
-        cli.write_text("placeholder", encoding="utf-8")
-        node = root / version / "bin/node"
-        node.parent.mkdir(parents=True)
-        node.write_text("placeholder", encoding="utf-8")
-
-    config = CodexRunnerConfig(
-        source_home=tmp_path / "source",
-        runtime_home=tmp_path / "runtime",
-        workdir=tmp_path / "workdir",
-        node_bin="definitely-not-on-path",
-        node_versions_root=str(root),
-    )
-
-    command = _resolve_cli(config)
-
-    assert "v22.14.0" in command[0]
-    assert "v22.14.0" in command[1]
-    assert _version_key(Path("/host/v24.1.3/lib/node_modules/@openai/codex/bin/codex.js")) == (24, 1, 3)
 
 
 def test_bundled_codex_is_discovered_from_path(tmp_path, monkeypatch):

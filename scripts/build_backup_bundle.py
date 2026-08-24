@@ -178,7 +178,7 @@ def create_backup_bundle(backup_path, extra_paths, bundle_dir, prefix, named_pat
 
         os.replace(temp_path, final_path)
         # The bundle contains credentials and rendered Xray configuration
-        # before the uploader encrypts it; never leave it world-readable.
+        # before the remote uploader encrypts it; never leave it world-readable.
         os.chmod(final_path, 0o600)
         print(f"[backup] wrote disaster bundle {final_path}")
         if skipped:

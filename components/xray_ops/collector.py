@@ -33,9 +33,24 @@ from .remote import RemoteCommandError, SshExecutor
 from .storage import OpsStore
 
 
+DEFAULT_NORMAL_TARGET = "root@100.65.108.93"
+DEFAULT_AI_TARGET = ""
+DEFAULT_SSH_KEY_PATH = "/run/secrets/fleet_ssh_key"
+DEFAULT_NORMAL_KNOWN_HOSTS = "/root/.ssh/known_hosts"
+DEFAULT_AI_KNOWN_HOSTS = "/root/.ssh/known_hosts_ai"
 DEFAULT_SSH_OPTIONS = (
     "-o",
     "BatchMode=yes",
+    "-o",
+    "PreferredAuthentications=publickey",
+    "-o",
+    "PasswordAuthentication=no",
+    "-o",
+    "KbdInteractiveAuthentication=no",
+    "-o",
+    "ChallengeResponseAuthentication=no",
+    "-o",
+    "IdentitiesOnly=yes",
     "-o",
     "StrictHostKeyChecking=yes",
     "-o",
@@ -63,9 +78,33 @@ def _split_options(value: str) -> tuple[str, ...]:
 
 
 def _validate_ssh_options(options: tuple[str, ...]) -> None:
-    joined = " ".join(options).lower().replace(" ", "")
-    if "stricthostkeychecking=no" in joined or "stricthostkeychecking=accept-new" in joined:
-        raise ValueError("ops collector requires StrictHostKeyChecking=yes")
+    forced_keys = {
+        "batchmode",
+        "challengeresponseauthentication",
+        "identityfile",
+        "identitiesonly",
+        "kbdinteractiveauthentication",
+        "passwordauthentication",
+        "preferredauthentications",
+        "stricthostkeychecking",
+        "userknownhostsfile",
+    }
+    index = 0
+    while index < len(options):
+        token = str(options[index])
+        if token == "-i":
+            raise ValueError("ops collector owns the SSH identity file")
+        if token.startswith("-i") and len(token) > 2:
+            raise ValueError("ops collector owns the SSH identity file")
+        if token != "-o":
+            index += 1
+            continue
+        if index + 1 >= len(options):
+            raise ValueError("ops collector received an incomplete SSH option")
+        key = str(options[index + 1]).split("=", 1)[0].strip().lower()
+        if key in forced_keys:
+            raise ValueError(f"ops collector owns SSH option: {key}")
+        index += 2
 
 
 def _emit(event: str, **fields: Any) -> None:
@@ -106,24 +145,34 @@ class CollectorConfig:
 
     @classmethod
     def from_env(cls) -> "CollectorConfig":
-        key_path = str(os.environ.get("OPS_SSH_KEY_PATH", "")).strip()
-        key_options = ("-i", key_path) if key_path else ()
+        key_path = str(os.environ.get("OPS_SSH_KEY_PATH", DEFAULT_SSH_KEY_PATH)).strip() or DEFAULT_SSH_KEY_PATH
+        key_options = ("-i", key_path)
         global_options = _split_options(os.environ.get("OPS_SSH_OPTIONS", ""))
-
-        normal_options = (
-            *DEFAULT_SSH_OPTIONS,
-            *key_options,
+        normal_custom_options = (
             *global_options,
             *_split_options(os.environ.get("OPS_NORMAL_NODE_SSH_OPTIONS", os.environ.get("DATAPLANE_SSH_OPTIONS", ""))),
         )
-        ai_options = (
-            *DEFAULT_SSH_OPTIONS,
-            *key_options,
+        ai_custom_options = (
             *global_options,
             *_split_options(os.environ.get("OPS_AI_NODE_SSH_OPTIONS", os.environ.get("AI_NODE_SSH_OPTIONS", ""))),
         )
-        _validate_ssh_options(tuple(normal_options))
-        _validate_ssh_options(tuple(ai_options))
+        _validate_ssh_options(tuple(normal_custom_options))
+        _validate_ssh_options(tuple(ai_custom_options))
+
+        normal_options = (
+            *normal_custom_options,
+            *key_options,
+            *DEFAULT_SSH_OPTIONS,
+            "-o",
+            f"UserKnownHostsFile={os.environ.get('OPS_NORMAL_KNOWN_HOSTS', DEFAULT_NORMAL_KNOWN_HOSTS).strip() or DEFAULT_NORMAL_KNOWN_HOSTS}",
+        )
+        ai_options = (
+            *ai_custom_options,
+            *key_options,
+            *DEFAULT_SSH_OPTIONS,
+            "-o",
+            f"UserKnownHostsFile={os.environ.get('OPS_AI_KNOWN_HOSTS', DEFAULT_AI_KNOWN_HOSTS).strip() or DEFAULT_AI_KNOWN_HOSTS}",
+        )
 
         normal_access = str(
             os.environ.get(
@@ -153,7 +202,10 @@ class CollectorConfig:
             NodeConfig(
                 role=NORMAL_DATA_PLANE,
                 target=str(
-                    os.environ.get("OPS_NORMAL_NODE_SSH_TARGET", os.environ.get("DATAPLANE_SSH_TARGET", ""))
+                    os.environ.get(
+                        "OPS_NORMAL_NODE_SSH_TARGET",
+                        os.environ.get("DATAPLANE_SSH_TARGET", DEFAULT_NORMAL_TARGET),
+                    )
                 ).strip(),
                 ssh_options=tuple(normal_options),
                 service_kind=str(os.environ.get("OPS_NORMAL_SERVICE_KIND", "docker")).strip().lower(),
@@ -168,7 +220,12 @@ class CollectorConfig:
             ),
             NodeConfig(
                 role=AI_DATA_PLANE,
-                target=str(os.environ.get("OPS_AI_NODE_SSH_TARGET", os.environ.get("AI_NODE_SSH_TARGET", ""))).strip(),
+                target=str(
+                    os.environ.get(
+                        "OPS_AI_NODE_SSH_TARGET",
+                        os.environ.get("AI_NODE_SSH_TARGET", DEFAULT_AI_TARGET),
+                    )
+                ).strip(),
                 ssh_options=tuple(ai_options),
                 service_kind=str(os.environ.get("OPS_AI_SERVICE_KIND", "docker")).strip().lower(),
                 service_name=str(

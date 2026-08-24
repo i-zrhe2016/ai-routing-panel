@@ -54,9 +54,6 @@ class CodexRunnerConfig:
     max_input_bytes: int = DEFAULT_MAX_INPUT_BYTES
     retry_backoff_seconds: float = 1.0
     codex_bin: str = ""
-    codex_cli_js: str = ""
-    node_bin: str = "node"
-    node_versions_root: str = ""
     model: str = ""
     model_provider: str = ""
     provider_base_url: str = ""
@@ -74,9 +71,6 @@ class CodexRunnerConfig:
             max_input_bytes=int(os.environ.get("OPS_CODEX_MAX_INPUT_BYTES", str(DEFAULT_MAX_INPUT_BYTES))),
             retry_backoff_seconds=float(os.environ.get("OPS_CODEX_RETRY_BACKOFF_SECONDS", "1")),
             codex_bin=os.environ.get("OPS_CODEX_BIN", "").strip(),
-            codex_cli_js=os.environ.get("OPS_CODEX_CLI_JS", "").strip(),
-            node_bin=os.environ.get("OPS_CODEX_NODE_BIN", "node").strip(),
-            node_versions_root=os.environ.get("OPS_CODEX_NODE_VERSIONS_ROOT", "").strip(),
             model=os.environ.get("OPS_CODEX_MODEL", "").strip(),
             model_provider=os.environ.get("OPS_CODEX_MODEL_PROVIDER", "").strip(),
             provider_base_url=os.environ.get("OPS_CODEX_PROVIDER_BASE_URL", "").strip(),
@@ -188,42 +182,12 @@ class CodexAnalysisError(RuntimeError):
         self.usage = usage
 
 
-def _version_key(path: Path) -> tuple[int, ...]:
-    raw = next((part for part in reversed(path.parts) if part.startswith("v") and part[1:2].isdigit()), "v0")
-    raw = raw.removeprefix("v")
-    parts = []
-    for item in raw.split("."):
-        try:
-            parts.append(int(item))
-        except ValueError:
-            parts.append(0)
-    return tuple(parts)
-
-
 def _resolve_cli(config: CodexRunnerConfig) -> list[str]:
     if config.codex_bin:
         resolved = shutil.which(config.codex_bin) or config.codex_bin
         if not Path(resolved).is_file() and shutil.which(resolved) is None:
             raise CodexAnalysisError("codex_cli_unavailable", 0, "configured Codex binary was not found")
         return [resolved]
-
-    cli_path = Path(config.codex_cli_js) if config.codex_cli_js else None
-    root = Path(config.node_versions_root) if config.node_versions_root else None
-    if (cli_path is None or not cli_path.is_file()) and root and root.is_dir():
-        matches = list(root.glob("*/lib/node_modules/@openai/codex/bin/codex.js"))
-        if matches:
-            cli_path = max(matches, key=_version_key)
-    if cli_path is not None and cli_path.is_file():
-        node = config.node_bin
-        if not Path(node).is_file():
-            node = shutil.which(node) or ""
-        if not node and root and root.is_dir():
-            nodes = list(root.glob("*/bin/node"))
-            if nodes:
-                node = str(max(nodes, key=_version_key))
-        if not node:
-            raise CodexAnalysisError("codex_node_unavailable", 0, "Node.js binary was not found")
-        return [node, str(cli_path)]
 
     resolved = shutil.which("codex")
     if resolved:
