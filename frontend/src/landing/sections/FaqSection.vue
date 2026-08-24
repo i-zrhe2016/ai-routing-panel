@@ -28,7 +28,7 @@ const faqs = [
   },
   {
     q: "如何开始？",
-    a: "选择套餐下单，审核通过后系统自动开通专属端口与订阅地址，导入客户端即可使用。",
+    a: "联系管理员确认套餐并完成开通后，系统会生成专属端口与订阅地址，导入客户端即可使用。",
   },
 ];
 
@@ -63,7 +63,7 @@ function toggle(i) {
       </ul>
 
       <div class="faq-cta reveal">
-        <a class="btn btn-primary" href="/plans">立即开通</a>
+        <a class="btn btn-primary" href="/plans">查看套餐</a>
       </div>
     </div>
   </section>

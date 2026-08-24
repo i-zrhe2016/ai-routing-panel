@@ -2,7 +2,7 @@
 // A real sequence, so the numbering carries meaning. A hairline runs through the
 // step nodes — the signal line, continued.
 const steps = [
-  { no: "01", title: "下单开通", desc: "选择套餐下单，审核通过后系统自动生成你的专属端口与订阅地址。" },
+  { no: "01", title: "联系开通", desc: "联系管理员确认套餐并完成开通，系统自动生成你的专属端口与订阅地址。" },
   { no: "02", title: "导入客户端", desc: "复制订阅链接，导入 Clash、V2Ray 等客户端，一键完成配置。" },
   { no: "03", title: "自动分流", desc: "节点自动识别 AI 流量走优选线路，其余本地直连，无需手动切换。" },
   { no: "04", title: "稳定保活", desc: "多上游与 DNS 故障切换持续保活，对话不掉线、模型不降智。" },

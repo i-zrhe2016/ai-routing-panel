@@ -4,16 +4,12 @@ import { computed } from "vue";
 const props = defineProps({
   state: { type: String, default: "loading" }, // loading | loaded | error
   plans: { type: Array, default: () => [] },
-  commerceSettings: { type: Object, default: () => ({}) },
 });
 
 const hasPlans = computed(() => props.state === "loaded" && props.plans.length > 0);
 const featured = computed(() => (hasPlans.value ? props.plans[0] : null));
 const others = computed(() => (hasPlans.value ? props.plans.slice(1) : []));
 
-function checkoutUrl(slug) {
-  return slug ? `/checkout/${slug}` : "/plans";
-}
 </script>
 
 <template>
@@ -34,7 +30,7 @@ function checkoutUrl(slug) {
           <p class="price-desc">
             {{ featured.description || "专属端口、AI 自动分流、Clash / V2Ray 订阅与 VLESS 分享链接。" }}
           </p>
-          <a class="btn btn-primary price-cta" :href="checkoutUrl(featured.slug)">立即开通</a>
+          <a class="btn btn-primary price-cta" href="/plans">查看套餐</a>
         </article>
 
         <ul v-if="others.length" class="price-more">
@@ -42,7 +38,7 @@ function checkoutUrl(slug) {
             <span class="price-more-name">{{ p.name }}</span>
             <span class="price-more-meta">{{ p.duration_days }} 天 · {{ p.traffic_limit_display }}</span>
             <span class="price-more-amount">{{ p.price_display }}</span>
-            <a class="btn-text" :href="checkoutUrl(p.slug)">选择 <span aria-hidden="true">→</span></a>
+            <a class="btn-text" href="/plans">查看 <span aria-hidden="true">→</span></a>
           </li>
         </ul>
       </div>
@@ -65,7 +61,7 @@ function checkoutUrl(slug) {
           <p class="price-amount display">¥49<span class="price-unit">/月</span></p>
           <p class="price-meta">独享端口 · AI 自动分流 · 不超售</p>
           <p class="price-desc">含专属订阅、Clash / V2Ray 订阅与 VLESS 分享链接，多路高可用、数据加密。</p>
-          <a class="btn btn-primary price-cta" href="/plans">查看套餐并开通</a>
+          <a class="btn btn-primary price-cta" href="/plans">查看套餐</a>
         </article>
       </div>
     </div>

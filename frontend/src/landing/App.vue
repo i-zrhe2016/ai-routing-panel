@@ -18,7 +18,6 @@ const props = defineProps({
 // Live pricing from the public plans API. Three states feed PricingSection:
 // loading -> loaded (with plans) | error (¥49/月 fallback).
 const plans = ref([]);
-const commerceSettings = ref({});
 const pricingState = ref("loading");
 
 const navLinks = [
@@ -49,7 +48,6 @@ onMounted(async () => {
     const res = await api.get("/api/customer/plans");
     const data = res.data || res || {};
     plans.value = Array.isArray(data.plans) ? data.plans : [];
-    commerceSettings.value = data.commerce_settings || {};
     pricingState.value = "loaded";
   } catch (_error) {
     pricingState.value = "error";
@@ -77,7 +75,7 @@ onBeforeUnmount(() => {
 
         <div class="nav-actions">
           <a class="btn-text nav-login" href="/portal">订阅中心</a>
-          <a class="btn btn-primary btn-sm" href="/plans">立即开通</a>
+          <a class="btn btn-primary btn-sm" href="/plans">查看套餐</a>
         </div>
 
         <button
@@ -93,7 +91,7 @@ onBeforeUnmount(() => {
       <div v-show="menuOpen" class="nav-drawer">
         <a v-for="l in navLinks" :key="l.href" :href="l.href" @click="closeMenu">{{ l.label }}</a>
         <a href="/portal" @click="closeMenu">订阅中心</a>
-        <a class="btn btn-primary" href="/plans" @click="closeMenu">立即开通</a>
+        <a class="btn btn-primary" href="/plans" @click="closeMenu">查看套餐</a>
       </div>
     </header>
 
@@ -105,7 +103,6 @@ onBeforeUnmount(() => {
       <PricingSection
         :state="pricingState"
         :plans="plans"
-        :commerce-settings="commerceSettings"
       />
       <FaqSection />
     </main>
@@ -120,7 +117,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="footer-cta">
-          <a class="btn btn-primary" href="/plans">立即开通</a>
+          <a class="btn btn-primary" href="/plans">查看套餐</a>
           <a class="btn-text" href="/portal">订阅中心</a>
         </div>
       </div>

@@ -31,7 +31,7 @@ const { display: latencyText, elRef: latencyEl } = useCountUp(38, { format: (v) 
       </p>
 
       <div class="hero-cta reveal" data-reveal-delay="260">
-        <a class="btn btn-primary" href="/plans">立即开通</a>
+        <a class="btn btn-primary" href="/plans">查看套餐</a>
         <a class="btn-text" href="#how">了解原理 <span aria-hidden="true">→</span></a>
       </div>
 
