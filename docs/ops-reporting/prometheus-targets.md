@@ -13,7 +13,7 @@
 | `job` | exporter 类型 | `node`、`xray`、`blackbox` |
 | `instance` | 实际抓取端点 | `host:port` |
 | `node_id` | 稳定、非敏感节点 ID | `normal-01` |
-| `node_role` | 节点角色 | `normal_dataplane`、`ai_dataplane` |
+| `node_role` | 节点角色 | `normal_data_plane`、`ai_data_plane` |
 | `environment` | 环境 | `production`、`staging` |
 | `region` | 部署区域 | 受控枚举 |
 

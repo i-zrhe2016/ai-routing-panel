@@ -9,13 +9,19 @@
 ## 生成流程
 
 1. 验证 Prometheus 可用性、必需 labels 和 target 唯一性。
-2. 对前一自然日执行版本化 range queries，计算覆盖率与 counter reset。
+2. 对前一自然日执行版本化 range queries，计算覆盖率、counter reset 和两个数据面的日流量增量。
 3. 将标准化指标交给确定性规则；缺失数据保持 `unknown`。
 4. 从同一份已校验结果生成 JSON 和 Markdown，并原子发布。
 5. 将 Markdown 和 JSON 复制到仓库内 `ops-daily-reports/<year>/`，只提交该目录并推送到 GitHub。
 6. 仅把本次运行元数据和报告归档索引写入 SQLite。
 
 Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注缺口的规则报告；无法校验规则结果或无法原子发布时，本次运行失败且不发布半份报告。
+
+## 数据面流量
+
+每个节点段落都会展示普通数据面和 AI 数据面的日总流量、入站流量、出站流量、网络流量覆盖率和计入接口列表。流量来源为 Prometheus 中 `job="data-plane-node"` 的 `node_network_receive_bytes_total` 与 `node_network_transmit_bytes_total`，按 `node_role` 分别汇总。
+
+日报只计入数据面主机上的公网/物理网络接口前缀：`eth`、`ens`、`enp`、`eno`、`enx`、`bond`、`wan`。`lo`、Docker bridge、veth、Tailscale 等虚拟或管理链路不会进入日报总流量，避免把监控隧道和容器内部转发重复计数。
 
 ## GitHub 归档
 

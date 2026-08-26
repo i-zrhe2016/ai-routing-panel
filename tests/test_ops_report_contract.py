@@ -32,17 +32,20 @@ def _node(role, status="normal", breaches=None):
         "status": status,
         "service": {
             "coverage_ratio": 1.0,
-            "sample_coverage_ratio": 1.0,
-            "prometheus_coverage_ratio": 0.0,
+            "prometheus_coverage_ratio": 1.0,
+            "target_coverage_ratio": 1.0,
             "downtime_intervals": [],
             "restart_events": 0,
         },
         "traffic": {
-            "status": "continuous",
+            "status": "demand_observed",
             "coverage_ratio": 1.0,
-            "accepted_events": 2,
-            "maximum_gap_seconds": 300,
-            "gaps": [],
+            "demand_increases": 2,
+            "network_received_bytes": 1024,
+            "network_transmitted_bytes": 2048,
+            "network_total_bytes": 3072,
+            "network_coverage_ratio": 1.0,
+            "network_devices": ["eth0"],
         },
         "telemetry": {"coverage_ratio": 1.0, "missing_sources": [], "recorded_gaps": 0},
         "resources": {"threshold_breaches": breaches or []},
@@ -171,6 +174,9 @@ def test_packaged_report_schema_matches_contract_root():
     assert schema["$schema"].endswith("2020-12/schema")
     assert set(schema["required"]) == ROOT_FIELDS
     assert schema["properties"]["schema_version"]["const"] == "1.0"
+    traffic_properties = schema["$defs"]["node"]["properties"]["traffic"]["properties"]
+    assert "network_total_bytes" in traffic_properties
+    assert "network_devices" in traffic_properties
     assert files("components.xray_ops").joinpath("schemas/model-analysis.schema.json").is_file()
 
 
@@ -181,6 +187,7 @@ def test_rules_only_versions_and_markdown_section_order(monkeypatch):
     assert report["prompt_version"] is None
     assert report["model_output_schema_version"] is None
     assert "Codex 不可用" in markdown
+    assert "数据面总流量：3.00 KiB" in markdown
     headings = [
         "## 执行摘要",
         "## 普通数据面",

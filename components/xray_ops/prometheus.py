@@ -31,6 +31,8 @@ DEFAULT_METRICS = (
     "node_memory_MemTotal_bytes",
     "node_filesystem_avail_bytes",
     "node_filesystem_size_bytes",
+    "node_network_receive_bytes_total",
+    "node_network_transmit_bytes_total",
     "container_cpu_usage_seconds_total",
     "container_memory_working_set_bytes",
     "container_spec_memory_limit_bytes",

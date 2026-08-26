@@ -19,6 +19,7 @@ CPU_PRESSURE_PERCENT = 95.0
 MEMORY_AVAILABLE_PRESSURE_RATIO = 0.10
 ROOT_DISK_PRESSURE_RATIO = 0.90
 RESOURCE_DURATION_SECONDS = 900
+NETWORK_TRAFFIC_DEVICE_PREFIXES = ("eth", "ens", "enp", "eno", "enx", "bond", "wan")
 RULE_PARAMETERS = {
     "scrape_step_seconds": SCRAPE_STEP_SECONDS,
     "service_down_min_samples": SERVICE_DOWN_MIN_SAMPLES,
@@ -113,6 +114,59 @@ def _coverage(points, start, end):
     stamps = {int(t.timestamp()) for t, _, _ in points if start <= t < end}
     expected = max(1, int((end - start).total_seconds() / SCRAPE_STEP_SECONDS))
     return min(1.0, len(stamps) / expected)
+
+
+def _counter_increase(values) -> int:
+    total = 0.0
+    previous = None
+    for value in values:
+        if previous is None:
+            previous = value
+            continue
+        if value >= previous:
+            total += value - previous
+        else:
+            total += value
+        previous = value
+    return max(0, int(round(total)))
+
+
+def _network_device_is_counted(labels: dict[str, str]) -> bool:
+    device = labels.get("device", "")
+    return bool(device) and device.startswith(NETWORK_TRAFFIC_DEVICE_PREFIXES)
+
+
+def _network_counter_points(prom: dict[str, Any], metric: str, role: str, start: datetime, end: datetime):
+    points = []
+    for timestamp, value, labels in _points(prom, metric, role):
+        if not start <= timestamp < end:
+            continue
+        if labels.get("node_role") != role:
+            continue
+        if labels.get("job") and labels["job"] != "data-plane-node":
+            continue
+        if not _network_device_is_counted(labels):
+            continue
+        points.append((timestamp, value, labels))
+    return points
+
+
+def _network_bytes(points) -> int:
+    by_series = {}
+    for _timestamp, value, labels in points:
+        by_series.setdefault(tuple(sorted(labels.items())), []).append(value)
+    return sum(_counter_increase(values) for values in by_series.values())
+
+
+def _network_devices(*point_groups) -> list[str]:
+    return sorted(
+        {
+            labels["device"]
+            for points in point_groups
+            for _timestamp, _value, labels in points
+            if labels.get("device")
+        }
+    )
 
 
 def _intervals(points, predicate, min_samples=2):
@@ -269,11 +323,14 @@ def _classify(role, start, end, prom, route_events, evidence):
             rules.append({"rule_id": "OPS-F004", "evidence_ids": [eid], **interval.as_dict()})
             fault = True
     # Counter increases represent observed demand; a flat counter means no demand, not a fault.
-    traffic = []
+    panel_traffic = []
     if role == NORMAL_DATA_PLANE:
-        traffic = _points(prom, "xray_panel_port_traffic_bytes_total") + _points(
+        panel_traffic = _points(prom, "xray_panel_port_traffic_bytes_total") + _points(
             prom, "xray_panel_port_connections_total"
         )
+    network_received = _network_counter_points(prom, "node_network_receive_bytes_total", role, start, end)
+    network_transmitted = _network_counter_points(prom, "node_network_transmit_bytes_total", role, start, end)
+    traffic = panel_traffic + network_received + network_transmitted
     traffic_coverage = _coverage(traffic, start, end)
     increases = 0
     by_series = {}
@@ -331,6 +388,11 @@ def _classify(role, start, end, prom, route_events, evidence):
             "status": traffic_status,
             "coverage_ratio": round(traffic_coverage, 6),
             "demand_increases": increases,
+            "network_received_bytes": _network_bytes(network_received),
+            "network_transmitted_bytes": _network_bytes(network_transmitted),
+            "network_total_bytes": _network_bytes(network_received) + _network_bytes(network_transmitted),
+            "network_coverage_ratio": round(_coverage(network_received + network_transmitted, start, end), 6),
+            "network_devices": _network_devices(network_received, network_transmitted),
         },
         "telemetry": {"coverage_ratio": round(coverage, 6), "missing_sources": missing, "recorded_gaps": 0},
         "resources": {"threshold_breaches": []},

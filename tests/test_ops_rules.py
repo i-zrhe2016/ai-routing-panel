@@ -12,13 +12,32 @@ def _series(values, labels=None):
     ]
 
 
+def _network_series(role, direction, values, device="eth0"):
+    metric = "node_network_receive_bytes_total" if direction == "receive" else "node_network_transmit_bytes_total"
+    return metric, _series(
+        values,
+        {
+            "node_role": role,
+            "job": "data-plane-node",
+            "environment": "production",
+            "device": device,
+        },
+    )
+
+
 def _metrics(running=1, traffic=0, *, scrape=True):
     values = [running] * 20
+    normal_rx_metric, normal_rx = _network_series("normal_data_plane", "receive", [0] * 20)
+    normal_tx_metric, normal_tx = _network_series("normal_data_plane", "transmit", [0] * 20)
+    _ai_rx_metric, ai_rx = _network_series("ai_data_plane", "receive", [0] * 20)
+    _ai_tx_metric, ai_tx = _network_series("ai_data_plane", "transmit", [0] * 20)
     metrics = {
         "xray_panel_data_plane_running": _series(values, {"role": "control_plane"}),
         "xray_panel_ai_node_running": _series(values, {"role": "control_plane"}),
         "xray_panel_port_traffic_bytes_total": _series([traffic] * 20),
         "xray_panel_port_connections_total": _series([0] * 20),
+        normal_rx_metric: [*normal_rx, *ai_rx],
+        normal_tx_metric: [*normal_tx, *ai_tx],
     }
     if scrape:
         metrics["up"] = [
@@ -40,8 +59,32 @@ def test_no_demand_is_not_a_fault():
     traffic_by_role = {node["node_role"]: node["traffic"]["status"] for node in result["nodes"]}
     assert traffic_by_role == {
         "normal_data_plane": "no_observed_demand",
-        "ai_data_plane": "unknown",
+        "ai_data_plane": "no_observed_demand",
     }
+
+
+def test_network_traffic_totals_are_reported_per_data_plane():
+    metrics = _metrics()
+    normal_rx_metric, normal_rx = _network_series("normal_data_plane", "receive", [100, 150, 180] + [180] * 17)
+    normal_tx_metric, normal_tx = _network_series("normal_data_plane", "transmit", [10, 30, 70] + [70] * 17)
+    _ai_rx_metric, ai_rx = _network_series("ai_data_plane", "receive", [1000, 1100, 1200] + [1200] * 17)
+    _ai_tx_metric, ai_tx = _network_series("ai_data_plane", "transmit", [2000, 2300, 2600] + [2600] * 17)
+    _ignored_metric, ignored_loopback = _network_series("ai_data_plane", "receive", [0, 999, 999] + [999] * 17, "lo")
+    metrics[normal_rx_metric] = [*normal_rx, *ai_rx, *ignored_loopback]
+    metrics[normal_tx_metric] = [*normal_tx, *ai_tx]
+
+    result = classify_report(window_start=START, window_end=END, prometheus=metrics)
+    by_role = {node["node_role"]: node["traffic"] for node in result["nodes"]}
+
+    assert by_role["normal_data_plane"]["network_received_bytes"] == 80
+    assert by_role["normal_data_plane"]["network_transmitted_bytes"] == 60
+    assert by_role["normal_data_plane"]["network_total_bytes"] == 140
+    assert by_role["normal_data_plane"]["network_devices"] == ["eth0"]
+    assert by_role["ai_data_plane"]["network_received_bytes"] == 200
+    assert by_role["ai_data_plane"]["network_transmitted_bytes"] == 600
+    assert by_role["ai_data_plane"]["network_total_bytes"] == 800
+    assert by_role["ai_data_plane"]["network_devices"] == ["eth0"]
+    assert by_role["ai_data_plane"]["status"] == "demand_observed"
 
 
 def test_prometheus_down_samples_confirm_fault_without_sqlite_inputs():

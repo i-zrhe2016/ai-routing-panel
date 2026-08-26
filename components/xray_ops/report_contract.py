@@ -184,11 +184,27 @@ def _node_label(role: str) -> str:
     return "普通数据面" if role == "normal_data_plane" else "AI 数据面"
 
 
+def _format_bytes(value: Any) -> str:
+    try:
+        size = max(0, int(value))
+    except (TypeError, ValueError):
+        return "—"
+    units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+    amount = float(size)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{size} B"
+            return f"{amount:.2f} {unit}"
+        amount /= 1024
+
+
 def _render_node(node: dict[str, Any]) -> list[str]:
     service = node.get("service") or {}
     traffic = node.get("traffic") or {}
     telemetry = node.get("telemetry") or {}
     rules = node.get("matched_rules") or []
+    network_devices = traffic.get("network_devices") or []
     lines = [
         f"## {_node_label(node['node_role'])}",
         "",
@@ -197,6 +213,11 @@ def _render_node(node: dict[str, Any]) -> list[str]:
         f"- 流量状态：`{traffic.get('status', 'unknown')}`",
         f"- 流量指标覆盖率：{float(traffic.get('coverage_ratio', 0)):.1%}",
         f"- 观测到的需求增量：{int(traffic.get('demand_increases', 0))}",
+        f"- 数据面总流量：{_format_bytes(traffic.get('network_total_bytes'))}"
+        f"（入站 {_format_bytes(traffic.get('network_received_bytes'))} / "
+        f"出站 {_format_bytes(traffic.get('network_transmitted_bytes'))}）",
+        f"- 数据面流量覆盖率：{float(traffic.get('network_coverage_ratio', 0)):.1%}",
+        f"- 计入网络接口：{', '.join(network_devices) or '无'}",
         f"- 数据缺口来源：{', '.join(telemetry.get('missing_sources', [])) or '无'}",
         "",
         "### 命中规则",

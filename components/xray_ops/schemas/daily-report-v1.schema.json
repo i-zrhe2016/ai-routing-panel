@@ -206,7 +206,16 @@
           "properties": {
             "status": {"enum": ["demand_observed", "no_observed_demand", "unknown"]},
             "coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-            "demand_increases": {"type": "integer", "minimum": 0}
+            "demand_increases": {"type": "integer", "minimum": 0},
+            "network_received_bytes": {"type": "integer", "minimum": 0},
+            "network_transmitted_bytes": {"type": "integer", "minimum": 0},
+            "network_total_bytes": {"type": "integer", "minimum": 0},
+            "network_coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+            "network_devices": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true
+            }
           }
         },
         "telemetry": {
