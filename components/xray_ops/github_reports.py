@@ -258,7 +258,7 @@ class GitHubReportPublisher:
         upstream = self._upstream(repo_dir)
         if not upstream:
             return
-        self._git(repo_dir, "fetch", "--quiet", self.config.remote, branch, env=self._push_env())
+        self._git(repo_dir, "fetch", "--quiet", self.config.remote, branch, env=self._push_env(repo_dir))
         _ahead, behind = self._ahead_behind(repo_dir)
         if not behind:
             return
@@ -273,7 +273,7 @@ class GitHubReportPublisher:
         if upstream and ahead <= 0:
             return {"pushed": False, "push_status": "up_to_date", "ahead_after": ahead}
 
-        env = self._push_env()
+        env = self._push_env(repo_dir)
         if upstream:
             self._git(repo_dir, "push", env=env)
         else:
@@ -281,11 +281,15 @@ class GitHubReportPublisher:
         ahead_after = self._ahead_count(repo_dir)
         return {"pushed": True, "push_status": "pushed", "ahead_after": ahead_after}
 
-    def _push_env(self) -> dict[str, str]:
+    def _push_env(self, repo_dir: Path | None = None) -> dict[str, str]:
         env: dict[str, str] = {}
         if not self.config.github_token:
             return env
-        askpass_dir = Path(tempfile.gettempdir()) / "xray-ops-git-askpass"
+        askpass_dir = (
+            repo_dir / ".git" / "xray-ops-askpass"
+            if repo_dir is not None
+            else Path(tempfile.gettempdir()) / "xray-ops-git-askpass"
+        )
         askpass_dir.mkdir(mode=0o700, exist_ok=True)
         askpass = askpass_dir / "askpass.sh"
         askpass.write_text(

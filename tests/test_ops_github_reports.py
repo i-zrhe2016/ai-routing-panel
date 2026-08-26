@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -111,3 +112,17 @@ def test_github_report_publisher_fast_forwards_clean_repo_before_commit(tmp_path
         "ops-daily-reports/README.md",
     }
     assert _git(repo, "show", "--name-only", "--format=", "HEAD^").strip() == "remote.txt"
+
+
+def test_github_report_publisher_askpass_uses_repo_git_directory(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    publisher = GitHubReportPublisher(
+        GitHubReportPublisherConfig(enabled=True, repo_dir=str(repo), github_token="token")
+    )
+
+    env = publisher._push_env(repo)
+    askpass = Path(env["GIT_ASKPASS"])
+
+    assert askpass.parent == repo / ".git" / "xray-ops-askpass"
+    assert os.access(askpass, os.X_OK)
