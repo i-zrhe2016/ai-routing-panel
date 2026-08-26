@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterator
 from zoneinfo import ZoneInfo
 
 from .codex_runner import CodexAnalysisError, CodexRunner, CodexRunnerConfig
+from .github_reports import GitHubReportPublisher, GitHubReportPublisherConfig
 from .models import format_timestamp, parse_timestamp, stable_id, utc_now
 from .prometheus import DEFAULT_METRICS, PrometheusClient, PrometheusResult
 from .redaction import redact_value
@@ -71,6 +72,7 @@ class ReporterConfig:
     report_retention_days: int
     scheduler_interval_seconds: int
     force_rules_only: bool
+    github_reports: GitHubReportPublisherConfig
     codex: CodexRunnerConfig
 
     @classmethod
@@ -89,6 +91,7 @@ class ReporterConfig:
             report_retention_days=_env_int("OPS_REPORT_RETENTION_DAYS", 90),
             scheduler_interval_seconds=_env_int("OPS_REPORT_SCHEDULER_INTERVAL_SECONDS", 60, minimum=10),
             force_rules_only=_env_bool("OPS_FORCE_RULES_ONLY", False),
+            github_reports=GitHubReportPublisherConfig.from_env(),
             codex=CodexRunnerConfig.from_env(),
         )
 
@@ -270,6 +273,7 @@ class ReporterService:
                 bearer_token=config.prometheus_bearer_token,
             )
         )
+        self.github_publisher = GitHubReportPublisher(config.github_reports)
 
     def initialize(self) -> None:
         self.store.initialize()
@@ -302,6 +306,7 @@ class ReporterService:
         end_utc = end_local.astimezone(ZoneInfo("UTC"))
         started = utc_now()
         run_id = stable_id("report", report_date.isoformat(), format_timestamp(started), os.getpid(), time.monotonic_ns())
+        publish_status: dict[str, Any] = {"status": "disabled"}
 
         with report_lock(self.config.lock_path):
             if skip_if_complete and self._is_complete(report_date.isoformat()):
@@ -458,6 +463,11 @@ class ReporterService:
                     error_class=type(exc).__name__,
                 )
 
+        publish_status = self._publish_report(
+            report_date.isoformat(),
+            output["json_path"],
+            output["markdown_path"],
+        )
         _emit(
             "report_completed",
             run_id=run_id,
@@ -467,9 +477,28 @@ class ReporterService:
             json_path=output["json_path"],
             markdown_path=output["markdown_path"],
             reports_deleted=deleted,
+            github_publish_status=publish_status.get("status", "unknown"),
+            github_push_status=publish_status.get("push_status", ""),
             duration_seconds=round((utc_now() - started).total_seconds(), 3),
         )
         return report
+
+    def _publish_report(self, report_date_text: str, json_path: str, markdown_path: str) -> dict[str, Any]:
+        if not self.config.github_reports.enabled:
+            return {"status": "disabled"}
+        try:
+            status = self.github_publisher.publish_report(report_date_text, json_path, markdown_path)
+        except Exception as exc:
+            status = {
+                "status": "failed",
+                "error_class": type(exc).__name__,
+                "detail": str(redact_value(str(exc)))[:500],
+            }
+            _emit("report_github_publish_failed", report_date=report_date_text, **status)
+            return status
+        if status.get("status") != "no_changes":
+            _emit("report_github_publish_completed", report_date=report_date_text, **status)
+        return status
 
     def run_forever(self) -> None:
         self.initialize()
@@ -489,6 +518,14 @@ class ReporterService:
                 if not self._is_complete(report_date_text):
                     self.store.set_service_heartbeat("daily_reporter", "overdue", report_date_text)
                     self.run_for_date(scheduled_report_date, skip_if_complete=True)
+                elif self.config.github_reports.enabled:
+                    completed = self.store.latest_successful_report(report_date_text)
+                    if completed and completed.get("json_path") and completed.get("markdown_path"):
+                        self._publish_report(
+                            report_date_text,
+                            str(completed["json_path"]),
+                            str(completed["markdown_path"]),
+                        )
                 self.store.set_service_heartbeat("daily_reporter", "healthy", report_date_text)
             except Exception as exc:
                 self.store.set_service_heartbeat("daily_reporter", "degraded", type(exc).__name__)

@@ -40,7 +40,7 @@ ARG CODEX_CLI_VERSION=0.145.0
 ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex /usr/local/bin/codex
 RUN chmod 0755 /usr/local/bin/codex
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bubblewrap \
+    && apt-get install -y --no-install-recommends bubblewrap git openssh-client \
     && rm -rf /var/lib/apt/lists/*
 RUN codex --version
 

@@ -1,0 +1,449 @@
+{
+  "collection_health": {
+    "gaps": [
+      {
+        "error_class": "prometheus_scrape_gap",
+        "node_role": "ai_data_plane",
+        "source": "prometheus:target_scrape"
+      }
+    ],
+    "node_coverage": {
+      "ai_data_plane": 0.998611,
+      "normal_data_plane": 0.998611
+    },
+    "overall_coverage_ratio": 0.998611,
+    "sources": [
+      {
+        "configured": true,
+        "error_class": "route_history_partial",
+        "files": 1123,
+        "invalid_files": 1,
+        "source": "ai_routing_history",
+        "success": false
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:up",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_data_plane_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_ai_node_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:xray_panel_port_reachable",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:xray_panel_port_probe_timestamp_seconds",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 14,
+        "source": "prometheus:xray_panel_port_traffic_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:xray_panel_port_connections_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_target_info",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_last_probe_healthy",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_consecutive_failures",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 24,
+        "source": "prometheus:node_cpu_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 3,
+        "source": "prometheus:node_memory_MemAvailable_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 3,
+        "source": "prometheus:node_memory_MemTotal_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_filesystem_avail_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_filesystem_size_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_cpu_usage_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_memory_working_set_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_spec_memory_limit_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_last_seen",
+        "success": true
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "attributes": {
+        "duration_seconds": 90,
+        "ended_at": "2026-08-07T01:32:30.000000Z",
+        "samples": 3,
+        "started_at": "2026-08-07T01:31:00.000000Z"
+      },
+      "evidence_id": "ev-1b291878347729482c5d760a",
+      "evidence_type": "service_state",
+      "node_role": "ai_data_plane",
+      "observed_at": "2026-08-07T01:31:00.000000Z",
+      "source": "prometheus:xray_panel_ai_node_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    },
+    {
+      "attributes": {
+        "duration_seconds": 60,
+        "ended_at": "2026-08-07T01:34:00.000000Z",
+        "samples": 2,
+        "started_at": "2026-08-07T01:33:00.000000Z"
+      },
+      "evidence_id": "ev-106b0e01fa215d9d87de9d7c",
+      "evidence_type": "service_state",
+      "node_role": "ai_data_plane",
+      "observed_at": "2026-08-07T01:33:00.000000Z",
+      "source": "prometheus:xray_panel_ai_node_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    },
+    {
+      "attributes": {
+        "duration_seconds": 90,
+        "ended_at": "2026-08-07T02:52:30.000000Z",
+        "samples": 3,
+        "started_at": "2026-08-07T02:51:00.000000Z"
+      },
+      "evidence_id": "ev-6e75072a07a8e60140402213",
+      "evidence_type": "service_state",
+      "node_role": "ai_data_plane",
+      "observed_at": "2026-08-07T02:51:00.000000Z",
+      "source": "prometheus:xray_panel_ai_node_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    },
+    {
+      "attributes": {
+        "duration_seconds": 60,
+        "ended_at": "2026-08-07T13:36:30.000000Z",
+        "samples": 2,
+        "started_at": "2026-08-07T13:35:30.000000Z"
+      },
+      "evidence_id": "ev-c9343b0edf7534dd82814ee7",
+      "evidence_type": "service_state",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-07T13:35:30.000000Z",
+      "source": "prometheus:xray_panel_data_plane_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    }
+  ],
+  "generated_at": "2026-08-08T00:10:22+08:00",
+  "generation_health": {
+    "atomic_write": "success",
+    "codex": "failed",
+    "codex_attempts": 1,
+    "codex_error_class": "codex_auth_failed",
+    "codex_input": null,
+    "codex_usage": null,
+    "json_schema": "valid",
+    "markdown": "success",
+    "rules": "success"
+  },
+  "generation_mode": "rules_only",
+  "incidents": [
+    {
+      "ended_at": "2026-08-07T01:32:30.000000Z",
+      "evidence_ids": [
+        "ev-1b291878347729482c5d760a"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-0bd9e27f53bc6d419ab89516",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "ai_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-07T01:31:00.000000Z",
+      "status": "fault"
+    },
+    {
+      "ended_at": "2026-08-07T01:34:00.000000Z",
+      "evidence_ids": [
+        "ev-106b0e01fa215d9d87de9d7c"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-b6900f7ec017ada496644a85",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "ai_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-07T01:33:00.000000Z",
+      "status": "fault"
+    },
+    {
+      "ended_at": "2026-08-07T02:52:30.000000Z",
+      "evidence_ids": [
+        "ev-6e75072a07a8e60140402213"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-8f0a2577fef7df44819425a8",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "ai_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-07T02:51:00.000000Z",
+      "status": "fault"
+    },
+    {
+      "ended_at": "2026-08-07T13:36:30.000000Z",
+      "evidence_ids": [
+        "ev-c9343b0edf7534dd82814ee7"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-b19da22e45fd8f5beb66cecb",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-07T13:35:30.000000Z",
+      "status": "fault"
+    }
+  ],
+  "model_analysis": null,
+  "model_output_schema_version": null,
+  "nodes": [
+    {
+      "matched_rules": [
+        {
+          "duration_seconds": 60,
+          "ended_at": "2026-08-07T13:36:30.000000Z",
+          "evidence_ids": [
+            "ev-c9343b0edf7534dd82814ee7"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 2,
+          "started_at": "2026-08-07T13:35:30.000000Z"
+        }
+      ],
+      "node_role": "normal_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 0.998611,
+        "downtime_intervals": [
+          {
+            "duration_seconds": 60,
+            "ended_at": "2026-08-07T13:36:30.000000Z",
+            "samples": 2,
+            "started_at": "2026-08-07T13:35:30.000000Z"
+          }
+        ],
+        "prometheus_coverage_ratio": 0.998611,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "fault",
+      "telemetry": {
+        "coverage_ratio": 0.998611,
+        "missing_sources": [],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 0.998611,
+        "demand_increases": 10686,
+        "status": "demand_observed"
+      }
+    },
+    {
+      "matched_rules": [
+        {
+          "duration_seconds": 90,
+          "ended_at": "2026-08-07T01:32:30.000000Z",
+          "evidence_ids": [
+            "ev-1b291878347729482c5d760a"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 3,
+          "started_at": "2026-08-07T01:31:00.000000Z"
+        },
+        {
+          "duration_seconds": 60,
+          "ended_at": "2026-08-07T01:34:00.000000Z",
+          "evidence_ids": [
+            "ev-106b0e01fa215d9d87de9d7c"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 2,
+          "started_at": "2026-08-07T01:33:00.000000Z"
+        },
+        {
+          "duration_seconds": 90,
+          "ended_at": "2026-08-07T02:52:30.000000Z",
+          "evidence_ids": [
+            "ev-6e75072a07a8e60140402213"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 3,
+          "started_at": "2026-08-07T02:51:00.000000Z"
+        }
+      ],
+      "node_role": "ai_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 0.998611,
+        "downtime_intervals": [
+          {
+            "duration_seconds": 90,
+            "ended_at": "2026-08-07T01:32:30.000000Z",
+            "samples": 3,
+            "started_at": "2026-08-07T01:31:00.000000Z"
+          },
+          {
+            "duration_seconds": 60,
+            "ended_at": "2026-08-07T01:34:00.000000Z",
+            "samples": 2,
+            "started_at": "2026-08-07T01:33:00.000000Z"
+          },
+          {
+            "duration_seconds": 90,
+            "ended_at": "2026-08-07T02:52:30.000000Z",
+            "samples": 3,
+            "started_at": "2026-08-07T02:51:00.000000Z"
+          }
+        ],
+        "prometheus_coverage_ratio": 0.998611,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "fault",
+      "telemetry": {
+        "coverage_ratio": 0.998611,
+        "missing_sources": [
+          "prometheus:target_scrape"
+        ],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 0.0,
+        "demand_increases": 0,
+        "status": "unknown"
+      }
+    }
+  ],
+  "overall_status": "fault",
+  "prompt_version": null,
+  "report_date": "2026-08-07",
+  "rule_parameters": {
+    "cpu_pressure_percent": 95.0,
+    "memory_available_pressure_ratio": 0.1,
+    "resource_duration_seconds": 900,
+    "root_disk_pressure_ratio": 0.9,
+    "scrape_step_seconds": 30,
+    "service_down_min_samples": 2,
+    "telemetry_min_coverage_ratio": 0.9
+  },
+  "rules_version": "2.0",
+  "schema_version": "1.0",
+  "timezone": "Asia/Shanghai",
+  "window_end": "2026-08-08T00:00:00+08:00",
+  "window_start": "2026-08-07T00:00:00+08:00"
+}

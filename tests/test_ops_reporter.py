@@ -8,6 +8,7 @@ from components.xray_ops.codex_runner import (
     CodexRunResult,
     CodexRunnerConfig,
 )
+from components.xray_ops.github_reports import GitHubReportPublisherConfig
 from components.xray_ops.prometheus import PrometheusResult
 from components.xray_ops.reporter import (
     ReporterConfig,
@@ -98,6 +99,7 @@ def _config(tmp_path, route_dir=None):
         report_retention_days=90,
         scheduler_interval_seconds=60,
         force_rules_only=False,
+        github_reports=GitHubReportPublisherConfig(),
         codex=CodexRunnerConfig(
             source_home=tmp_path / "codex-seed",
             runtime_home=tmp_path / "codex-runtime",
