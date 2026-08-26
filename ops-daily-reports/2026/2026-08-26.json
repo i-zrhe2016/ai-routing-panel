@@ -16,7 +16,7 @@
       {
         "configured": true,
         "error_class": "route_history_partial",
-        "files": 1545,
+        "files": 1546,
         "invalid_files": 1,
         "source": "ai_routing_history",
         "success": false
@@ -129,6 +129,20 @@
       {
         "configured": true,
         "error_class": "",
+        "series": 19,
+        "source": "prometheus:node_network_receive_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 19,
+        "source": "prometheus:node_network_transmit_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
         "series": 6,
         "source": "prometheus:container_cpu_usage_seconds_total",
         "success": true
@@ -173,12 +187,12 @@
       "summary": "健康检查失败期间 DNS 目标为非 primary"
     }
   ],
-  "generated_at": "2026-08-27T00:10:21+08:00",
+  "generated_at": "2026-08-27T01:19:23+08:00",
   "generation_health": {
     "atomic_write": "success",
-    "codex": "failed",
-    "codex_attempts": 1,
-    "codex_error_class": "codex_auth_failed",
+    "codex": "skipped",
+    "codex_attempts": 0,
+    "codex_error_class": "",
     "codex_input": null,
     "codex_usage": null,
     "json_schema": "valid",
@@ -243,7 +257,14 @@
       },
       "traffic": {
         "coverage_ratio": 1.0,
-        "demand_increases": 12124,
+        "demand_increases": 17878,
+        "network_coverage_ratio": 0.999306,
+        "network_devices": [
+          "eth0"
+        ],
+        "network_received_bytes": 5694292,
+        "network_total_bytes": 76087247,
+        "network_transmitted_bytes": 70392955,
         "status": "demand_observed"
       }
     },
@@ -267,9 +288,16 @@
         "recorded_gaps": 0
       },
       "traffic": {
-        "coverage_ratio": 0.0,
-        "demand_increases": 0,
-        "status": "unknown"
+        "coverage_ratio": 1.0,
+        "demand_increases": 5758,
+        "network_coverage_ratio": 1.0,
+        "network_devices": [
+          "eth0"
+        ],
+        "network_received_bytes": 8967627591,
+        "network_total_bytes": 17822842687,
+        "network_transmitted_bytes": 8855215096,
+        "status": "demand_observed"
       }
     }
   ],
