@@ -108,6 +108,14 @@ class GitHubReportPublisher:
         if not repo_dir.is_dir() or not (repo_dir / ".git").exists():
             raise RuntimeError("github_reports_repo_missing")
 
+        branch = self._current_branch(repo_dir)
+        target_branch = self.config.branch or branch
+        if not target_branch:
+            raise RuntimeError("github_reports_detached_head")
+        self._ensure_no_conflicts(repo_dir)
+        if self.config.push_enabled:
+            self._sync_upstream(repo_dir, target_branch)
+
         output_subdir = _safe_relative_subdir(self.config.output_subdir)
         year = report_date[:4]
         archive_dir = repo_dir / output_subdir / year
@@ -119,12 +127,6 @@ class GitHubReportPublisher:
             self._ensure_readme(repo_dir / output_subdir),
         ]
         relative_paths = [str(path.relative_to(repo_dir)) for path in targets]
-
-        branch = self._current_branch(repo_dir)
-        target_branch = self.config.branch or branch
-        if not target_branch:
-            raise RuntimeError("github_reports_detached_head")
-        self._ensure_no_conflicts(repo_dir)
 
         ahead_before = self._ahead_count(repo_dir)
         path_status = self._git(repo_dir, "status", "--porcelain", "--", *relative_paths).stdout.strip()
@@ -251,6 +253,18 @@ class GitHubReportPublisher:
         conflicted = self._git(repo_dir, "diff", "--name-only", "--diff-filter=U").stdout.strip()
         if conflicted:
             raise RuntimeError("github_reports_repo_has_conflicts")
+
+    def _sync_upstream(self, repo_dir: Path, branch: str) -> None:
+        upstream = self._upstream(repo_dir)
+        if not upstream:
+            return
+        self._git(repo_dir, "fetch", "--quiet", self.config.remote, branch, env=self._push_env())
+        _ahead, behind = self._ahead_behind(repo_dir)
+        if not behind:
+            return
+        if self._git(repo_dir, "status", "--porcelain").stdout.strip():
+            raise RuntimeError("github_reports_branch_behind_upstream")
+        self._git(repo_dir, "merge", "--ff-only", "--quiet", upstream)
 
     def _push_if_needed(self, repo_dir: Path, branch: str) -> dict[str, Any]:
         self._ensure_not_behind(repo_dir)

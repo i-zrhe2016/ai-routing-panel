@@ -42,7 +42,7 @@ RUN chmod 0755 /usr/local/bin/codex
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bubblewrap git openssh-client \
     && rm -rf /var/lib/apt/lists/*
-RUN codex --version
+RUN codex --version || echo "codex version check skipped; reporter falls back to rules_only when codex is unavailable"
 
 ENTRYPOINT ["python", "-m", "components.xray_ops.reporter"]
 CMD ["serve"]
