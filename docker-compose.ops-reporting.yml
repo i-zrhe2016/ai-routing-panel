@@ -60,11 +60,15 @@ services:
       OPS_GITHUB_REPORTS_AUTHOR_NAME: "${OPS_GITHUB_REPORTS_AUTHOR_NAME:-i-zrhe2016}"
       OPS_GITHUB_REPORTS_AUTHOR_EMAIL: "${OPS_GITHUB_REPORTS_AUTHOR_EMAIL:-zrhe2016@gmail.com}"
       OPS_GITHUB_REPORTS_USERNAME: "${OPS_GITHUB_REPORTS_USERNAME:-x-access-token}"
-      OPS_GITHUB_REPORTS_TOKEN_FILE: "${OPS_GITHUB_REPORTS_TOKEN_FILE:-}"
+      OPS_GITHUB_REPORTS_TOKEN_FILE: "${OPS_GITHUB_REPORTS_TOKEN_FILE:-/run/secrets/github_reports_token}"
     volumes:
       - type: bind
         source: "${OPS_GITHUB_REPORTS_REPO_HOST_DIR:-.}"
         target: /reports-repo
+      - type: bind
+        source: "${OPS_GITHUB_REPORTS_TOKEN_HOST_PATH:-/dev/null}"
+        target: /run/secrets/github_reports_token
+        read_only: true
       - type: bind
         source: "${OPS_DATA_DIR:-./data/xray-ops}"
         target: /data/xray-ops

@@ -42,7 +42,8 @@ ops-daily-reports/
 | `OPS_GITHUB_REPORTS_PUSH_ENABLED` | `1` | 是否执行 `git push`；设为 `0` 时只提交不推送。 |
 | `OPS_GITHUB_REPORTS_AUTHOR_NAME` | `i-zrhe2016` | 自动提交作者。 |
 | `OPS_GITHUB_REPORTS_AUTHOR_EMAIL` | `zrhe2016@gmail.com` | 自动提交邮箱。 |
-| `OPS_GITHUB_REPORTS_TOKEN_FILE` | 空 | 可选 GitHub token 文件路径；HTTPS remote 推送时使用。 |
+| `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` | `/dev/null` | 宿主机上的 GitHub token 文件路径；通过只读挂载进入容器。 |
+| `OPS_GITHUB_REPORTS_TOKEN_FILE` | `/run/secrets/github_reports_token` | 容器内 GitHub token 文件路径；HTTPS remote 推送时使用。 |
 
 发布器只执行这些路径的 `git add` 和 `git commit`：
 
