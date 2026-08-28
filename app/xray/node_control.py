@@ -61,6 +61,7 @@ os.replace(tmp_path, target)
 """
 
 REMOTE_REPLACE_FILE_SCRIPT = """
+import json
 import os
 import pathlib
 import sys
@@ -68,7 +69,12 @@ import sys
 source = pathlib.Path(sys.argv[1])
 target = pathlib.Path(sys.argv[2])
 target.parent.mkdir(parents=True, exist_ok=True)
-os.replace(source, target)
+changed = not target.is_file() or source.read_bytes() != target.read_bytes()
+if changed:
+    os.replace(source, target)
+else:
+    source.unlink(missing_ok=True)
+print(json.dumps({"changed": changed}))
 """
 
 REMOTE_DELETE_FILE_SCRIPT = """
@@ -747,7 +753,7 @@ class DataPlaneController:
                 )
                 if validate_config:
                     self.test_config(config_path=remote_tmp)
-                self._run_remote(
+                replaced = self._run_remote(
                     ["python3", "-c", REMOTE_REPLACE_FILE_SCRIPT, remote_tmp, self.config.config_path],
                     f"{self.config.label} 配置替换失败",
                 )
@@ -757,7 +763,15 @@ class DataPlaneController:
                     f"{self.config.label} 临时配置清理失败",
                 )
                 raise
-            uploaded.append(self.config.config_path)
+            config_changed = True
+            try:
+                replace_result = json.loads(replaced.stdout or "{}")
+                if isinstance(replace_result, dict) and "changed" in replace_result:
+                    config_changed = bool(replace_result["changed"])
+            except json.JSONDecodeError:
+                pass
+            if config_changed:
+                uploaded.append(self.config.config_path)
 
         if self.config.source_panel_ports_path and self.config.panel_ports_path:
             source = self.config.source_panel_ports_path

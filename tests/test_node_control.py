@@ -87,9 +87,29 @@ class NodeControlTest(unittest.TestCase):
             return ["/etc/xray/config.json"]
 
         state.data_plane.sync_generated_files = fake_sync
-        state.xray_config_test()
+        uploaded = state.xray_config_test()
 
         self.assertEqual(calls, [True])
+        self.assertEqual(uploaded, ["/etc/xray/config.json"])
+
+    def test_startup_restarts_remote_data_plane_when_synced_config_changed(self):
+        os.environ["DATAPLANE_SSH_TARGET"] = "root@default-node"
+        os.environ["DATAPLANE_CONFIG_PATH"] = "/etc/xray/config.json"
+        state_module = load_state_module(self.root)
+        state = state_module.PanelState()
+        restarted = []
+
+        state.connect = mock.MagicMock()
+        state.render_panel_ports_payload = lambda conn: {"ports": []}
+        state.write_json_file = lambda path, payload: None
+        state.render_xray_config = lambda: None
+        state.xray_config_test = lambda: ["/etc/xray/config.json"]
+        state.data_plane.supports_restart = lambda: True
+        state.restart_data_plane = lambda: restarted.append(True) or True
+
+        state.write_current_config()
+
+        self.assertEqual(restarted, [True])
 
     def test_remote_command_timeout_is_reported(self):
         controller = DataPlaneController(
@@ -269,6 +289,31 @@ class NodeControlTest(unittest.TestCase):
         self.assertEqual(uploaded, ["/etc/xray/config.json"])
         self.assertEqual(tested_paths, ["/etc/xray/config.codex-tmp.json"])
         self.assertEqual(remote_calls[0][0][-1], "/etc/xray/config.codex-tmp.json")
+
+    def test_remote_sync_does_not_report_unchanged_config(self):
+        source_config = self.root / "config.json"
+        source_config.write_text("{}", encoding="utf-8")
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                config_path="/etc/xray/config.json",
+                source_config_path=source_config,
+            )
+        )
+
+        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
+            if args[-1] == "/etc/xray/config.json":
+                return SimpleNamespace(returncode=0, stdout='{"changed": false}', stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        controller._run_remote = fake_run_remote
+        controller.test_config = lambda config_path=None: None
+
+        uploaded = controller.sync_generated_files(validate_config=True)
+
+        self.assertEqual(uploaded, [])
 
     def test_remote_dynamic_routing_sync_updates_local_copy(self):
         local_path = self.root / "dynamic-routing.json"

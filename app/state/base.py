@@ -537,7 +537,7 @@ class CoreService:
             self._panel.write_json_file(XRAY_PANEL_PORTS_PATH, self._panel.render_panel_ports_payload(conn))
         self._panel.render_xray_config()
         try:
-            self._panel.xray_config_test()
+            changed_paths = self._panel.xray_config_test() or []
         except RuntimeError as exc:
             if not self._panel.data_plane.is_remote:
                 raise
@@ -547,6 +547,31 @@ class CoreService:
                 actor_type="system",
                 resource_type="node",
                 resource_id="data_plane",
+                exc=exc,
+            )
+            return
+
+        config_path = str(self._panel.data_plane.config.config_path or "")
+        if config_path not in changed_paths or not self._panel.data_plane.supports_restart():
+            return
+        try:
+            if not self._panel.restart_data_plane():
+                raise RuntimeError("数据面配置已更新，但 Xray 未能重载。")
+            emit_business_event(
+                "node.data_plane.restarted",
+                actor_type="system",
+                resource_type="node",
+                resource_id="data_plane",
+                metadata={"reason": "startup_config_changed"},
+            )
+        except RuntimeError as exc:
+            emit_business_event(
+                "node.data_plane.restarted",
+                result="failure",
+                actor_type="system",
+                resource_type="node",
+                resource_id="data_plane",
+                error_code="startup_reload_failed",
                 exc=exc,
             )
     def write_json_file(self, path, payload):
@@ -617,9 +642,9 @@ class CoreService:
         return self._panel.data_plane.sync_generated_files(validate_config=True)
     def xray_config_test(self):
         if self._panel.data_plane.supports_sync():
-            self._panel.sync_data_plane_artifacts()
-            return
+            return self._panel.sync_data_plane_artifacts()
         self._panel.data_plane.test_config()
+        return []
     def restart_data_plane(self):
         return self._panel.data_plane.restart()
     def ai_node_status(self):
