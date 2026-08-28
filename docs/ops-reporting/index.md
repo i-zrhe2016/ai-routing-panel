@@ -1,18 +1,18 @@
-# Prometheus-only 节点运维分析
+# Prometheus 与脱敏归因节点运维分析
 
-> 状态：Prometheus-only 采集与影子日报已部署，正式验收待完成
+> 状态：Prometheus 采集、脱敏归因快照与影子日报已部署，正式验收待完成
 > 权威范围：本专题边界与模块导航
-> 最后核验日期：2026-08-05
+> 最后核验日期：2026-08-26
 
-本专题只使用 Prometheus 时序指标生成普通数据面与 AI 数据面的运维结论和日报。
+本专题使用 Prometheus 时序指标生成普通数据面与 AI 数据面的运维结论和日报，并可用脱敏 Xray counter 快照补充 user/inbound 流量归因。
 
 ## 强制边界
 
-- 不通过 SSH 登录节点，不远程执行命令。
+- Reporter 不通过 SSH 登录节点，不远程执行命令；可选归因采样器只执行固定 stats 读取命令。
 - 不读取、复制、解析或保存 Xray、systemd、Docker 等原始日志。
 - 节点只部署指标 exporter；控制面通过 Prometheus HTTP API 查询聚合后的指标。
 - exporter 端口只允许 Prometheus 抓取源访问，不向公网开放。
-- SQLite 不保存遥测、日志或规则证据，只保留报告运行审计与历史报告归档索引。
+- SQLite 不保存原始日志或规则证据；归因采样只保存盐化 HMAC 后的 user/inbound 引用和 counter 值。
 - 规则只能判断指标能够证明的运行、可达性、流量连续性和资源风险，不能推断日志级根因。
 
 ![Prometheus-only 监控与日报架构](diagrams/monitoring-reporting.svg)

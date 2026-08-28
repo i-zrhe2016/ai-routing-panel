@@ -98,6 +98,7 @@ def _config(tmp_path, route_dir=None):
         ai_routing_report_dir=str(route_dir or (tmp_path / "missing-route-history")),
         report_retention_days=90,
         scheduler_interval_seconds=60,
+        xray_stats_window_padding_seconds=900,
         force_rules_only=False,
         github_reports=GitHubReportPublisherConfig(),
         codex=CodexRunnerConfig(

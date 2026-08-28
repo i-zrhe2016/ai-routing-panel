@@ -87,6 +87,87 @@ def test_network_traffic_totals_are_reported_per_data_plane():
     assert by_role["ai_data_plane"]["status"] == "demand_observed"
 
 
+def test_xray_stats_samples_add_sanitized_user_and_inbound_attribution():
+    samples = []
+    for observed_at, user_uplink, user_downlink, inbound_uplink, inbound_downlink in (
+        (START, 100, 300, 100, 300),
+        (START + timedelta(minutes=5), 700, 1300, 700, 1300),
+    ):
+        for entity_type, entity_ref, uplink, downlink in (
+            ("user", "usr-0123456789abcdef", user_uplink, user_downlink),
+            ("inbound", "inb-fedcba9876543210", inbound_uplink, inbound_downlink),
+        ):
+            for direction, value in (("uplink", uplink), ("downlink", downlink)):
+                samples.append(
+                    {
+                        "sample_id": f"{entity_type}-{direction}-{observed_at.timestamp()}",
+                        "node_role": "ai_data_plane",
+                        "source_id": "ai-xray",
+                        "observed_at": observed_at.isoformat(),
+                        "collected_at": observed_at.isoformat(),
+                        "entity_type": entity_type,
+                        "entity_ref": entity_ref,
+                        "direction": direction,
+                        "value": value,
+                    }
+                )
+
+    result = classify_report(window_start=START, window_end=END, prometheus=_metrics(), xray_traffic_samples=samples)
+    ai = next(node for node in result["nodes"] if node["node_role"] == "ai_data_plane")
+
+    assert ai["traffic"]["attribution"] == [
+        {
+            "source_id": "ai-xray",
+            "entity_type": "user",
+            "entity_ref": "usr-0123456789abcdef",
+            "uplink_bytes": 600,
+            "downlink_bytes": 1000,
+            "total_bytes": 1600,
+            "sample_count": 2,
+            "first_sample_at": "2030-01-02T00:00:00.000000Z",
+            "last_sample_at": "2030-01-02T00:05:00.000000Z",
+            "counter_resets": 0,
+        },
+        {
+            "source_id": "ai-xray",
+            "entity_type": "inbound",
+            "entity_ref": "inb-fedcba9876543210",
+            "uplink_bytes": 600,
+            "downlink_bytes": 1000,
+            "total_bytes": 1600,
+            "sample_count": 2,
+            "first_sample_at": "2030-01-02T00:00:00.000000Z",
+            "last_sample_at": "2030-01-02T00:05:00.000000Z",
+            "counter_resets": 0,
+        },
+    ]
+
+
+def test_xray_attribution_handles_counter_resets():
+    samples = []
+    for index, value in enumerate((1000, 200, 450)):
+        observed_at = START + timedelta(minutes=index)
+        samples.append(
+            {
+                "sample_id": f"reset-{index}",
+                "node_role": "ai_data_plane",
+                "source_id": "ai-xray",
+                "observed_at": observed_at.isoformat(),
+                "collected_at": observed_at.isoformat(),
+                "entity_type": "user",
+                "entity_ref": "usr-0123456789abcdef",
+                "direction": "uplink",
+                "value": value,
+            }
+        )
+
+    result = classify_report(window_start=START, window_end=END, prometheus=_metrics(), xray_traffic_samples=samples)
+    ai = next(node for node in result["nodes"] if node["node_role"] == "ai_data_plane")
+
+    assert ai["traffic"]["attribution"][0]["uplink_bytes"] == 450
+    assert ai["traffic"]["attribution"][0]["counter_resets"] == 1
+
+
 def test_prometheus_down_samples_confirm_fault_without_sqlite_inputs():
     metrics = _metrics()
     metrics["xray_panel_data_plane_running"] = _series([1, 0, 0] + [1] * 17, {"role": "control_plane"})

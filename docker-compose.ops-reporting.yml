@@ -35,6 +35,7 @@ services:
       OPS_REPORT_LOCK_PATH: /data/xray-ops/reporter.lock
       OPS_REPORT_RETENTION_DAYS: "90"
       OPS_REPORT_SCHEDULER_INTERVAL_SECONDS: "60"
+      OPS_XRAY_STATS_WINDOW_PADDING_SECONDS: "${OPS_XRAY_STATS_WINDOW_PADDING_SECONDS:-900}"
       OPS_PROMETHEUS_URL: "${OPS_PROMETHEUS_URL:-http://127.0.0.1:9090}"
       OPS_PROMETHEUS_TIMEOUT_SECONDS: "10"
       OPS_AI_ROUTING_REPORT_DIR: /inputs/ai-routing
@@ -95,3 +96,58 @@ services:
       timeout: 10s
       retries: 3
       start_period: 420s
+
+  xray-ops-attribution-sampler:
+    <<: *service-hardening
+    build:
+      context: .
+      dockerfile: components/xray_ops/Dockerfile
+      target: reporter
+    image: xray-ops-daily-reporter:local
+    container_name: xray-ops-attribution-sampler
+    entrypoint: ["python", "-m", "components.xray_ops.xray_stats"]
+    command: ["serve"]
+    stop_grace_period: 60s
+    mem_limit: 128m
+    environment:
+      OPS_DB_PATH: /data/xray-ops/ops.db
+      OPS_XRAY_STATS_ENABLED: "${OPS_XRAY_STATS_ENABLED:-0}"
+      OPS_XRAY_STATS_SAMPLE_INTERVAL_SECONDS: "${OPS_XRAY_STATS_SAMPLE_INTERVAL_SECONDS:-300}"
+      OPS_XRAY_STATS_TIMEOUT_SECONDS: "${OPS_XRAY_STATS_TIMEOUT_SECONDS:-15}"
+      OPS_XRAY_STATS_REDACTION_SALT_FILE: /data/xray-ops/xray-stats-redaction-salt
+      OPS_XRAY_STATS_SSH_KEY_FILE: /run/secrets/xray_stats_ssh_key
+      OPS_XRAY_STATS_AI_ENABLED: "${OPS_XRAY_STATS_AI_ENABLED:-0}"
+      OPS_XRAY_STATS_AI_SOURCE_ID: "${OPS_XRAY_STATS_AI_SOURCE_ID:-ai-xray}"
+      OPS_XRAY_STATS_AI_SSH_TARGET: "${OPS_XRAY_STATS_AI_SSH_TARGET:-}"
+      OPS_XRAY_STATS_AI_KNOWN_HOSTS: /run/secrets/xray_stats_ai_known_hosts
+      OPS_XRAY_STATS_AI_SSH_OPTIONS: "${OPS_XRAY_STATS_AI_SSH_OPTIONS:-}"
+      OPS_XRAY_STATS_AI_CONTAINER: "${OPS_XRAY_STATS_AI_CONTAINER:-xray}"
+      OPS_XRAY_STATS_AI_DOCKER_BIN: "${OPS_XRAY_STATS_AI_DOCKER_BIN:-docker}"
+      OPS_XRAY_STATS_AI_METRICS_PORT: "${OPS_XRAY_STATS_AI_METRICS_PORT:-31097}"
+    volumes:
+      - type: bind
+        source: "${OPS_DATA_DIR:-./data/xray-ops}"
+        target: /data/xray-ops
+      - type: bind
+        source: "${OPS_XRAY_STATS_SSH_KEY_HOST_PATH:-/dev/null}"
+        target: /run/secrets/xray_stats_ssh_key
+        read_only: true
+      - type: bind
+        source: "${OPS_XRAY_STATS_AI_KNOWN_HOSTS_HOST_PATH:-/dev/null}"
+        target: /run/secrets/xray_stats_ai_known_hosts
+        read_only: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-m",
+          "components.xray_ops.xray_stats",
+          "healthcheck",
+          "--max-age-seconds",
+          "900",
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s

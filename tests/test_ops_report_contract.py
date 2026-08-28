@@ -46,6 +46,20 @@ def _node(role, status="normal", breaches=None):
             "network_total_bytes": 3072,
             "network_coverage_ratio": 1.0,
             "network_devices": ["eth0"],
+            "attribution": [
+                {
+                    "source_id": "ai-xray",
+                    "entity_type": "user",
+                    "entity_ref": "usr-0123456789abcdef",
+                    "uplink_bytes": 1024,
+                    "downlink_bytes": 2048,
+                    "total_bytes": 3072,
+                    "sample_count": 2,
+                    "first_sample_at": "2030-01-01T16:00:00.000000Z",
+                    "last_sample_at": "2030-01-01T16:05:00.000000Z",
+                    "counter_resets": 0,
+                }
+            ],
         },
         "telemetry": {"coverage_ratio": 1.0, "missing_sources": [], "recorded_gaps": 0},
         "resources": {"threshold_breaches": breaches or []},
@@ -177,6 +191,7 @@ def test_packaged_report_schema_matches_contract_root():
     traffic_properties = schema["$defs"]["node"]["properties"]["traffic"]["properties"]
     assert "network_total_bytes" in traffic_properties
     assert "network_devices" in traffic_properties
+    assert "attribution" in traffic_properties
     assert files("components.xray_ops").joinpath("schemas/model-analysis.schema.json").is_file()
 
 
@@ -188,6 +203,7 @@ def test_rules_only_versions_and_markdown_section_order(monkeypatch):
     assert report["model_output_schema_version"] is None
     assert "Codex 不可用" in markdown
     assert "数据面总流量：3.00 KiB" in markdown
+    assert "| `user` | `usr-0123456789abcdef` | 1.00 KiB | 2.00 KiB | 3.00 KiB | 2 | 0 |" in markdown
     headings = [
         "## 执行摘要",
         "## 普通数据面",

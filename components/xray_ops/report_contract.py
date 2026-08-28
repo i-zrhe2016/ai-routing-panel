@@ -199,6 +199,28 @@ def _format_bytes(value: Any) -> str:
         amount /= 1024
 
 
+def _render_attribution(attribution: list[dict[str, Any]]) -> list[str]:
+    if not attribution:
+        return []
+    lines = [
+        "### 流量归因",
+        "",
+        "user 和 inbound 是同一批 Xray counter 的两种视角，不应相加。",
+        "",
+        "| 维度 | 脱敏标识 | 上行 | 下行 | 合计 | 样本 | Reset |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for item in attribution:
+        lines.append(
+            f"| `{_escape(item.get('entity_type'))}` | `{_escape(item.get('entity_ref'))}` | "
+            f"{_format_bytes(item.get('uplink_bytes'))} | {_format_bytes(item.get('downlink_bytes'))} | "
+            f"{_format_bytes(item.get('total_bytes'))} | {int(item.get('sample_count', 0))} | "
+            f"{int(item.get('counter_resets', 0))} |"
+        )
+    lines.append("")
+    return lines
+
+
 def _render_node(node: dict[str, Any]) -> list[str]:
     service = node.get("service") or {}
     traffic = node.get("traffic") or {}
@@ -220,9 +242,9 @@ def _render_node(node: dict[str, Any]) -> list[str]:
         f"- 计入网络接口：{', '.join(network_devices) or '无'}",
         f"- 数据缺口来源：{', '.join(telemetry.get('missing_sources', [])) or '无'}",
         "",
-        "### 命中规则",
-        "",
     ]
+    lines.extend(_render_attribution(traffic.get("attribution") or []))
+    lines.extend(["### 命中规则", ""])
     if rules:
         lines.extend(["| 规则 | 开始 | 结束 | 证据 |", "| --- | --- | --- | --- |"])
         for rule in rules:

@@ -86,34 +86,24 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "traffic_gap_seconds",
-        "correlation_window_seconds",
-        "service_sample_interval_seconds",
+        "scrape_step_seconds",
         "service_down_min_samples",
         "telemetry_min_coverage_ratio",
         "resource_duration_seconds",
         "cpu_pressure_percent",
         "memory_available_pressure_ratio",
-        "root_disk_pressure_ratio"
+        "root_disk_pressure_ratio",
+        "xray_attribution_top_n"
       ],
       "properties": {
-        "traffic_gap_seconds": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["normal_data_plane", "ai_data_plane"],
-          "properties": {
-            "normal_data_plane": {"type": "integer", "minimum": 1},
-            "ai_data_plane": {"type": "integer", "minimum": 1}
-          }
-        },
-        "correlation_window_seconds": {"type": "integer", "minimum": 0},
-        "service_sample_interval_seconds": {"type": "integer", "minimum": 1},
+        "scrape_step_seconds": {"type": "integer", "minimum": 1},
         "service_down_min_samples": {"type": "integer", "minimum": 1},
         "telemetry_min_coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
         "resource_duration_seconds": {"type": "integer", "minimum": 1},
         "cpu_pressure_percent": {"type": "number", "minimum": 0, "maximum": 100},
         "memory_available_pressure_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-        "root_disk_pressure_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+        "root_disk_pressure_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "xray_attribution_top_n": {"type": "integer", "minimum": 1}
       }
     },
     "status": {
@@ -215,6 +205,10 @@
               "type": "array",
               "items": {"type": "string", "minLength": 1},
               "uniqueItems": true
+            },
+            "attribution": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/xray_attribution"}
             }
           }
         },
@@ -247,6 +241,34 @@
           "type": "array",
           "items": {"$ref": "#/$defs/rule_match"}
         }
+      }
+    },
+    "xray_attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "entity_type",
+        "entity_ref",
+        "uplink_bytes",
+        "downlink_bytes",
+        "total_bytes",
+        "sample_count",
+        "first_sample_at",
+        "last_sample_at",
+        "counter_resets"
+      ],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "entity_type": {"enum": ["user", "inbound"]},
+        "entity_ref": {"type": "string", "pattern": "^(usr|inb)-[0-9a-f]{16}$"},
+        "uplink_bytes": {"type": "integer", "minimum": 0},
+        "downlink_bytes": {"type": "integer", "minimum": 0},
+        "total_bytes": {"type": "integer", "minimum": 0},
+        "sample_count": {"type": "integer", "minimum": 2},
+        "first_sample_at": {"type": "string", "format": "date-time"},
+        "last_sample_at": {"type": "string", "format": "date-time"},
+        "counter_resets": {"type": "integer", "minimum": 0}
       }
     },
     "incident": {

@@ -20,6 +20,7 @@ MEMORY_AVAILABLE_PRESSURE_RATIO = 0.10
 ROOT_DISK_PRESSURE_RATIO = 0.90
 RESOURCE_DURATION_SECONDS = 900
 NETWORK_TRAFFIC_DEVICE_PREFIXES = ("eth", "ens", "enp", "eno", "enx", "bond", "wan")
+XRAY_ATTRIBUTION_TOP_N = 10
 RULE_PARAMETERS = {
     "scrape_step_seconds": SCRAPE_STEP_SECONDS,
     "service_down_min_samples": SERVICE_DOWN_MIN_SAMPLES,
@@ -28,6 +29,7 @@ RULE_PARAMETERS = {
     "cpu_pressure_percent": CPU_PRESSURE_PERCENT,
     "memory_available_pressure_ratio": MEMORY_AVAILABLE_PRESSURE_RATIO,
     "root_disk_pressure_ratio": ROOT_DISK_PRESSURE_RATIO,
+    "xray_attribution_top_n": XRAY_ATTRIBUTION_TOP_N,
 }
 
 
@@ -117,8 +119,13 @@ def _coverage(points, start, end):
 
 
 def _counter_increase(values) -> int:
+    return _counter_increase_with_resets(values)[0]
+
+
+def _counter_increase_with_resets(values) -> tuple[int, int]:
     total = 0.0
     previous = None
+    resets = 0
     for value in values:
         if previous is None:
             previous = value
@@ -126,9 +133,10 @@ def _counter_increase(values) -> int:
         if value >= previous:
             total += value - previous
         else:
+            resets += 1
             total += value
         previous = value
-    return max(0, int(round(total)))
+    return max(0, int(round(total))), resets
 
 
 def _network_device_is_counted(labels: dict[str, str]) -> bool:
@@ -216,7 +224,97 @@ def _route_fallback(events, start, end):
     return out
 
 
-def _classify(role, start, end, prom, route_events, evidence):
+def _select_counter_window(points, start, end):
+    before = []
+    inside = []
+    after = []
+    for timestamp, value in sorted(points, key=lambda item: item[0]):
+        if timestamp < start:
+            before.append((timestamp, value))
+        elif timestamp <= end:
+            inside.append((timestamp, value))
+        else:
+            after.append((timestamp, value))
+    selected = []
+    if before:
+        selected.append(before[-1])
+    selected.extend(inside)
+    if after:
+        selected.append(after[0])
+    return selected
+
+
+def _xray_attribution(samples, role, start, end):
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for sample in samples or []:
+        if sample.get("node_role") != role:
+            continue
+        entity_type = str(sample.get("entity_type", ""))
+        if entity_type not in {"user", "inbound"}:
+            continue
+        entity_ref = str(sample.get("entity_ref", ""))
+        if not entity_ref:
+            continue
+        direction = str(sample.get("direction", ""))
+        if direction not in {"uplink", "downlink"}:
+            continue
+        try:
+            observed_at = parse_timestamp(sample["observed_at"])
+            value = int(sample["value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if value < 0:
+            continue
+        source_id = str(sample.get("source_id") or "xray-stats")
+        item = grouped.setdefault(
+            (source_id, entity_type, entity_ref),
+            {
+                "source_id": source_id,
+                "entity_type": entity_type,
+                "entity_ref": entity_ref,
+                "directions": {"uplink": [], "downlink": []},
+            },
+        )
+        item["directions"][direction].append((observed_at, value))
+
+    entries = []
+    for item in grouped.values():
+        uplink_points = _select_counter_window(item["directions"]["uplink"], start, end)
+        downlink_points = _select_counter_window(item["directions"]["downlink"], start, end)
+        uplink, uplink_resets = _counter_increase_with_resets([value for _timestamp, value in uplink_points])
+        downlink, downlink_resets = _counter_increase_with_resets([value for _timestamp, value in downlink_points])
+        total = uplink + downlink
+        timestamps = sorted({timestamp for timestamp, _value in [*uplink_points, *downlink_points]})
+        if total <= 0 or len(timestamps) < 2:
+            continue
+        entries.append(
+            {
+                "source_id": item["source_id"],
+                "entity_type": item["entity_type"],
+                "entity_ref": item["entity_ref"],
+                "uplink_bytes": uplink,
+                "downlink_bytes": downlink,
+                "total_bytes": total,
+                "sample_count": len(timestamps),
+                "first_sample_at": format_timestamp(timestamps[0]),
+                "last_sample_at": format_timestamp(timestamps[-1]),
+                "counter_resets": uplink_resets + downlink_resets,
+            }
+        )
+
+    top_entries = []
+    for entity_type in ("user", "inbound"):
+        candidates = [entry for entry in entries if entry["entity_type"] == entity_type]
+        top_entries.extend(
+            sorted(
+                candidates,
+                key=lambda entry: (-entry["total_bytes"], entry["entity_ref"], entry["source_id"]),
+            )[:XRAY_ATTRIBUTION_TOP_N]
+        )
+    return top_entries
+
+
+def _classify(role, start, end, prom, route_events, xray_traffic_samples, evidence):
     running_name = "xray_panel_data_plane_running" if role == NORMAL_DATA_PLANE else "xray_panel_ai_node_running"
     running = _points(prom, running_name)
     target = _points(prom, "up", role)
@@ -393,6 +491,7 @@ def _classify(role, start, end, prom, route_events, evidence):
             "network_total_bytes": _network_bytes(network_received) + _network_bytes(network_transmitted),
             "network_coverage_ratio": round(_coverage(network_received + network_transmitted, start, end), 6),
             "network_devices": _network_devices(network_received, network_transmitted),
+            "attribution": _xray_attribution(xray_traffic_samples, role, start, end),
         },
         "telemetry": {"coverage_ratio": round(coverage, 6), "missing_sources": missing, "recorded_gaps": 0},
         "resources": {"threshold_breaches": []},
@@ -411,6 +510,7 @@ def classify_report(
     gaps=None,
     collection_runs=None,
     rollups=None,
+    xray_traffic_samples=None,
 ):
     """Classify Prometheus evidence. Legacy SQLite arguments are accepted but deliberately ignored."""
     start = parse_timestamp(window_start)
@@ -421,7 +521,15 @@ def classify_report(
     nodes = []
     incidents = []
     for role in NODE_ROLES:
-        node, found = _classify(role, start, end, prometheus or {}, route_events or [], evidence)
+        node, found = _classify(
+            role,
+            start,
+            end,
+            prometheus or {},
+            route_events or [],
+            xray_traffic_samples or [],
+            evidence,
+        )
         nodes.append(node)
         incidents.extend(found)
     return {

@@ -22,7 +22,7 @@ from .models import (
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 SCHEMA_SQL = """
@@ -163,6 +163,21 @@ CREATE TABLE IF NOT EXISTS service_heartbeats (
     status TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS xray_traffic_samples (
+    sample_id TEXT PRIMARY KEY,
+    node_role TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('user', 'inbound')),
+    entity_ref TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('uplink', 'downlink')),
+    value INTEGER NOT NULL CHECK (value >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_xray_traffic_samples_window
+ON xray_traffic_samples(node_role, observed_at, entity_type, entity_ref, direction);
 """
 
 
@@ -534,6 +549,44 @@ class OpsStore:
         with self.connect() as connection:
             return [dict(row) for row in connection.execute(sql, params).fetchall()]
 
+    def insert_xray_traffic_samples(self, samples: Iterable[dict[str, Any]]) -> int:
+        rows = list(samples)
+        if not rows:
+            return 0
+        inserted = 0
+        with self.connect() as connection:
+            for sample in rows:
+                inserted += connection.execute(
+                    """
+                    INSERT OR IGNORE INTO xray_traffic_samples (
+                        sample_id, node_role, source_id, observed_at, collected_at,
+                        entity_type, entity_ref, direction, value
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        sample["sample_id"],
+                        sample["node_role"],
+                        sample["source_id"],
+                        sample["observed_at"],
+                        sample["collected_at"],
+                        sample["entity_type"],
+                        sample["entity_ref"],
+                        sample["direction"],
+                        int(sample["value"]),
+                    ),
+                ).rowcount
+        return inserted
+
+    def query_xray_traffic_samples(self, start: str, end: str, node_role: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM xray_traffic_samples WHERE observed_at >= ? AND observed_at <= ?"
+        params: list[Any] = [start, end]
+        if node_role:
+            sql += " AND node_role = ?"
+            params.append(node_role)
+        sql += " ORDER BY observed_at, sample_id"
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute(sql, params).fetchall()]
+
     def latest_collection_heartbeat(self) -> str | None:
         with self.connect() as connection:
             row = connection.execute("SELECT MAX(heartbeat_at) AS heartbeat_at FROM collection_runs").fetchone()
@@ -636,6 +689,7 @@ class OpsStore:
                 ("raw_log_events", "observed_at", raw_cutoff),
                 ("node_samples", "observed_at", raw_cutoff),
                 ("rollups_5m", "bucket_start", rollup_cutoff),
+                ("xray_traffic_samples", "observed_at", rollup_cutoff),
                 ("telemetry_gaps", "ended_at", rollup_cutoff),
                 ("collection_runs", "ended_at", rollup_cutoff),
                 ("report_runs", "started_at", rollup_cutoff),

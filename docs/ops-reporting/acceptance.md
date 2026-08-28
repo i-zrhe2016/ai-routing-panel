@@ -1,4 +1,4 @@
-# Prometheus-only 验收标准
+# Prometheus 与脱敏归因验收标准
 
 > 权威范围：上线完成定义与安全门禁
 
@@ -10,8 +10,9 @@
 - [ ] `job`、`instance`、`node_id`、`node_role`、`environment`、`region` 齐全，无秘密或高基数值。
 - [ ] 正常、target down、探针失败、资源越界、counter reset、标签冲突和覆盖不足场景均产生预期状态。
 - [ ] 报告明确写出规则能力边界，不把无流量或 `up == 0` 单独判为业务故障。
-- [ ] 全链路不存在 SSH 调用、私钥挂载、远程命令、原始日志读取或日志入库。
-- [ ] SQLite 只包含报告运行审计和历史报告归档索引。
+- [ ] Reporter 不存在 SSH 调用、私钥挂载、远程命令、原始日志读取或日志入库。
+- [ ] 可选归因采样器只读取 Xray `/debug/vars` counter，且 SQLite/GitHub 报告中不存在原始 user/inbound、客户端 IP、访问域名、URL、UUID 或 email。
+- [ ] SQLite 只包含报告运行审计、历史报告归档索引和脱敏 counter 快照。
 - [ ] JSON/Markdown 原子发布、摘要一致，保留策略可执行。
 - [ ] 按[灰度与回滚](rollout.md)完成回滚演练并保留记录。
 

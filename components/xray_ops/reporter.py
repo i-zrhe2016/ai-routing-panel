@@ -23,6 +23,7 @@ from .redaction import redact_value
 from .report_contract import build_report, cleanup_reports, validate_report, write_report_atomic
 from .rules import classify_report
 from .storage import OpsStore
+from .xray_stats import SERVICE_NAME as XRAY_STATS_SERVICE_NAME
 
 
 REPORT_TIMEZONE = ZoneInfo("Asia/Shanghai")
@@ -71,6 +72,7 @@ class ReporterConfig:
     ai_routing_report_dir: str
     report_retention_days: int
     scheduler_interval_seconds: int
+    xray_stats_window_padding_seconds: int
     force_rules_only: bool
     github_reports: GitHubReportPublisherConfig
     codex: CodexRunnerConfig
@@ -90,6 +92,7 @@ class ReporterConfig:
             ).strip(),
             report_retention_days=_env_int("OPS_REPORT_RETENTION_DAYS", 90),
             scheduler_interval_seconds=_env_int("OPS_REPORT_SCHEDULER_INTERVAL_SECONDS", 60, minimum=10),
+            xray_stats_window_padding_seconds=_env_int("OPS_XRAY_STATS_WINDOW_PADDING_SECONDS", 900),
             force_rules_only=_env_bool("OPS_FORCE_RULES_ONLY", False),
             github_reports=GitHubReportPublisherConfig.from_env(),
             codex=CodexRunnerConfig.from_env(),
@@ -216,12 +219,15 @@ def _collection_health(
     classification: dict[str, Any],
     prometheus: PrometheusResult,
     route_history: RouteHistoryResult,
+    xray_stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     node_coverage = {
         node["node_role"]: float((node.get("telemetry") or {}).get("coverage_ratio", 0))
         for node in classification["nodes"]
     }
     sources = [route_history.health, *prometheus.sources]
+    if xray_stats:
+        sources.append(xray_stats)
     return {
         "overall_coverage_ratio": round(sum(node_coverage.values()) / max(1, len(node_coverage)), 6),
         "node_coverage": node_coverage,
@@ -293,6 +299,23 @@ class ReporterService:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
             return False
 
+    def _xray_stats_health(self, samples: list[dict[str, Any]]) -> dict[str, Any] | None:
+        heartbeat = self.store.get_service_heartbeat(XRAY_STATS_SERVICE_NAME)
+        if not heartbeat and not samples:
+            return None
+        heartbeat_status = str((heartbeat or {}).get("status", "unknown"))
+        configured = bool(heartbeat) and heartbeat_status != "idle"
+        success = bool(samples)
+        return {
+            "source": "xray_stats_attribution",
+            "configured": configured,
+            "success": success,
+            "error_class": "" if success else "xray_stats_no_window_samples",
+            "samples": len(samples),
+            "sampler_status": heartbeat_status,
+            "heartbeat_at": (heartbeat or {}).get("heartbeat_at"),
+        }
+
     def run_for_date(
         self,
         report_date: date,
@@ -334,16 +357,28 @@ class ReporterService:
                             "files": 0,
                         },
                     )
+                stats_query_start = format_timestamp(
+                    start_utc - timedelta(seconds=self.config.xray_stats_window_padding_seconds)
+                )
+                stats_query_end = format_timestamp(
+                    end_utc + timedelta(seconds=self.config.xray_stats_window_padding_seconds)
+                )
+                try:
+                    xray_traffic_samples = self.store.query_xray_traffic_samples(stats_query_start, stats_query_end)
+                except Exception:
+                    xray_traffic_samples = []
                 classification = classify_report(
                     window_start=start_utc,
                     window_end=end_utc,
                     prometheus=prometheus.metrics,
                     route_events=route_history.events,
+                    xray_traffic_samples=xray_traffic_samples,
                 )
                 collection_health = _collection_health(
                     classification=classification,
                     prometheus=prometheus,
                     route_history=route_history,
+                    xray_stats=self._xray_stats_health(xray_traffic_samples),
                 )
 
                 model_analysis = None
