@@ -1,0 +1,524 @@
+{
+  "collection_health": {
+    "gaps": [
+      {
+        "error_class": "prometheus_scrape_gap",
+        "node_role": "normal_data_plane",
+        "source": "prometheus:target_scrape"
+      }
+    ],
+    "node_coverage": {
+      "ai_data_plane": 1.0,
+      "normal_data_plane": 1.0
+    },
+    "overall_coverage_ratio": 1.0,
+    "sources": [
+      {
+        "configured": true,
+        "error_class": "route_history_partial",
+        "files": 1599,
+        "invalid_files": 1,
+        "source": "ai_routing_history",
+        "success": false
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:up",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_data_plane_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_ai_node_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 10,
+        "source": "prometheus:xray_panel_port_reachable",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 10,
+        "source": "prometheus:xray_panel_port_probe_timestamp_seconds",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 22,
+        "source": "prometheus:xray_panel_port_traffic_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 11,
+        "source": "prometheus:xray_panel_port_connections_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_target_info",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_last_probe_healthy",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_consecutive_failures",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 24,
+        "source": "prometheus:node_cpu_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 3,
+        "source": "prometheus:node_memory_MemAvailable_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 3,
+        "source": "prometheus:node_memory_MemTotal_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_filesystem_avail_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_filesystem_size_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 19,
+        "source": "prometheus:node_network_receive_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 19,
+        "source": "prometheus:node_network_transmit_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_cpu_usage_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_memory_working_set_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_spec_memory_limit_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_last_seen",
+        "success": true
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "attributes": {
+        "duration_seconds": 180,
+        "ended_at": "2026-08-28T07:34:30.000000Z",
+        "samples": 6,
+        "started_at": "2026-08-28T07:31:30.000000Z"
+      },
+      "evidence_id": "ev-34ea5045b8ec69a95f631a7d",
+      "evidence_type": "service_state",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-28T07:31:30.000000Z",
+      "source": "prometheus:xray_panel_data_plane_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    },
+    {
+      "attributes": {
+        "duration_seconds": 540,
+        "ended_at": "2026-08-28T09:42:00.000000Z",
+        "samples": 18,
+        "started_at": "2026-08-28T09:33:00.000000Z"
+      },
+      "evidence_id": "ev-19adf9d27644b15b99255e82",
+      "evidence_type": "service_state",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-28T09:33:00.000000Z",
+      "source": "prometheus:xray_panel_data_plane_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    },
+    {
+      "attributes": {
+        "duration_seconds": 450,
+        "ended_at": "2026-08-28T11:33:30.000000Z",
+        "samples": 15,
+        "started_at": "2026-08-28T11:26:00.000000Z"
+      },
+      "evidence_id": "ev-945dffc6eae82125eed2d597",
+      "evidence_type": "service_state",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-28T11:26:00.000000Z",
+      "source": "prometheus:xray_panel_data_plane_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    },
+    {
+      "attributes": {
+        "duration_seconds": 180,
+        "ended_at": "2026-08-28T12:23:30.000000Z",
+        "samples": 6,
+        "started_at": "2026-08-28T12:20:30.000000Z"
+      },
+      "evidence_id": "ev-29fe5bb6a38322ecb05d9c1f",
+      "evidence_type": "service_state",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-28T12:20:30.000000Z",
+      "source": "prometheus:xray_panel_data_plane_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    },
+    {
+      "attributes": {
+        "duration_seconds": 150,
+        "ended_at": "2026-08-28T13:39:00.000000Z",
+        "samples": 5,
+        "started_at": "2026-08-28T13:36:30.000000Z"
+      },
+      "evidence_id": "ev-65a8cf63560d083dc1983710",
+      "evidence_type": "service_state",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-28T13:36:30.000000Z",
+      "source": "prometheus:xray_panel_data_plane_running",
+      "source_quality": "complete",
+      "summary": "Prometheus 节点运行指标连续显示停止"
+    }
+  ],
+  "generated_at": "2026-08-29T00:10:46+08:00",
+  "generation_health": {
+    "atomic_write": "success",
+    "codex": "failed",
+    "codex_attempts": 2,
+    "codex_error_class": "codex_process_failed",
+    "codex_input": null,
+    "codex_usage": null,
+    "json_schema": "valid",
+    "markdown": "success",
+    "rules": "success"
+  },
+  "generation_mode": "rules_only",
+  "incidents": [
+    {
+      "ended_at": "2026-08-28T07:34:30.000000Z",
+      "evidence_ids": [
+        "ev-34ea5045b8ec69a95f631a7d"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-d24dd8efd684a69be192a8df",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-28T07:31:30.000000Z",
+      "status": "fault"
+    },
+    {
+      "ended_at": "2026-08-28T09:42:00.000000Z",
+      "evidence_ids": [
+        "ev-19adf9d27644b15b99255e82"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-db40eba65f3cfc604b183c1f",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-28T09:33:00.000000Z",
+      "status": "fault"
+    },
+    {
+      "ended_at": "2026-08-28T11:33:30.000000Z",
+      "evidence_ids": [
+        "ev-945dffc6eae82125eed2d597"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-e35805f75c56242f72995f05",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-28T11:26:00.000000Z",
+      "status": "fault"
+    },
+    {
+      "ended_at": "2026-08-28T12:23:30.000000Z",
+      "evidence_ids": [
+        "ev-29fe5bb6a38322ecb05d9c1f"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-a1a332352edef6777263a609",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-28T12:20:30.000000Z",
+      "status": "fault"
+    },
+    {
+      "ended_at": "2026-08-28T13:39:00.000000Z",
+      "evidence_ids": [
+        "ev-65a8cf63560d083dc1983710"
+      ],
+      "facts": [
+        "面板 Prometheus 运行指标连续至少两个采样显示停止。"
+      ],
+      "incident_id": "inc-756a1d723f0551cd5574237c",
+      "kind": "service_down",
+      "missing_sources": [],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-F001"
+      ],
+      "started_at": "2026-08-28T13:36:30.000000Z",
+      "status": "fault"
+    }
+  ],
+  "model_analysis": null,
+  "model_output_schema_version": null,
+  "nodes": [
+    {
+      "matched_rules": [
+        {
+          "duration_seconds": 180,
+          "ended_at": "2026-08-28T07:34:30.000000Z",
+          "evidence_ids": [
+            "ev-34ea5045b8ec69a95f631a7d"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 6,
+          "started_at": "2026-08-28T07:31:30.000000Z"
+        },
+        {
+          "duration_seconds": 540,
+          "ended_at": "2026-08-28T09:42:00.000000Z",
+          "evidence_ids": [
+            "ev-19adf9d27644b15b99255e82"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 18,
+          "started_at": "2026-08-28T09:33:00.000000Z"
+        },
+        {
+          "duration_seconds": 450,
+          "ended_at": "2026-08-28T11:33:30.000000Z",
+          "evidence_ids": [
+            "ev-945dffc6eae82125eed2d597"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 15,
+          "started_at": "2026-08-28T11:26:00.000000Z"
+        },
+        {
+          "duration_seconds": 180,
+          "ended_at": "2026-08-28T12:23:30.000000Z",
+          "evidence_ids": [
+            "ev-29fe5bb6a38322ecb05d9c1f"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 6,
+          "started_at": "2026-08-28T12:20:30.000000Z"
+        },
+        {
+          "duration_seconds": 150,
+          "ended_at": "2026-08-28T13:39:00.000000Z",
+          "evidence_ids": [
+            "ev-65a8cf63560d083dc1983710"
+          ],
+          "rule_id": "OPS-F001",
+          "samples": 5,
+          "started_at": "2026-08-28T13:36:30.000000Z"
+        }
+      ],
+      "node_role": "normal_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 1.0,
+        "downtime_intervals": [
+          {
+            "duration_seconds": 180,
+            "ended_at": "2026-08-28T07:34:30.000000Z",
+            "samples": 6,
+            "started_at": "2026-08-28T07:31:30.000000Z"
+          },
+          {
+            "duration_seconds": 540,
+            "ended_at": "2026-08-28T09:42:00.000000Z",
+            "samples": 18,
+            "started_at": "2026-08-28T09:33:00.000000Z"
+          },
+          {
+            "duration_seconds": 450,
+            "ended_at": "2026-08-28T11:33:30.000000Z",
+            "samples": 15,
+            "started_at": "2026-08-28T11:26:00.000000Z"
+          },
+          {
+            "duration_seconds": 180,
+            "ended_at": "2026-08-28T12:23:30.000000Z",
+            "samples": 6,
+            "started_at": "2026-08-28T12:20:30.000000Z"
+          },
+          {
+            "duration_seconds": 150,
+            "ended_at": "2026-08-28T13:39:00.000000Z",
+            "samples": 5,
+            "started_at": "2026-08-28T13:36:30.000000Z"
+          }
+        ],
+        "prometheus_coverage_ratio": 1.0,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "fault",
+      "telemetry": {
+        "coverage_ratio": 1.0,
+        "missing_sources": [
+          "prometheus:target_scrape"
+        ],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 1.0,
+        "demand_increases": 19149,
+        "network_coverage_ratio": 0.801042,
+        "network_devices": [
+          "eth0"
+        ],
+        "network_received_bytes": 4637578,
+        "network_total_bytes": 66089824,
+        "network_transmitted_bytes": 61452246,
+        "status": "demand_observed"
+      }
+    },
+    {
+      "matched_rules": [],
+      "node_role": "ai_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 1.0,
+        "downtime_intervals": [],
+        "prometheus_coverage_ratio": 1.0,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "normal",
+      "telemetry": {
+        "coverage_ratio": 1.0,
+        "missing_sources": [],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 1.0,
+        "demand_increases": 5758,
+        "network_coverage_ratio": 1.0,
+        "network_devices": [
+          "eth0"
+        ],
+        "network_received_bytes": 2927533657,
+        "network_total_bytes": 5847488930,
+        "network_transmitted_bytes": 2919955273,
+        "status": "demand_observed"
+      }
+    }
+  ],
+  "overall_status": "fault",
+  "prompt_version": null,
+  "report_date": "2026-08-28",
+  "rule_parameters": {
+    "cpu_pressure_percent": 95.0,
+    "memory_available_pressure_ratio": 0.1,
+    "resource_duration_seconds": 900,
+    "root_disk_pressure_ratio": 0.9,
+    "scrape_step_seconds": 30,
+    "service_down_min_samples": 2,
+    "telemetry_min_coverage_ratio": 0.9
+  },
+  "rules_version": "2.0",
+  "schema_version": "1.0",
+  "timezone": "Asia/Shanghai",
+  "window_end": "2026-08-29T00:00:00+08:00",
+  "window_start": "2026-08-28T00:00:00+08:00"
+}
