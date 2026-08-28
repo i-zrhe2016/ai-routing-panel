@@ -150,6 +150,16 @@ class TenantPanelTest(unittest.TestCase):
                 return port
         self.fail(f"port {listen_port} was not created")
 
+    def test_admin_shell_disables_cache_for_asset_version_rollout(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertEqual(response.headers["Pragma"], "no-cache")
+        body = response.get_data(as_text=True)
+        self.assertIn("admin.js?v=20260828-port-actions", body)
+        self.assertIn("admin.css?v=20260828-port-actions", body)
+
     def seed_ai_domain_dashboard(self):
         report_path = self.panel.state.data_plane.config.source_ai_report_path
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -266,7 +276,7 @@ class TenantPanelTest(unittest.TestCase):
             1,
         )
 
-    def test_port_api_duplicate_listen_port_returns_conflict(self):
+    def test_port_api_duplicate_listen_port_is_idempotent(self):
         self.create_port(31201, "Existing")
 
         response = self.client.post(
@@ -274,12 +284,30 @@ class TenantPanelTest(unittest.TestCase):
             json={"listen_port": 31201, "traffic_limit": "10G", "note": "Duplicate"},
         )
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.get_json()["message"], "监听端口已存在，请更换其他端口。")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["message"], "监听端口已存在，已选中已有端口。")
+        self.assertEqual(body["level"], "info")
+        self.assertIn(31201, [port["listen_port"] for port in body["dashboard"]["ports"]])
         self.assertEqual(
             [port["listen_port"] for port in self.panel.state.query_ports()].count(31201),
             1,
         )
+
+    def test_port_api_delete_is_idempotent_for_missing_record(self):
+        port = self.create_port(31202, "Delete once")
+
+        first = self.client.delete(f"/api/ports/{port['id']}")
+        self.assertEqual(first.status_code, 200)
+        self.assertNotIn(31202, [item["listen_port"] for item in first.get_json()["dashboard"]["ports"]])
+
+        second = self.client.delete(f"/api/ports/{port['id']}")
+        self.assertEqual(second.status_code, 200)
+        body = second.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["message"], "端口已不存在，列表已刷新。")
+        self.assertNotIn(31202, [item["listen_port"] for item in body["dashboard"]["ports"]])
 
     def test_tenant_panel_login_is_isolated_per_port(self):
         port_a = self.create_port(31001, "Tenant A")

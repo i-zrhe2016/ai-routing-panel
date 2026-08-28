@@ -1,5 +1,5 @@
 import { fallbackCopyText } from "../utils.js";
-import { reportClientError } from "../shared/apiClient.js";
+import { reportClientError, shouldReportHttpError } from "../shared/apiClient.js";
 
 export function sameOriginLoginUrl(value, location = window.location) {
   try {
@@ -191,7 +191,11 @@ export const CoreMixin = {
       }
       if (!response.ok || data.ok === false) {
         const error = new Error(data.message || `请求失败（${response.status}）。`);
-        reportClientError({ url, method, error, csrfToken: this.meta?.csrf_token, status: response.status, source: "http" });
+        error.status = response.status;
+        error.payload = data;
+        if (shouldReportHttpError(response.status)) {
+          reportClientError({ url, method, error, csrfToken: this.meta?.csrf_token, status: response.status, source: "http" });
+        }
         throw error;
       }
       return data;

@@ -1,7 +1,7 @@
 from datetime import datetime
 import sqlite3
 
-from flask import redirect, render_template, request, session, url_for
+from flask import make_response, redirect, render_template, request, session, url_for
 
 from ..auth import (
     credentials_match,
@@ -91,10 +91,16 @@ def index():
     # The admin is now a built SPA (app/static/admin/*). The shell only needs the
     # CSRF token and auth flag; the SPA fetches GET /api/dashboard on mount (which
     # runs the same build_dashboard_state side effects the page render used to).
-    return render_template(
-        "index.html",
-        boot={"csrf_token": ensure_csrf_token(), "auth_enabled": AUTH_ENABLED},
+    response = make_response(
+        render_template(
+            "index.html",
+            boot={"csrf_token": ensure_csrf_token(), "auth_enabled": AUTH_ENABLED},
+        )
     )
+    response.headers["Cache-Control"] = "no-store, no-cache, max-age=0, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @route("/probe-dashboard", methods=["GET"])
@@ -144,8 +150,12 @@ def create_port():
         return message_redirect("端口已创建并写入 Xray。", "success")
     except sqlite3.IntegrityError as exc:
         if is_listen_port_conflict(exc):
-            log_business_event("port.created", result="failure", error_code="conflict", resource_type="port")
-            return message_redirect("监听端口已存在，请更换其他端口。", "error")
+            log_business_event(
+                "port.created",
+                resource_type="port",
+                metadata={"listen_port": payload.get("listen_port", ""), "already_exists": True},
+            )
+            return message_redirect("监听端口已存在，列表已刷新。", "info")
         raise
     except (ValidationError, RuntimeError) as exc:
         log_business_event("port.created", result="failure", error_code="validation", message=str(exc), resource_type="port")
@@ -187,6 +197,14 @@ def delete_port(port_id):
         log_business_event("port.deleted", resource_type="port", resource_id=port_id)
         return message_redirect("端口已删除。", "success")
     except (ValidationError, RuntimeError) as exc:
+        if isinstance(exc, ValidationError) and str(exc) == "端口记录不存在。":
+            log_business_event(
+                "port.deleted",
+                resource_type="port",
+                resource_id=port_id,
+                metadata={"already_missing": True},
+            )
+            return message_redirect("端口已不存在，列表已刷新。", "info")
         log_business_event("port.deleted", result="failure", error_code="rejected", message=str(exc), resource_type="port", resource_id=port_id)
         return message_redirect(str(exc), "error")
 

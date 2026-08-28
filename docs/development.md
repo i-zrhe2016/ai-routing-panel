@@ -170,9 +170,21 @@ python app/panel.py
 ## 前端发布资源
 
 管理后台、订阅者门户和 Landing 页的发布资源已保存在
-`app/static/{admin,portal,landing}`。控制面镜像直接复制这些静态文件，不安装
-JavaScript 构建工具。`frontend/src` 仅作为源码快照保留，
-不参与运行时和镜像构建。
+`app/static/{admin,portal,landing}`。控制面镜像直接复制这些静态文件，运行时不安装
+JavaScript 构建工具。
+
+Admin 控制台源码和构建配置位于 `frontend/`。修改 Admin 前端后执行：
+
+```bash
+cd frontend
+npm ci
+npm test
+npm run build
+```
+
+`npm run build` 会将 Admin 入口输出为 `app/static/admin/admin.js` 和
+`app/static/admin/admin.css`；构建产物必须随变更一起提交，Docker 不在镜像构建阶段安装
+Node 或 npm。
 
 后端测试用 pytest 直接跑现有 unittest：
 

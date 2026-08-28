@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 
 import "../shared/tokens.css";
+import "./admin.css";
 import App from "./App.vue";
 import { installClientErrorLogging, installVueErrorLogging } from "../shared/apiClient.js";
 

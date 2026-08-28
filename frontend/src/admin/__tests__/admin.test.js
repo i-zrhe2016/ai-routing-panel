@@ -117,8 +117,12 @@ function makeDashboard() {
   };
 }
 
-function jsonResp(body) {
-  return Promise.resolve({ status: 200, ok: true, text: () => Promise.resolve(JSON.stringify(body)) });
+function jsonResp(body, status = 200) {
+  return Promise.resolve({
+    status,
+    ok: status >= 200 && status < 300,
+    text: () => Promise.resolve(JSON.stringify(body)),
+  });
 }
 
 let fetchMock;
@@ -165,6 +169,26 @@ describe("sameOriginLoginUrl", () => {
 });
 
 describe("AdminApp", () => {
+  it("organizes the console into three workspaces and exposes contextual tabs", async () => {
+    const wrapper = await mountAdmin();
+    expect(wrapper.findAll(".workspace-nav__item")).toHaveLength(3);
+    expect(wrapper.text()).toContain("运行总览");
+    await wrapper.findAll(".workspace-nav__item").at(2).trigger("click");
+    expect(wrapper.vm.activeWorkspace).toBe("infra");
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Prometheus 与 Grafana");
+  });
+
+  it("switches the resources workspace between ports and commerce", async () => {
+    const wrapper = await mountAdmin();
+    await wrapper.findAll(".workspace-nav__item").at(1).trigger("click");
+    expect(wrapper.vm.activeWorkspace).toBe("resources");
+    expect(wrapper.find(".workspace-tabs").text()).toContain("端口与租户");
+    await wrapper.get('.workspace-tabs [role="tab"]:nth-child(2)').trigger("click");
+    expect(wrapper.vm.resourceTab).toBe("commerce");
+    expect(wrapper.find(".commerce-workspace").exists()).toBe(true);
+  });
+
   it("fetches the dashboard on mount and renders a port card", async () => {
     const wrapper = await mountAdmin();
     expect(fetchMock).toHaveBeenCalledWith("/api/dashboard", expect.objectContaining({ method: "GET" }));
@@ -310,7 +334,64 @@ describe("AdminApp", () => {
     expect(createForm).toBeTruthy();
     await createForm.trigger("submit");
     await flushPromises();
-    const portsCall = fetchMock.mock.calls.find((c) => c[0] === "/api/ports" && c[1] && c[1].method === "POST");
-    expect(portsCall).toBeTruthy();
+    const portsCalls = fetchMock.mock.calls.filter((c) => c[0] === "/api/ports" && c[1] && c[1].method === "POST");
+    expect(portsCalls).toHaveLength(1);
+  });
+
+  it("refreshes and selects the existing port when create returns a listen-port conflict", async () => {
+    fetchMock.mockImplementation((url, init) => {
+      if (url === "/api/ports" && init?.method === "POST") {
+        return jsonResp({ ok: false, message: "监听端口已存在，请更换其他端口。" }, 409);
+      }
+      return jsonResp({ ok: true, message: "ok", dashboard });
+    });
+    const wrapper = await mountAdmin();
+    wrapper.vm.filters.query = "missing";
+    wrapper.vm.filters.status = "disabled";
+    wrapper.vm.createForm.listen_port = "31098";
+    const createForm = wrapper.findAll("form").find((f) => f.text().includes("创建端口"));
+
+    await createForm.trigger("submit");
+    await flushPromises();
+
+    expect(fetchMock.mock.calls.filter((c) => c[0] === "/api/ports")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some((c) => c[0] === "/api/client-errors")).toBe(false);
+    expect(wrapper.vm.selectedPortId).toBe(1);
+    expect(wrapper.vm.filters).toMatchObject({ query: "", status: "all" });
+    expect(wrapper.vm.flash).toMatchObject({ message: "监听端口已存在，已选中已有端口。", level: "info" });
+    expect(wrapper.vm.createForm.listen_port).toBe("");
+  });
+
+  it("refreshes the dashboard when deleting a port that is already gone", async () => {
+    const emptyDashboard = structuredClone(dashboard);
+    emptyDashboard.ports = [];
+    emptyDashboard.summary = {
+      ...emptyDashboard.summary,
+      total_ports: 0,
+      active_ports: 0,
+      total_connections: 0,
+      total_bytes_received: 0,
+      total_bytes_sent: 0,
+    };
+    let dashboardLoads = 0;
+    fetchMock.mockImplementation((url, init) => {
+      if (url === "/api/ports/1" && init?.method === "DELETE") {
+        return jsonResp({ ok: false, message: "端口记录不存在。" }, 400);
+      }
+      if (url === "/api/dashboard") {
+        dashboardLoads += 1;
+        return jsonResp({ ok: true, message: "ok", dashboard: dashboardLoads === 1 ? dashboard : emptyDashboard });
+      }
+      return jsonResp({ ok: true, message: "ok", dashboard });
+    });
+    const wrapper = await mountAdmin();
+    const deleteButton = wrapper.findAll("button").find((b) => b.text().includes("删除端口"));
+
+    await deleteButton.trigger("click");
+    await flushPromises();
+
+    expect(fetchMock.mock.calls.some((c) => c[0] === "/api/client-errors")).toBe(false);
+    expect(wrapper.vm.ports).toHaveLength(0);
+    expect(wrapper.vm.flash).toMatchObject({ message: "端口已不存在，列表已刷新。", level: "info" });
   });
 });

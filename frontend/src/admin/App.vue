@@ -1,45 +1,33 @@
 <script>
 import { NConfigProvider } from "naive-ui/es/config-provider";
-import { NDrawer, NDrawerContent } from "naive-ui/es/drawer";
-import { NLayout, NLayoutContent, NLayoutHeader, NLayoutSider } from "naive-ui/es/layout";
-import { NMenu } from "naive-ui/es/menu";
 import { NSpin } from "naive-ui/es/spin";
 
-import { naiveThemeOverrides } from "../shared/tokens.js";
-import StatusPill from "../shared/ui/StatusPill.vue";
 import { AiDomainsMixin } from "../mixins/domains.js";
 import { CommerceMixin } from "../mixins/commerce.js";
 import { CoreMixin } from "../mixins/core.js";
 import { DnsMixin } from "../mixins/dns.js";
 import { PortsMixin } from "../mixins/ports.js";
+import StatusPill from "../shared/ui/StatusPill.vue";
+import { naiveThemeOverrides } from "../shared/tokens.js";
+import WorkspaceNav from "./components/WorkspaceNav.vue";
 import CommerceSection from "./sections/CommerceSection.vue";
 import InfraSection from "./sections/InfraSection.vue";
 import MonitoringSection from "./sections/MonitoringSection.vue";
 import OverviewSection from "./sections/OverviewSection.vue";
 import PortsSection from "./sections/PortsSection.vue";
 
-// Root admin component. Reuses the per-domain Options-API mixins verbatim (Vue
-// merges them, so this.x resolves across all), provides itself as `panel` to the
-// section children, and renders a Naive UI layout shell. All /api/* calls and
-// the data/computed/methods are unchanged from the legacy in-DOM-template app.
 export default {
   name: "AdminApp",
   components: {
-    NConfigProvider,
-    NDrawer,
-    NDrawerContent,
-    NLayout,
-    NLayoutContent,
-    NLayoutHeader,
-    NLayoutSider,
-    NMenu,
-    NSpin,
-    StatusPill,
-    OverviewSection,
-    PortsSection,
     CommerceSection,
     InfraSection,
     MonitoringSection,
+    NConfigProvider,
+    NSpin,
+    OverviewSection,
+    PortsSection,
+    StatusPill,
+    WorkspaceNav,
   },
   mixins: [CoreMixin, PortsMixin, CommerceMixin, DnsMixin, AiDomainsMixin],
   provide() {
@@ -48,25 +36,49 @@ export default {
   data() {
     return {
       themeOverrides: naiveThemeOverrides(),
-      activeSection: "overview",
+      activeWorkspace: "overview",
+      resourceTab: "ports",
+      infraTab: "infrastructure",
       isMobile: false,
       mobileNavOpen: false,
       loading: true,
       dashboardPollTimer: null,
       dashboardRefreshBusy: false,
       authEnabled: Boolean(typeof window !== "undefined" && window.__BOOT__ && window.__BOOT__.auth_enabled),
-      menuOptions: [
-        { label: "总览", key: "overview" },
-        { label: "端口管理", key: "ports" },
-        { label: "套餐与订单", key: "commerce" },
-        { label: "数据面与 DNS", key: "infra" },
-        { label: "监控", key: "monitoring" },
+      workspaceOptions: [
+        { key: "overview", label: "运行总览", description: "路由健康与待处理" },
+        { key: "resources", label: "资源与租户", description: "端口、套餐与订单" },
+        { key: "infra", label: "基础设施", description: "数据面、DNS 与监控" },
+      ],
+      resourceTabs: [
+        { key: "ports", label: "端口与租户", description: "监听入口和订阅交付" },
+        { key: "commerce", label: "套餐与订单", description: "售卖、审核与设置" },
+      ],
+      infraTabs: [
+        { key: "infrastructure", label: "数据面与 DNS", description: "路由、探测与故障切换" },
+        { key: "monitoring", label: "监控", description: "Prometheus 与 Grafana" },
       ],
     };
   },
   computed: {
     dataPlaneTone() {
       return this.dataPlaneStatus && this.dataPlaneStatus.xray_running ? "success" : "danger";
+    },
+    activeWorkspaceMeta() {
+      return this.workspaceOptions.find((item) => item.key === this.activeWorkspace) || this.workspaceOptions[0];
+    },
+    workspaceTitle() {
+      return this.activeWorkspaceMeta.label;
+    },
+    workspaceDescription() {
+      return {
+        overview: "先确认当前路径和异常，再进入具体操作。",
+        resources: "管理监听入口、租户交付和商业化服务。",
+        infra: "检查数据面、DNS、AI 路由与观测信号。",
+      }[this.activeWorkspace] || "";
+    },
+    lastRefreshLabel() {
+      return this.meta?.dashboard_updated_at_display || this.meta?.updated_at_display || "自动刷新 15 秒";
     },
   },
   async mounted() {
@@ -103,13 +115,25 @@ export default {
   },
   methods: {
     updateIsMobile() {
-      const mobile = typeof window !== "undefined" && window.innerWidth <= 768;
+      const mobile = typeof window !== "undefined" && window.innerWidth <= 840;
       this.isMobile = mobile;
       if (!mobile) this.mobileNavOpen = false;
     },
-    selectSection(key) {
-      this.activeSection = key;
+    selectWorkspace(key) {
+      this.activeWorkspace = key;
       this.mobileNavOpen = false;
+    },
+    selectResourceTab(key) {
+      this.resourceTab = key;
+    },
+    selectInfraTab(key) {
+      this.infraTab = key;
+    },
+    toggleMobileNav() {
+      this.mobileNavOpen = !this.mobileNavOpen;
+    },
+    async refreshNow() {
+      await this.refreshDashboard();
     },
     async refreshDashboard() {
       if (this.dashboardRefreshBusy || this.loading) return;
@@ -118,7 +142,7 @@ export default {
         const data = await this.requestJson("/api/dashboard");
         this.applyDashboard(data.dashboard || {});
       } catch (_error) {
-        // Keep the last known topology visible when a background refresh fails.
+        // Keep the last known state visible when a background refresh fails.
       } finally {
         this.dashboardRefreshBusy = false;
       }
@@ -136,405 +160,104 @@ export default {
 
 <template>
   <n-config-provider :theme-overrides="themeOverrides">
-    <n-layout has-sider class="admin-root">
-      <n-layout-sider v-if="!isMobile" bordered :width="248" content-class="admin-sider">
-        <div class="brand">
-          <p class="eyebrow">XRAY ROUTING PANEL</p>
-          <h2>控制台</h2>
-          <p class="brand-sub">端口、租户与数据面统一后台</p>
-        </div>
-        <n-menu v-model:value="activeSection" :options="menuOptions" />
-        <div class="sider-cards">
-          <div class="sider-card">
-            <span>数据面状态</span>
-            <strong>{{ dataPlaneRunningLabel(dataPlaneStatus) }}</strong>
-            <small>{{ dataPlaneStatus.management_target || "当前未配置数据面" }}</small>
+    <div class="admin-shell">
+      <aside class="admin-sidebar" :class="{ 'is-open': mobileNavOpen }" aria-label="控制台导航">
+        <div class="sidebar-scroll">
+          <div class="brand-lockup">
+            <div class="brand-mark" aria-hidden="true">XR</div>
+            <div>
+              <p class="brand-kicker">XRAY ROUTING</p>
+              <strong>控制台</strong>
+            </div>
           </div>
-          <div class="sider-card">
-            <span>AI 节点状态</span>
-            <strong>{{ aiNodeStatusLabel() }}</strong>
-            <small>{{ (aiNodeStatus && aiNodeStatus.management_target) || "AI 节点未纳管" }}</small>
-          </div>
-          <div class="sider-card">
-            <span>面板地址</span>
-            <strong>{{ meta.panel_address || "—" }}</strong>
-            <small>{{ (meta.timezone_label || "") + " · Xray Direct" }}</small>
-          </div>
-        </div>
-      </n-layout-sider>
+          <p class="brand-description">网络流量、AI 路由和租户交付的统一操作面。</p>
 
-      <n-drawer v-if="isMobile" v-model:show="mobileNavOpen" :width="262" placement="left">
-        <n-drawer-content body-content-class="admin-sider" :native-scrollbar="false">
-          <div class="brand">
-            <p class="eyebrow">XRAY ROUTING PANEL</p>
-            <h2>控制台</h2>
-            <p class="brand-sub">端口、租户与数据面统一后台</p>
-          </div>
-          <n-menu :value="activeSection" :options="menuOptions" @update:value="selectSection" />
-          <div class="sider-cards">
-            <div class="sider-card">
-              <span>数据面状态</span>
+          <workspace-nav :items="workspaceOptions" :active-key="activeWorkspace" @select="selectWorkspace" />
+
+          <div class="sidebar-status-stack" aria-label="基础设施状态">
+            <div class="sidebar-status-card">
+              <div class="sidebar-status-card__head"><span>DATA PLANE</span><i :class="dataPlaneStatus.xray_running ? 'is-ok' : 'is-bad'"></i></div>
               <strong>{{ dataPlaneRunningLabel(dataPlaneStatus) }}</strong>
               <small>{{ dataPlaneStatus.management_target || "当前未配置数据面" }}</small>
             </div>
-            <div class="sider-card">
-              <span>面板地址</span>
-              <strong>{{ meta.panel_address || "—" }}</strong>
-              <small>{{ (meta.timezone_label || "") + " · Xray Direct" }}</small>
+            <div class="sidebar-status-card">
+              <div class="sidebar-status-card__head"><span>AI NODE</span><i :class="aiNodeStatus && aiNodeStatus.reachable ? 'is-ok' : 'is-warn'"></i></div>
+              <strong>{{ aiNodeStatusLabel() }}</strong>
+              <small>{{ (aiNodeStatus && aiNodeStatus.management_target) || "AI 节点未纳管" }}</small>
             </div>
           </div>
-        </n-drawer-content>
-      </n-drawer>
+        </div>
+        <div class="sidebar-footer">
+          <span>面板地址</span>
+          <strong>{{ meta.panel_address || "—" }}</strong>
+          <small>{{ meta.timezone_label || "服务器本地时区" }}</small>
+        </div>
+      </aside>
 
-      <n-layout>
-        <n-layout-header bordered class="topbar">
-          <div class="topbar-copy">
-            <button
-              v-if="isMobile"
-              class="a-btn ghost nav-toggle"
-              type="button"
-              aria-label="打开菜单"
-              @click="mobileNavOpen = true"
-            >
-              ☰
+      <button v-if="isMobile && mobileNavOpen" class="mobile-scrim" type="button" aria-label="关闭导航" @click="mobileNavOpen = false"></button>
+
+      <div class="admin-main">
+        <header class="admin-topbar">
+          <div class="topbar-leading">
+            <button v-if="isMobile" class="icon-button mobile-menu-button" type="button" aria-label="打开控制台导航" @click="toggleMobileNav">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
-            <div class="topbar-title">
-              <p class="eyebrow">ADMIN WORKSPACE</p>
-              <h1>控制台总览</h1>
+            <div>
+              <p class="breadcrumb">CONTROL PLANE <span>/</span> {{ activeWorkspaceMeta.label.toUpperCase() }}</p>
+              <h1>{{ workspaceTitle }}</h1>
+              <p>{{ workspaceDescription }}</p>
             </div>
           </div>
           <div class="topbar-actions">
+            <div class="refresh-meta">
+              <span class="live-dot" :class="{ 'is-busy': dashboardRefreshBusy }"></span>
+              <span>{{ dashboardRefreshBusy ? "同步中" : lastRefreshLabel }}</span>
+            </div>
             <status-pill :tone="dataPlaneTone" :label="dataPlaneRunningLabel(dataPlaneStatus)" />
-            <span class="topbar-badge">端口 · {{ summary.total_ports || 0 }}</span>
-            <button v-if="authEnabled" class="a-btn ghost" type="button" @click="logout">退出登录</button>
+            <button class="icon-button" type="button" :aria-label="dashboardRefreshBusy ? '正在刷新' : '刷新数据'" :disabled="dashboardRefreshBusy" @click="refreshNow">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.9-3M4 5v4h4M4 13a8.1 8.1 0 0 0 14.9 3M20 19v-4h-4" /></svg>
+            </button>
+            <button v-if="authEnabled" class="topbar-logout" type="button" @click="logout">退出登录</button>
           </div>
-        </n-layout-header>
+        </header>
 
-        <n-layout-content class="content">
-          <div v-if="flash.message" class="banner" :class="flash.level || 'info'">
+        <main class="admin-content">
+          <div v-if="flash.message" class="admin-notice" :class="`is-${flash.level || 'info'}`" role="status" aria-live="polite">
+            <span class="admin-notice__mark" aria-hidden="true">{{ flash.level === "error" ? "!" : "i" }}</span>
             <span>{{ flash.message }}</span>
-            <button class="a-btn link" type="button" @click="clearFlash">关闭</button>
+            <button class="notice-close" type="button" aria-label="关闭提示" @click="clearFlash">关闭</button>
+          </div>
+
+          <div v-if="activeWorkspace === 'resources'" class="workspace-tabs" role="tablist" aria-label="资源与租户视图">
+            <button v-for="tab in resourceTabs" :key="tab.key" class="workspace-tab" :class="{ 'is-active': resourceTab === tab.key }" type="button" role="tab" :aria-selected="resourceTab === tab.key" @click="selectResourceTab(tab.key)">
+              <strong>{{ tab.label }}</strong><small>{{ tab.description }}</small>
+            </button>
+          </div>
+          <div v-if="activeWorkspace === 'infra'" class="workspace-tabs" role="tablist" aria-label="基础设施视图">
+            <button v-for="tab in infraTabs" :key="tab.key" class="workspace-tab" :class="{ 'is-active': infraTab === tab.key }" type="button" role="tab" :aria-selected="infraTab === tab.key" @click="selectInfraTab(tab.key)">
+              <strong>{{ tab.label }}</strong><small>{{ tab.description }}</small>
+            </button>
           </div>
 
           <n-spin :show="loading">
-            <overview-section v-show="activeSection === 'overview'" />
-            <ports-section v-show="activeSection === 'ports'" />
-            <commerce-section v-show="activeSection === 'commerce'" />
-            <infra-section v-show="activeSection === 'infra'" />
-            <monitoring-section v-show="activeSection === 'monitoring'" />
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'overview' }" :aria-hidden="activeWorkspace !== 'overview'">
+              <overview-section />
+            </section>
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'resources' || resourceTab !== 'ports' }" :aria-hidden="activeWorkspace !== 'resources' || resourceTab !== 'ports'">
+              <ports-section />
+            </section>
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'resources' || resourceTab !== 'commerce' }" :aria-hidden="activeWorkspace !== 'resources' || resourceTab !== 'commerce'">
+              <commerce-section />
+            </section>
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'infra' || infraTab !== 'infrastructure' }" :aria-hidden="activeWorkspace !== 'infra' || infraTab !== 'infrastructure'">
+              <infra-section />
+            </section>
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'infra' || infraTab !== 'monitoring' }" :aria-hidden="activeWorkspace !== 'infra' || infraTab !== 'monitoring'">
+              <monitoring-section />
+            </section>
           </n-spin>
-        </n-layout-content>
-      </n-layout>
-    </n-layout>
+        </main>
+      </div>
+    </div>
   </n-config-provider>
 </template>
-
-<style>
-/* App-wide (unscoped) helpers shared by the section components. */
-body {
-  margin: 0;
-  font-family: var(--font-sans);
-  color: var(--c-text);
-  background: var(--c-bg);
-}
-.admin-root {
-  min-height: 100vh;
-}
-.admin-sider {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  padding: var(--space-6) var(--space-4);
-}
-.brand h2 {
-  margin: 4px 0;
-  font-size: 22px;
-}
-.brand-sub {
-  margin: 0;
-  font-size: 14px;
-  color: var(--c-text-muted);
-}
-.eyebrow {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--c-primary);
-}
-.sider-cards {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin-top: auto;
-}
-.sider-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-3);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  background: var(--c-surface-muted);
-}
-.sider-card span {
-  font-size: 14px;
-  color: var(--c-text-muted);
-}
-.sider-card strong {
-  font-size: 17px;
-}
-.sider-card small {
-  font-size: 13px;
-  color: var(--c-text-soft);
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-6);
-  background: var(--c-surface);
-}
-.topbar-copy h1 {
-  margin: 2px 0 0;
-  font-size: 26px;
-}
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.topbar-badge {
-  font-size: 14px;
-  color: var(--c-text-muted);
-  padding: 4px 10px;
-  border: 1px solid var(--c-line);
-  border-radius: 999px;
-}
-.content {
-  padding: var(--space-6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-}
-.banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--r-md);
-  border: 1px solid var(--c-line);
-  background: var(--c-surface);
-}
-.banner.success {
-  border-color: var(--c-success);
-  background: var(--c-success-soft);
-}
-.banner.error {
-  border-color: var(--c-danger);
-  background: var(--c-danger-soft);
-}
-.banner.info {
-  border-color: var(--c-primary);
-  background: var(--c-primary-soft);
-}
-
-/* Section / card / form helpers */
-.a-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-}
-.a-card {
-  background: var(--c-surface);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-lg);
-  padding: var(--space-6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-.a-card-head h3 {
-  margin: 2px 0;
-  font-size: 21px;
-}
-.a-card-head p {
-  margin: 0;
-  font-size: 15px;
-  color: var(--c-text-muted);
-}
-.a-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--space-3);
-}
-.a-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-4);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  background: var(--c-surface-muted);
-}
-.a-tile span {
-  font-size: 14px;
-  color: var(--c-text-muted);
-}
-.a-tile strong {
-  font-size: 26px;
-}
-.a-tile small {
-  font-size: 13px;
-  color: var(--c-text-soft);
-}
-.a-tile strong.ok {
-  color: var(--c-success);
-}
-.a-tile strong.bad {
-  color: var(--c-danger);
-}
-.a-tile strong.warn {
-  color: var(--c-warning);
-}
-.a-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-3);
-}
-.a-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.a-field.full {
-  grid-column: 1 / -1;
-}
-.a-field span {
-  font-size: 14px;
-  color: var(--c-text-muted);
-}
-.a-input {
-  height: 38px;
-  padding: 0 12px;
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  background: var(--c-surface);
-  color: var(--c-text);
-  font-size: 16px;
-}
-.a-input:focus {
-  outline: none;
-  border-color: var(--c-primary);
-  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12);
-}
-.a-check {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-}
-.a-actions {
-  display: flex;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-.a-btn {
-  height: 38px;
-  padding: 0 16px;
-  border-radius: var(--r-md);
-  border: 1px solid transparent;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.a-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.a-btn.primary {
-  background: var(--c-primary);
-  color: #fff;
-}
-.a-btn.secondary {
-  background: var(--c-primary-soft);
-  color: var(--c-primary-strong);
-  border-color: var(--c-primary-soft);
-}
-.a-btn.danger {
-  background: var(--c-danger-soft);
-  color: var(--c-danger);
-  border-color: var(--c-danger-soft);
-}
-.a-btn.ghost {
-  background: transparent;
-  border-color: var(--c-line);
-  color: var(--c-text-muted);
-}
-.a-btn.link {
-  background: transparent;
-  border: none;
-  color: var(--c-primary);
-  padding: 0 4px;
-}
-.a-empty {
-  padding: var(--space-6);
-  text-align: center;
-  color: var(--c-text-muted);
-  border: 1px dashed var(--c-line);
-  border-radius: var(--r-md);
-}
-
-/* Mobile layout: drawer-based nav replaces the persistent sider, paddings and
- * type scale down so cards and forms stay usable on a phone-width viewport. */
-.topbar-copy {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-.nav-toggle {
-  flex: none;
-  width: 38px;
-  padding: 0;
-  font-size: 20px;
-  line-height: 1;
-}
-
-@media (max-width: 768px) {
-  .topbar {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
-  }
-  .topbar-copy h1 {
-    font-size: 20px;
-  }
-  .topbar-actions {
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-  .content {
-    padding: var(--space-4);
-    gap: var(--space-4);
-  }
-  .a-card {
-    padding: var(--space-4);
-  }
-  .a-card-head h3 {
-    font-size: 19px;
-  }
-  .a-tile strong {
-    font-size: 22px;
-  }
-  .a-tiles,
-  .a-grid {
-    grid-template-columns: 1fr;
-  }
-  .a-actions .a-btn {
-    flex: 1 1 auto;
-  }
-}
-</style>

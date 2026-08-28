@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>xray-routing-panel 控制台</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='admin/admin.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin/admin.css') }}?v=20260828-port-actions">
     <script>
       window.__BOOT__ = {{ boot | tojson }};
     </script>
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="{{ url_for('static', filename='admin/admin.js') }}?v=20260824-ai-manual-switch"></script>
+    <script type="module" src="{{ url_for('static', filename='admin/admin.js') }}?v=20260828-port-actions"></script>
   </body>
 </html>

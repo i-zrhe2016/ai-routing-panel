@@ -9,6 +9,7 @@ import App from "../App.vue";
 describe("landing App", () => {
   beforeEach(() => {
     global.fetch = vi.fn(() => Promise.reject(new Error("offline")));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   });
   afterEach(() => {
     vi.restoreAllMocks();

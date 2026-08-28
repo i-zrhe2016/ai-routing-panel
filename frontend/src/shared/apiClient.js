@@ -40,6 +40,11 @@ function markErrorReported(error) {
   return false;
 }
 
+export function shouldReportHttpError(status) {
+  const code = Number(status || 0);
+  return code === 401 || code >= 500;
+}
+
 export function reportClientError({
   url = typeof window !== "undefined" ? window.location.pathname : "unknown",
   method = "RUNTIME",
@@ -161,7 +166,9 @@ export function createApiClient({ csrfToken = "", loginUrl = "/login", onUnautho
     }
     if (!response.ok || data.ok === false) {
       const error = new ApiError(data.message || `请求失败（${response.status}）。`, response.status, data);
-      reportClientError({ url, method, error, csrfToken: token, status: response.status, source: "http" });
+      if (shouldReportHttpError(response.status)) {
+        reportClientError({ url, method, error, csrfToken: token, status: response.status, source: "http" });
+      }
       throw error;
     }
     return data;

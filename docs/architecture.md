@@ -35,7 +35,7 @@
 
 - 入口代码：`app/panel.py`（进程入口）→ `app/web/`（`create_app` 工厂 + 按域视图模块）、`app/state/`（`PanelState` facade 组合域 service）
 - `PanelState` 持有两个受管节点控制器：`data_plane`（普通数据面）和 `ai_node`（AI 节点），均复用 `DataPlaneController` / `ManagedNodeController`（`app/xray/node_control.py`）
-- Flask 同时托管：管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、公共/认证页（`/plans`、`/customer/*`）、租户订阅直达（`/tenant/<token>`）和探针/AI 仪表盘；前端发布资源位于 `app/static/{admin,portal,landing}`，`frontend/src` 仅作为源码快照保留
+- Flask 同时托管：管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、公共/认证页（`/plans`、`/customer/*`）、租户订阅直达（`/tenant/<token>`）和探针/AI 仪表盘；前端发布资源位于 `app/static/{admin,portal,landing}`，Admin 源码与 Vite 配置位于 `frontend/`
 - 保存端口、租户、流量、AI 聚合，以及商业化数据（客户、套餐、订单、服务订阅、支付凭证）到 `data/panel.db`
 - 保存 DNS 故障切换状态和事件历史到 `data/panel.db`
 - 根据数据库内容生成 `app/xray/runtime/panel-ports.json`

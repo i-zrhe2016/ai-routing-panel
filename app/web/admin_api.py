@@ -186,8 +186,12 @@ def api_create_port():
         log_business_event("port.created", resource_type="port", resource_id=port_id, metadata={"listen_port": payload.get("listen_port")})
     except sqlite3.IntegrityError as exc:
         if is_listen_port_conflict(exc):
-            log_business_event("port.created", result="failure", error_code="conflict", resource_type="port", metadata={"listen_port": payload.get("listen_port", "")})
-            return json_error_response("监听端口已存在，请更换其他端口。", status_code=409)
+            log_business_event(
+                "port.created",
+                resource_type="port",
+                metadata={"listen_port": payload.get("listen_port", ""), "already_exists": True},
+            )
+            return json_snapshot_success_response("监听端口已存在，已选中已有端口。", level="info")
         raise
     except (ValidationError, RuntimeError) as exc:
         log_business_event("port.created", result="failure", error_code="validation", message=str(exc), resource_type="port")
@@ -230,6 +234,14 @@ def api_delete_port(port_id):
         log_business_event("port.deleted", resource_type="port", resource_id=port_id)
         return json_success_response("端口已删除。")
     except (ValidationError, RuntimeError) as exc:
+        if isinstance(exc, ValidationError) and str(exc) == "端口记录不存在。":
+            log_business_event(
+                "port.deleted",
+                resource_type="port",
+                resource_id=port_id,
+                metadata={"already_missing": True},
+            )
+            return json_snapshot_success_response("端口已不存在，列表已刷新。", level="info")
         log_business_event("port.deleted", result="failure", error_code="rejected", message=str(exc), resource_type="port", resource_id=port_id)
         return json_error_response(str(exc), status_code=400)
 

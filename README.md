@@ -155,8 +155,9 @@ ruff check .
 black --check .
 ```
 
-前端发布资源已随仓库保存在 `app/static/{admin,portal,landing}`，运行和部署不需要 JavaScript 构建工具。
-`frontend/src` 仅保留源码快照，不参与镜像构建。
+前端发布资源仍随仓库保存在 `app/static/{admin,portal,landing}`，运行时和镜像内不需要 JavaScript 构建工具。
+Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会将 Admin bundle 写入
+`app/static/admin/`，再由 Flask/Docker 直接发布。
 
 完整流程见[开发与启动](docs/development.md)。
 

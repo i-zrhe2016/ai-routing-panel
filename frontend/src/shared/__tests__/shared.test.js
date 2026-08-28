@@ -138,6 +138,21 @@ describe("apiClient", () => {
     expect(report.url_path).toBe("/api/dashboard");
   });
 
+  it("does not report handled 409 business responses as frontend failures", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(409, { ok: false, message: "监听端口已存在。" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createApiClient({ csrfToken: "csrf-123" });
+
+    await expect(api.post("/api/ports", { listen_port: 31098 })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 409,
+      message: "监听端口已存在。",
+    });
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("reports uncaught window errors", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(202, { ok: true }));
     vi.stubGlobal("fetch", fetchMock);

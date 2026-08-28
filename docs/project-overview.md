@@ -18,7 +18,7 @@
 
 - `xray-routing-panel`（控制面）
   - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`）以及探针/AI 仪表盘
-  - 前端发布资源位于 `app/static/admin/*`、`app/static/portal/*` 与 `app/static/landing/*`；`frontend/src` 仅作为源码快照保留
+  - 前端发布资源位于 `app/static/admin/*`、`app/static/portal/*` 与 `app/static/landing/*`；Admin 源码与 Vite 配置位于 `frontend/`，构建产物写回 `app/static/admin/*`
   - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
   - 通过 Tailscale SSH 纳管普通数据面；AI 节点当前是控制面本机 Docker `xray-ai-node`，也支持显式切换为远端 SSH 模式
   - 维护 `dns_failover_state` / `dns_failover_history`
@@ -129,7 +129,8 @@ docker compose --profile backup-xray up -d xray-reality-backup
 ```
 
 > 前端发布资源已随仓库保存在 `app/static/{admin,portal,landing}`，`docker compose --build`
-> 直接将其复制进镜像。运行时和镜像构建不安装 JavaScript 构建工具。
+> 直接将其复制进镜像。运行时和镜像构建不安装 JavaScript 构建工具；Admin 修改需在宿主机
+> `frontend/` 中完成测试和构建。
 
 默认地址：
 
@@ -348,7 +349,8 @@ docker compose run --rm xray-routing-panel-db-backup \
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests -q
 
-# 前端发布资源已在 app/static/，无需额外构建步骤
+# Admin 前端测试与构建
+cd frontend && npm ci && npm test && npm run build
 ```
 
 ## 文档导航

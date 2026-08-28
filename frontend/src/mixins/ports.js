@@ -96,19 +96,50 @@ export const PortsMixin = {
       this.createForm = createEmptyPortForm();
     },
 
+    findPortByListenPort(listenPort) {
+      const target = String(listenPort ?? "").trim();
+      if (!target) return null;
+      return this.ports.find((port) => String(port.listen_port) === target) || null;
+    },
+
+    revealPort(port) {
+      if (!port) return;
+      this.filters.query = "";
+      this.filters.status = "all";
+      this.selectedPortId = port.id;
+    },
+
+    async refreshPortsFromDashboard() {
+      const data = await this.requestJson("/api/dashboard");
+      this.applyDashboard(data.dashboard || {});
+    },
+
     async createPort() {
       await this.runAction("create-port", async () => {
-        const createdListenPort = String(this.createForm.listen_port || "");
-        const data = await this.requestJson("/api/ports", {
-          method: "POST",
-          body: JSON.stringify(this.createForm),
-        });
-        this.applyResponse(data);
-        if (createdListenPort) {
-          const createdPort = this.ports.find((port) => String(port.listen_port) === createdListenPort);
-          if (createdPort) {
-            this.selectedPortId = createdPort.id;
+        const createdListenPort = String(this.createForm.listen_port ?? "").trim();
+        let data;
+        try {
+          data = await this.requestJson("/api/ports", {
+            method: "POST",
+            body: JSON.stringify(this.createForm),
+          });
+        } catch (error) {
+          if (error.status === 409 && createdListenPort) {
+            await this.refreshPortsFromDashboard();
+            const existingPort = this.findPortByListenPort(createdListenPort);
+            if (existingPort) {
+              this.revealPort(existingPort);
+              this.setFlash("监听端口已存在，已选中已有端口。", "info");
+              this.resetCreateForm();
+              return;
+            }
           }
+          throw error;
+        }
+        this.applyResponse(data);
+        const createdPort = this.findPortByListenPort(createdListenPort);
+        if (createdPort) {
+          this.revealPort(createdPort);
         }
         this.resetCreateForm();
       });
@@ -146,9 +177,19 @@ export const PortsMixin = {
         return;
       }
       await this.runAction(`delete:${port.id}`, async () => {
-        const data = await this.requestJson(`/api/ports/${port.id}`, {
-          method: "DELETE",
-        });
+        let data;
+        try {
+          data = await this.requestJson(`/api/ports/${port.id}`, {
+            method: "DELETE",
+          });
+        } catch (error) {
+          if (error.status === 400 && error.message === "端口记录不存在。") {
+            await this.refreshPortsFromDashboard();
+            this.setFlash("端口已不存在，列表已刷新。", "info");
+            return;
+          }
+          throw error;
+        }
         this.applyResponse(data);
       });
     },
