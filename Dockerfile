@@ -1,18 +1,16 @@
 FROM ghcr.io/xtls/xray-core:26.5.3 AS xray-core
 
-FROM debian:bookworm-slim
+FROM python:3.12-slim
 
 ARG CODEX_CLI_VERSION=0.145.0
 
-# Runtime deps. python3-pip replaces the apt python3-flask package (the Python
-# deps are pinned in requirements.txt and installed with pip).
+# Runtime dependencies. Python and pip are supplied by the official runtime
+# image; application dependencies remain pinned in requirements.txt.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         cron \
         ca-certificates \
-        docker.io \
-        python3 \
-        python3-pip \
+        docker-cli \
         openssh-client \
         tar \
     && rm -rf /var/lib/apt/lists/* \

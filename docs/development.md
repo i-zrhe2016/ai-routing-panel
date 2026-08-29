@@ -7,6 +7,15 @@
 - 如果启用完整数据面，确认 `443` 未被其他进程占用
 - 如果启用 Codex 域名分类，宿主机需要可用的 `codex` CLI 登录态
 
+控制面镜像使用官方 `python:3.12-slim` 运行时基础镜像，应用依赖由
+`requirements.txt` 通过 pip 安装。构建请使用项目约定的 CPU-aware Docker
+构建脚本，避免绕过统一的 BuildKit 资源限制：
+
+```bash
+/root/docker-build-cpu/scripts/docker-build.sh \
+  xray-routing-panel-xray-routing-panel:latest .
+```
+
 ## 推荐本地路径：完整栈
 
 ```bash

@@ -3,10 +3,9 @@ name = "xray-routing-panel"
 version = "0.1.0"
 description = "Control panel for managing Xray REALITY proxy nodes, tenants, and subscription commerce."
 requires-python = ">=3.10"
-# Runtime versions are pinned to match the Debian bookworm python3-flask stack
-# the container currently ships, so the pip-based image stays behavior-compatible
-# with the apt-based one. Bump deliberately in a dedicated phase, never as a
-# side effect of an unrelated change.
+# Runtime versions are pinned so the pip-based image stays behavior-compatible
+# across the Debian runtime base. Bump deliberately in a dedicated phase, never
+# as a side effect of an unrelated change.
 dependencies = [
     "Flask==2.2.5",
     "Werkzeug==2.2.3",

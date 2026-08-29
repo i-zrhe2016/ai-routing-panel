@@ -1,6 +1,5 @@
-# Runtime dependencies, pinned to the Debian bookworm python3-flask stack the
-# container currently ships. Source of truth is pyproject.toml [project.dependencies].
-# Installed by the Dockerfile in place of the apt python3-flask package.
+# Runtime dependencies are installed with pip in the Python 3.12 slim image.
+# Source of truth is pyproject.toml [project.dependencies].
 Flask==2.2.5
 Werkzeug==2.2.3
 Jinja2==3.1.2
