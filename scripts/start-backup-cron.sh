@@ -34,7 +34,7 @@ set -eu
 : "${DB_BACKUP_AI_NODE_REMOTE_PATHS:=}"
 : "${DB_BACKUP_AI_NODE_DEPLOY_ROOT:=/root/xray-routing-panel}"
 : "${DB_BACKUP_CRON_SCHEDULE:=0 3 * * *}"
-: "${DB_BACKUP_R2_ENABLED:=0}"
+: "${DB_BACKUP_R2_ENABLED:=1}"
 : "${DB_BACKUP_R2_ENDPOINT:=}"
 : "${DB_BACKUP_R2_BUCKET:=}"
 : "${DB_BACKUP_R2_ACCESS_KEY_ID:=}"

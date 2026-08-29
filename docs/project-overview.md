@@ -245,7 +245,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过 Tailscale 严格只读 SSH 采集普通数据面 `100.65.108.93:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
 
-如需在备份完成后自动加密并上传到 Cloudflare R2：
+Compose 备份服务默认会在备份完成后自动加密并上传到 Cloudflare R2；首次部署前请在根 `.env` 中填入：
 
 - 在根 `.env` 中设置 `DB_BACKUP_R2_ENABLED=1`
 - 设置 `DB_BACKUP_R2_ENDPOINT`、`DB_BACKUP_R2_BUCKET`

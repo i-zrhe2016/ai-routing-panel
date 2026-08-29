@@ -89,7 +89,7 @@ Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥�
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
 | `DB_BACKUP_RECOVERY_REQUIRED` | `0` | `1` 时不完整节点恢复包阻止后续上传；默认保留数据库备份并记录状态 |
 | `DB_BACKUP_RECOVERY_STATUS_PATH` | 归档目录下的 `node-recovery-status.json` | 最近一次节点恢复完整性报告 |
-| `DB_BACKUP_R2_ENABLED` | `0` | 是否将加密灾备归档上传到 R2 |
+| `DB_BACKUP_R2_ENABLED` | `1`（Compose） | 是否将加密灾备归档上传到 R2；Kubernetes 需显式设置并注入凭据 |
 | `DB_BACKUP_R2_ENDPOINT` | 空 | Cloudflare R2 S3 endpoint |
 | `DB_BACKUP_R2_BUCKET` | 空 | R2 bucket 名称 |
 | `DB_BACKUP_R2_ACCESS_KEY_ID` | 空 | R2 S3 access key ID |

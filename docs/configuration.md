@@ -120,7 +120,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 
 | 变量 | 说明 |
 | --- | --- |
-| `DB_BACKUP_R2_ENABLED` | 是否在每日本地备份成功后上传；默认 `0` |
+| `DB_BACKUP_R2_ENABLED` | 是否在每日本地备份成功后上传；Compose 备份服务默认 `1`，Kubernetes/直接执行脚本需显式启用 |
 | `DB_BACKUP_R2_ENDPOINT` | Cloudflare R2 S3 endpoint，必须使用 HTTPS |
 | `DB_BACKUP_R2_BUCKET` | R2 bucket 名称 |
 | `DB_BACKUP_R2_ACCESS_KEY_ID` / `DB_BACKUP_R2_SECRET_ACCESS_KEY` | R2 S3 凭据，只通过部署环境或 Secret 注入 |
