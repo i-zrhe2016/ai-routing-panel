@@ -1,0 +1,37 @@
+@startuml
+!theme plain
+title Xray node backup validation and replacement
+left to right direction
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam defaultFontName Arial
+
+actor "Operator" as operator
+cloud "Local backup /\nCloudflare R2" as archive #F9E79F
+component "node_recovery.py\nvalidate\nSHA-256 + path checks" as validator #D7BDE2
+component "node_recovery.py\nprepare\nportable node layout" as preparer #FAD7A0
+node "New empty host\nDocker + network ready" as host #E0F2FE
+component "docker-compose.node.yml\nstandalone Xray" as compose #A9DFBF
+node "Normal data plane\nor AI data plane" as node #DCFCE7
+database "Shared panel.db\ninside archive" as db #D3D3D3
+
+operator --> archive : select last complete bundle
+archive --> validator : read archive
+validator --> db : verify database hash
+validator --> preparer : recoveryReady=true
+preparer --> host : write only validated files
+host --> compose : docker compose up -d
+compose --> node : start Xray
+operator --> node : Tailscale / firewall / endpoint check
+operator --> host : health and traffic verification
+
+note bottom of validator
+  Invalid hashes, missing required files,
+  duplicate members, and traversal paths fail closed.
+end note
+
+note bottom of preparer
+  SSH keys, known_hosts, cloud credentials,
+  and infrastructure provisioning remain external secrets.
+end note
+@enduml

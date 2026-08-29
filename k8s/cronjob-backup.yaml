@@ -54,7 +54,14 @@ spec:
                 - name: shared-storage
                   mountPath: /app/xray/runtime
                   subPath: runtime
+                - name: xray-env
+                  mountPath: /app/xray/.env
+                  subPath: xray.env
+                  readOnly: true
           volumes:
             - name: shared-storage
               persistentVolumeClaim:
                 claimName: xray-routing-panel-shared
+            - name: xray-env
+              secret:
+                secretName: xray-routing-panel-secrets

@@ -18,6 +18,11 @@ import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from node_recovery import NODE_RECOVERY_MANIFEST_NAME, build_node_recovery_manifest
+except ModuleNotFoundError:
+    from scripts.node_recovery import NODE_RECOVERY_MANIFEST_NAME, build_node_recovery_manifest
+
 
 STAMP_PATTERN = re.compile(r"(\d{8})T(\d{6})Z")
 
@@ -115,6 +120,39 @@ def _add_source(archive, source, arcname, file_entries):
             continue
 
 
+def _add_generated_file(archive, archive_path, data, file_entries):
+    """Add generated metadata and cover it with the same top-level manifest."""
+
+    archive_path = Path(archive_path).as_posix()
+    info = tarfile.TarInfo(archive_path)
+    info.size = len(data)
+    info.mtime = int(datetime.now(timezone.utc).timestamp())
+    archive.addfile(info, fileobj=io.BytesIO(data))
+    file_entries.append(
+        {
+            "archivePath": archive_path,
+            "sourcePath": f"<generated>/{archive_path}",
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+    )
+
+
+def _read_remote_collection_manifest(named_sources):
+    for source, archive_name in named_sources:
+        if Path(archive_name) != Path("nodes"):
+            continue
+        manifest_path = Path(source) / "remote-node-collection.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+    return None
+
+
 def create_backup_bundle(backup_path, extra_paths, bundle_dir, prefix, named_paths=()):
     """Create a gzip tar archive and return its final path.
 
@@ -153,6 +191,20 @@ def create_backup_bundle(backup_path, extra_paths, bundle_dir, prefix, named_pat
                     skipped.append(str(source))
                     continue
                 _add_source(archive, resolved, archive_name, file_entries)
+
+            node_manifest = build_node_recovery_manifest(
+                file_entries,
+                _read_remote_collection_manifest(named_sources),
+            )
+            node_manifest_bytes = (
+                json.dumps(node_manifest, ensure_ascii=False, indent=2) + "\n"
+            ).encode("utf-8")
+            _add_generated_file(
+                archive,
+                NODE_RECOVERY_MANIFEST_NAME,
+                node_manifest_bytes,
+                file_entries,
+            )
 
             manifest = {
                 "version": 1,

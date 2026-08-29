@@ -80,11 +80,11 @@
 - 将 `ai_candidates`、`manual_mode`、当前 `ai_target` 和不可达原因提供给控制台
 - 输出动态路由片段、小时报表、数据库聚合快照
 
-### 灾备归档与 R2 上传组件
+### 灾备归档、完整性与节点恢复组件
 
-- 入口代码：`scripts/run_db_backup_cycle.py`、`scripts/collect_remote_backup.py`、`scripts/build_backup_bundle.py`、`scripts/upload_backup_r2.py`
+- 入口代码：`scripts/run_db_backup_cycle.py`、`scripts/collect_remote_backup.py`、`scripts/build_backup_bundle.py`、`scripts/node_recovery.py`、`scripts/upload_backup_r2.py`
 - 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件，并通过严格只读 SSH 收集普通数据面的实际配置；本机 AI 配置随控制面运行时目录归档
-- `collect_remote_backup.py` 只负责 SSH、校验和 staging；`build_backup_bundle.py` 只负责归档和 manifest；`upload_backup_r2.py` 只负责加密、R2 上传和记录写入
+- `collect_remote_backup.py` 只负责 SSH、校验和 staging；`build_backup_bundle.py` 负责归档及两个 manifest；`node_recovery.py` 负责归档验证和替换节点目录准备；`upload_backup_r2.py` 只负责加密、R2 上传和记录写入
 - 按配置调用 Cloudflare R2 做加密归档的异地保存，不进入快速恢复或故障切换路径
 
 ## 节点模式判定
@@ -123,7 +123,7 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 9. 自动模式下所有候选不可达，或人工固定目标不可达时，管理器删除 `dynamic-routing.json`，AI 流量回退数据面 freedom 直出。
 10. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
 11. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
-12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成 `backups/*-disaster-*.tar.gz`；本机 AI 配置来自 `config/`，启用时调用 Cloudflare R2 上传加密灾备归档。
+12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；本机 AI 配置来自 `config/`，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
 13. 首页读取三节点状态、双 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
 ## 关键运行产物
@@ -132,7 +132,9 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 - `data/panel.db` 内 `dns_failover_state` / `dns_failover_history`：DNS 切换当前态和最近事件
 - `backups/*.db`：最近几天的本地数据库备份
 - `backups/*-disaster-*.tar.gz`：包含数据库与配置文件的离线灾备归档
+- `backups/node-recovery-status.json`：最近一次节点恢复完整性状态
 - 归档 `nodes/remote-node-collection.json`：普通数据面的 SSH 目标、文件状态和 SHA-256；显式启用远端 AI 采集时才会增加 AI 节点项
+- 归档 `node-recovery-manifest.json`：节点必需/可选文件、恢复目标路径和 `recoveryReady`
 - `backups/r2-upload-record.json`：最新一次 R2 上传记录
 - `app/xray/runtime/panel-ports.json`：当前有效监听端口列表
 - `app/xray/runtime/config.json`：普通数据面 Xray 服务端配置

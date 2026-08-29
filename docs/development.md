@@ -158,6 +158,17 @@ docker compose run --rm \
   python3 /app/scripts/run_db_backup_cycle.py
 ```
 
+验证归档完整性并准备替换节点：
+
+```bash
+python3 scripts/node_recovery.py validate --bundle ./backups/<bundle>.tar.gz --require-ready --json
+python3 scripts/node_recovery.py prepare \
+  --bundle ./backups/<bundle>.tar.gz \
+  --node normal-data-plane \
+  --output-dir /tmp/xray-node-recovery
+docker compose -f /tmp/xray-node-recovery/docker-compose.node.yml config
+```
+
 仅直接启动面板进程（非 Docker）：
 
 ```bash

@@ -101,6 +101,40 @@ class BackupCycleTest(unittest.TestCase):
             backups = list(backup_dir.glob("panel-test-*.db"))
             self.assertEqual(len(backups), 1)
 
+    def test_recovery_required_rejects_incomplete_node_bundle_after_writing_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = self.create_source_db(root)
+            backup_dir = root / "backups"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "DB_PATH": str(db_path),
+                    "DB_BACKUP_DIR": str(backup_dir),
+                    "DB_BACKUP_PREFIX": "panel-test",
+                    "DB_BACKUP_BUNDLE_DIR": str(backup_dir),
+                    "DB_BACKUP_EXTRA_PATHS": "",
+                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "0",
+                    "DB_BACKUP_RECOVERY_REQUIRED": "1",
+                    "DB_BACKUP_R2_ENABLED": "0",
+                }
+            )
+
+            completed = subprocess.run(
+                [sys.executable, str(RUN_CYCLE_SCRIPT)],
+                cwd=str(ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("node recovery artifacts are incomplete", completed.stderr)
+            status_path = backup_dir / "node-recovery-status.json"
+            self.assertTrue(status_path.is_file())
+            self.assertFalse(json.loads(status_path.read_text(encoding="utf-8"))["recoveryReady"])
+
     def test_run_db_backup_cycle_skips_cleanly_when_database_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -132,9 +166,12 @@ class BackupCycleTest(unittest.TestCase):
             runtime = root / "app" / "xray" / "runtime"
             runtime.mkdir(parents=True)
             (runtime / "config.json").write_text('{"inbounds": []}\n', encoding="utf-8")
+            upload = root / "data" / "uploads" / "payment-proofs" / "order-1" / "proof.png"
+            upload.parent.mkdir(parents=True)
+            upload.write_bytes(b"business attachment")
             bundle = module.create_backup_bundle(
                 database,
-                [str(runtime), str(root / "missing.env")],
+                [str(runtime), str(upload.parent.parent.parent), str(root / "missing.env")],
                 root / "backups",
                 "panel-test",
             )
@@ -143,6 +180,12 @@ class BackupCycleTest(unittest.TestCase):
             with tarfile.open(bundle, "r:gz") as archive:
                 self.assertIn("database/panel-20260808T030000Z.db", archive.getnames())
                 self.assertIn("config/" + str(runtime).lstrip("/") + "/config.json", archive.getnames())
+                upload_archive = (
+                    "config/"
+                    + str(upload.parent.parent.parent).lstrip("/")
+                    + "/payment-proofs/order-1/proof.png"
+                )
+                self.assertIn(upload_archive, archive.getnames())
                 manifest = json.load(archive.extractfile("backup-manifest.json"))
                 for entry in manifest["files"]:
                     archived = archive.extractfile(entry["archivePath"])

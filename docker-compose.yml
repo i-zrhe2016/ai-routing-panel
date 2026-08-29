@@ -126,7 +126,10 @@ services:
       DB_BACKUP_BUNDLE_DIR: "${DB_BACKUP_BUNDLE_DIR:-/backups}"
       DB_BACKUP_BUNDLE_KEEP_DAYS: "${DB_BACKUP_BUNDLE_KEEP_DAYS:-7}"
       DB_BACKUP_BUNDLE_PREFIX: "${DB_BACKUP_BUNDLE_PREFIX:-xray-routing-panel}"
-      DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/k8s,/project/app/xray/.env,/project/app/xray/runtime,/project/scripts}"
+      DB_BACKUP_RECOVERY_REQUIRED: "${DB_BACKUP_RECOVERY_REQUIRED:-0}"
+      DB_BACKUP_RECOVERY_STATUS_PATH: "${DB_BACKUP_RECOVERY_STATUS_PATH:-/backups/node-recovery-status.json}"
+      DB_BACKUP_OPS_DB_PATH: "${DB_BACKUP_OPS_DB_PATH:-/ops-data/ops.db}"
+      DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/k8s,/project/app/xray/.env,/project/app/xray/runtime,/project/app/xray/reports,/project/scripts,/data/uploads}"
       # Read the actual normal/AI node files over the Tailscale SSH network
       # before bundling. Both management endpoints use the standard SSH port.
       DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-1}"
@@ -141,13 +144,15 @@ services:
       DB_BACKUP_DATAPLANE_KNOWN_HOSTS: "${DB_BACKUP_DATAPLANE_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DB_BACKUP_DATAPLANE_SSH_OPTIONS: "${DB_BACKUP_DATAPLANE_SSH_OPTIONS:-}"
       DB_BACKUP_DATAPLANE_CONFIG_PATH: "${DB_BACKUP_DATAPLANE_CONFIG_PATH:-}"
-      DB_BACKUP_DATAPLANE_REMOTE_PATHS: "${DB_BACKUP_DATAPLANE_REMOTE_PATHS:-/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env}"
+      DB_BACKUP_DATAPLANE_REMOTE_PATHS: "${DB_BACKUP_DATAPLANE_REMOTE_PATHS:-/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json,/root/xray-routing-panel/app/xray/runtime/client-test.json,/root/xray-routing-panel/app/xray/runtime/client-share.txt,/root/xray-routing-panel/app/xray/reports/hourly-domains/latest.json}"
+      DB_BACKUP_DATAPLANE_DEPLOY_ROOT: "${DB_BACKUP_DATAPLANE_DEPLOY_ROOT:-/root/xray-routing-panel}"
       DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET-}"
       DB_BACKUP_AI_NODE_SSH_PORT: "${DB_BACKUP_AI_NODE_SSH_PORT:-22}"
       DB_BACKUP_AI_NODE_KNOWN_HOSTS: "${DB_BACKUP_AI_NODE_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
       DB_BACKUP_AI_NODE_SSH_OPTIONS: "${DB_BACKUP_AI_NODE_SSH_OPTIONS:-}"
       DB_BACKUP_AI_NODE_CONFIG_PATH: "${DB_BACKUP_AI_NODE_CONFIG_PATH:-}"
       DB_BACKUP_AI_NODE_REMOTE_PATHS: "${DB_BACKUP_AI_NODE_REMOTE_PATHS-}"
+      DB_BACKUP_AI_NODE_DEPLOY_ROOT: "${DB_BACKUP_AI_NODE_DEPLOY_ROOT:-/root/xray-routing-panel}"
       DB_BACKUP_CRON_SCHEDULE: "0 3 * * *"
     volumes:
       - ./data:/data

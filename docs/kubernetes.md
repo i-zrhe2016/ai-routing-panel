@@ -87,7 +87,7 @@ kubectl apply -k k8s
 
 ## 备份 CronJob 与灾备归档
 
-三个阶段的 `cronjob-backup.yaml` 都执行 `scripts/run_db_backup_cycle.py`，而不是只执行数据库快照脚本。任务会在共享 PVC 的 `backups/` 下生成 `.db` 和 `*-disaster-*.tar.gz`；默认把共享卷的 `/app/xray/runtime` 纳入归档。
+三个阶段的 `cronjob-backup.yaml` 都执行 `scripts/run_db_backup_cycle.py`，而不是只执行数据库快照脚本。任务会在共享 PVC 的 `backups/` 下生成 `.db` 和 `*-disaster-*.tar.gz`；默认把共享卷的 `/app/xray/runtime`、Secret 提供的 `/app/xray/.env` 和 `/data/uploads` 纳入归档。
 
 Kubernetes 清单默认不启用远端 SSH 采集（`DB_BACKUP_SSH_COLLECTION_ENABLED` 未设置时脚本默认 `0`），因为仓库不能携带生产私钥和 known_hosts。若需要把普通数据面的实际配置也纳入灾备，按以下最小边界扩展备份 CronJob；本机 AI 配置由控制面运行时目录归档：
 

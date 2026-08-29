@@ -190,6 +190,40 @@ class RemoteBackupTest(unittest.TestCase):
         self.assertEqual(normal.ssh_port, "22")
         self.assertEqual(ai.target, "")
         self.assertEqual(ai.ssh_port, "22")
+        self.assertIn("/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json", normal.paths)
+        self.assertEqual(
+            normal.required_paths,
+            (
+                "/root/xray-routing-panel/app/xray/runtime/config.json",
+                "/root/xray-routing-panel/app/xray/.env",
+            ),
+        )
+
+    def test_explicit_remote_paths_still_require_sibling_env_file(self):
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_DATAPLANE_REMOTE_PATHS"] = "/srv/xray/config.json"
+            os.environ.pop("DB_BACKUP_DATAPLANE_CONFIG_PATH", None)
+            normal, _ = self.module.build_nodes()
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+        self.assertEqual(normal.paths, ("/srv/xray/config.json",))
+        self.assertEqual(normal.required_paths, ("/srv/xray/config.json", "/srv/xray/.env"))
+
+    def test_config_path_override_derives_sibling_env_in_default_path_set(self):
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_DATAPLANE_CONFIG_PATH"] = "/srv/xray/runtime/config.json"
+            os.environ.pop("DB_BACKUP_DATAPLANE_REMOTE_PATHS", None)
+            normal, _ = self.module.build_nodes()
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+        self.assertEqual(normal.paths[0], "/srv/xray/runtime/config.json")
+        self.assertEqual(normal.paths[1], "/srv/xray/runtime/.env")
 
 
 if __name__ == "__main__":

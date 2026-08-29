@@ -12,7 +12,7 @@
 - 基于公网 TCP 探测和 Cloudflare API 做单记录 DNS 故障切换，并支持自动回切。
 - 管理后台「监控」标签内嵌 Grafana 图表（数据源自 Prometheus），展示主机系统资源与每端口流量/连接速率；配置/订单等数据仍由面板自身（SQLite）提供。详见 [operations.md](operations.md)。
 - 可选启用控制面备用 Xray，配合 DNS 切换让控制面本机接管流量。
-- 每天备份 `panel.db`，并可选地加密后保存到 Cloudflare R2。
+- 每天备份 `panel.db`、业务附件和节点实际配置，生成带恢复清单的归档，并可选地加密后保存到 Cloudflare R2。
 
 ## 当前架构
 
@@ -49,6 +49,8 @@
   - 负责 `panel.db` 定时备份、控制面配置归档，并在打包前调用只读 SSH 采集普通数据面实际配置
 - `collect_remote_backup.py`
   - 只负责普通数据面配置的 SSH 读取、SHA-256 校验和 `nodes/` staging；显式配置远端 AI 时也可采集该节点
+- `node_recovery.py`
+  - 校验归档完整性，生成普通/AI 节点的便携恢复目录和单节点 Docker Compose
 - `R2 灾备上传`
   - 负责将数据库备份加密并上传到 Cloudflare R2
 
@@ -241,7 +243,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 ## 灾备归档与 R2 上传
 
-默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和灾备归档；Compose 通过 Tailscale 严格只读 SSH 采集普通数据面 `100.65.108.93:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
+默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过 Tailscale 严格只读 SSH 采集普通数据面 `100.65.108.93:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
 
 如需在备份完成后自动加密并上传到 Cloudflare R2：
 
@@ -250,7 +252,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 - 设置 `DB_BACKUP_R2_ACCESS_KEY_ID`、`DB_BACKUP_R2_SECRET_ACCESS_KEY`
 - 设置独立的 `DB_BACKUP_ENCRYPTION_PASSWORD`
 
-R2 仅作为低频异地灾备保存通道，不进入 DNS 故障切换和快速恢复路径。归档结构、远端采集和灾难阶段恢复见 [disaster-backup.md](disaster-backup.md) 与 [remote-node-backup.md](remote-node-backup.md)。
+R2 仅作为低频异地灾备保存通道，不进入 DNS 故障切换路径；从归档快速准备替换节点见 [node-recovery.md](node-recovery.md)，归档结构和远端采集见 [disaster-backup.md](disaster-backup.md) 与 [remote-node-backup.md](remote-node-backup.md)。
 
 先验证本地归档和 R2 配置：
 
@@ -337,6 +339,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 - [../frontend/](../frontend/): 前端源码快照；实际部署使用已生成的 `app/static/{admin,portal,landing}` 发布资源
 - [disaster-backup.md](disaster-backup.md): 配置归档、R2 灾备保留和离线恢复边界
 - [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集普通数据面实际配置；本机 AI 配置随控制面归档
+- [node-recovery.md](node-recovery.md): 节点备份完整性、校验和快速准备替换节点
 - [db-backup-uploader.md](db-backup-uploader.md): 加密和 R2 上传组件
 - [../Dockerfile](../Dockerfile): 复制静态发布资源并安装 Python 依赖
 - [../docker-compose.yml](../docker-compose.yml): 本地 compose 栈

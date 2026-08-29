@@ -147,8 +147,9 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 
 - `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`，并生成一个包含配置文件的灾备归档
 - 本地 `.db` 和 `tar.gz` 备份文件均落在 `./backups`
-- 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env` 和 `app/xray/runtime`
+- 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env`、运行时/报告、`data/uploads` 和部署脚本
 - Compose 还会在打包前通过 Tailscale 上的严格只读 SSH 采集普通数据面（`100.65.108.93:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
+- 每个归档都包含 `node-recovery-manifest.json`，任务还会生成 `node-recovery-status.json`，明确标记 `recoveryReady`
 - 远端采集默认是非必需的：普通数据面失联不会丢弃控制面归档；要把普通数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
 - 当 `DB_BACKUP_R2_ENABLED=1` 时，归档成功后会继续调用 `R2 灾备上传`
 - R2 对象 key 默认包含日期、归档名称和 SHA-256 前缀；对象保留由 Cloudflare R2 生命周期策略控制，不承担快速恢复
@@ -164,8 +165,10 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 - 查看日志：`docker compose logs -f xray-routing-panel-db-backup`
 - 确认最新本地备份已生成到 `./backups`
 - 确认对应的 `*-disaster-*.tar.gz` 已生成，并检查其中 `backup-manifest.json` 的 `skippedExtraPaths`
-- 检查归档 `nodes/remote-node-collection.json`：普通数据面 `status=ok` 且 `configCollected=true`；`.env` 缺失只会显示为文件级 `missing`
+- 检查 `node-recovery-status.json`：普通数据面和 AI 数据面都应为 `ready=true`；必需 `.env` 缺失会列入 `missingRequiredArtifacts`
 - 确认 `./backups/r2-upload-record.json` 是否已更新
+
+节点替换的演练和应急命令见[节点备份完整性与快速恢复](node-recovery.md)。应急时先执行 `python3 scripts/node_recovery.py validate --bundle <bundle> --require-ready`，再执行 `prepare`，不要直接解压覆盖运行目录。
 
 SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
 

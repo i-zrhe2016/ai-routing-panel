@@ -34,6 +34,8 @@
 | `DATAPLANE_ACCESS_LOG_PATH` | 远端 `access.log` 路径 |
 | `DATAPLANE_RESTART_COMMAND` | 远端数据面重启命令 |
 | `DATAPLANE_PROBE_HOST` | TCP 探针连接目标；远端模式下应指向远端入口 IP 或域名 |
+| `DB_BACKUP_RECOVERY_REQUIRED` | 节点恢复材料不完整时是否阻止灾备归档继续上传；默认 `0`，完整性状态仍会写入报告 |
+| `DB_BACKUP_RECOVERY_STATUS_PATH` | 最近一次节点恢复完整性报告路径 |
 
 AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链接包含 REALITY SNI，管理器会执行 REALITY 握手；否则回退到 TCP 探测。可通过 `AI_UPSTREAM_PROBE_SERVER_NAME` 为模板显式指定 SNI。
 
@@ -64,6 +66,8 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |
 | `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；本机 Docker 生产当前为 `127.0.0.1:27166` |
 | `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；当前为 `100.87.76.6` |
+
+节点备份默认请求普通数据面的配置、`.env`、运行时辅助文件和最新报告；远端部署根可用 `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` / `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 配置。节点备份清单和恢复命令见[节点备份完整性与快速恢复](node-recovery.md)。
 
 说明：
 

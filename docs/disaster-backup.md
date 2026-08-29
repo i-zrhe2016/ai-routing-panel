@@ -1,6 +1,6 @@
 # 灾备归档与 Cloudflare R2 上传通道
 
-本模块只说明如何生成加密灾备归档并上传到 Cloudflare R2。它不负责故障切换、在线热备或快速恢复；恢复发生在灾难处理阶段。
+本模块只说明如何生成加密灾备归档并上传到 Cloudflare R2。它不负责故障切换或在线热备；节点快速恢复的准备命令见[节点备份完整性与快速恢复](node-recovery.md)。
 
 ## 目标与边界
 
@@ -15,6 +15,7 @@
 flowchart LR
     P[panel.db] --> B[SQLite 快照]
     C[DB_BACKUP_EXTRA_PATHS<br/>控制面配置文件/目录] --> D[灾备 tar.gz]
+    U[data/uploads<br/>业务附件] --> D
     B --> D
     N[普通数据面<br/>只读 SSH] --> D
     I[本机 AI 备用<br/>运行时目录] --> D
@@ -27,9 +28,10 @@ flowchart LR
 
 1. 调用 `scripts/backup_db.py`，通过 SQLite 在线备份 API 生成 `backups/<prefix>-<UTC 时间戳>.db`。
 2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，以严格只读 SSH 采集普通数据面的主配置与可选环境文件；本机 AI 备用由 `DB_BACKUP_EXTRA_PATHS` 归档，不发起 AI SSH。
-3. 调用 `scripts/build_backup_bundle.py`，把数据库快照放在 `database/`、控制面额外路径放在 `config/`、远端 staging 放在 `nodes/`，并写入 `backup-manifest.json`。
-4. `DB_BACKUP_R2_ENABLED=1` 时，使用 R2 S3 兼容 API 上传加密归档。
-5. 上传记录写入 `DB_BACKUP_R2_RECORD_PATH`，本地文件保留用于核验和人工恢复。
+3. 调用 `scripts/build_backup_bundle.py`，把数据库快照放在 `database/`、控制面额外路径放在 `config/`、远端 staging 放在 `nodes/`，并写入 `backup-manifest.json` 和 `node-recovery-manifest.json`。
+4. 重新校验归档内所有文件的大小和 SHA-256，并把节点恢复状态写入 `node-recovery-status.json`。
+5. `DB_BACKUP_R2_ENABLED=1` 时，使用 R2 S3 兼容 API 上传加密归档。
+6. 上传记录写入 `DB_BACKUP_R2_RECORD_PATH`，本地文件保留用于核验和节点恢复准备。
 
 单次任务的组件边界如下：
 
@@ -47,7 +49,7 @@ Docker Compose 的备份容器默认收集：
 - 当次生成的 `panel.db` 一致性快照
 - `/srv/xray-ops/ops.db` 的独立 SQLite 在线快照（存在时）
 - Compose、ops-reporting Compose、`.env`/`.env.ops-reporting`、Kubernetes 清单
-- Xray `.env`、渲染运行配置和备份脚本
+- Xray `.env`、渲染运行配置、报告、备份脚本和 `data/uploads`
 
 项目目录和 `/srv/xray-ops` 均只读挂载到备份容器；缺失的可选文件会记录在 manifest 中，不阻断 `panel.db` 备份。启用 SSH 采集后，归档还会加入：
 
@@ -59,6 +61,7 @@ nodes/
   app/xray/runtime/config-ai-node.json
   remote-node-collection.json
 backup-manifest.json
+node-recovery-manifest.json
 ```
 
 普通数据面通过 Tailscale `100.65.108.93:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `100.87.76.6`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
@@ -76,12 +79,16 @@ Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥�
 | `DB_BACKUP_BUNDLE_KEEP_DAYS` | `DB_BACKUP_KEEP_DAYS` | 本地灾备归档保留天数，`0` 表示不清理 |
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过 SSH 读取普通数据面 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `1` 时普通数据面主配置必须成功；`0` 时记录失败但继续保留控制面归档 |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `1` 时所有已配置远端节点的必需恢复文件必须成功；`0` 时记录失败但继续保留控制面归档 |
 | `DB_BACKUP_SSH_KEY_PATH` | `/run/secrets/fleet_ssh_key` | 只读 SSH 私钥；源文件权限过宽时采集器使用临时 `0600` 副本 |
 | `DB_BACKUP_SSH_OPTIONS` | 空 | 仅允许 `-4`/`-6`、日志级别和连接超时/keepalive 等安全选项 |
-| `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面实测宿主路径 + `.env` | 逗号/换行分隔；第一个路径是主配置 |
+| `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号/换行分隔；配置和 `.env` 是恢复必需文件，其余为可选 |
+| `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
 | `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 仅在显式启用远端 AI 节点 SSH 采集时使用 |
 | `DB_BACKUP_AI_NODE_REMOTE_PATHS` | 空 | 当前本机 AI 备用不使用远端采集 |
+| `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
+| `DB_BACKUP_RECOVERY_REQUIRED` | `0` | `1` 时不完整节点恢复包阻止后续上传；默认保留数据库备份并记录状态 |
+| `DB_BACKUP_RECOVERY_STATUS_PATH` | 归档目录下的 `node-recovery-status.json` | 最近一次节点恢复完整性报告 |
 | `DB_BACKUP_R2_ENABLED` | `0` | 是否将加密灾备归档上传到 R2 |
 | `DB_BACKUP_R2_ENDPOINT` | 空 | Cloudflare R2 S3 endpoint |
 | `DB_BACKUP_R2_BUCKET` | 空 | R2 bucket 名称 |
@@ -93,10 +100,10 @@ Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥�
 示例：加入控制面项目文件和自定义密钥目录（目录必须以只读方式挂载到备份容器）：
 
 ```dotenv
-DB_BACKUP_EXTRA_PATHS=/app/xray/.env,/app/xray/runtime,/backup-input/docker-compose.yml,/backup-input/k8s
+DB_BACKUP_EXTRA_PATHS=/app/xray/.env,/app/xray/runtime,/app/xray/reports,/data/uploads,/backup-input/docker-compose.yml,/backup-input/k8s
 ```
 
-`DB_BACKUP_EXTRA_PATHS` 路径会被写入归档的 `config/` 前缀下，远端 SSH staging 则写入 `nodes/`，避免恢复时覆盖宿主机绝对路径。归档内的 `backup-manifest.json` 记录每个文件的来源、大小和 SHA-256；远端节点另有 `remote-node-collection.json` 记录 SSH 目标和逐路径状态，便于灾难阶段人工核验。
+`DB_BACKUP_EXTRA_PATHS` 路径会被写入归档的 `config/` 前缀下，远端 SSH staging 则写入 `nodes/`，避免恢复时覆盖宿主机绝对路径。归档内的 `backup-manifest.json` 记录每个文件的来源、大小和 SHA-256；`remote-node-collection.json` 记录 SSH 目标和逐路径状态；`node-recovery-manifest.json` 再声明哪些文件足以快速恢复每类节点。
 
 `DB_BACKUP_EXTRA_PATHS` 可以包含业务敏感配置，但不要把 R2 密钥、SSH 私钥或其他不需要迁移的凭据目录加入列表；数据库快照和灾备归档在本地生成时仍是明文，文件权限统一为 `0600`，备份目录也必须限制为备份服务可读。R2 凭据只通过部署环境、Docker Secret 或 Kubernetes Secret 注入，灾备加密密码必须与 R2 Secret Access Key 分离保存。任何出现在聊天、日志或 shell 历史中的 token 都应立即撤销。
 
@@ -106,16 +113,13 @@ R2 上传成功后，本地会保留归档和 `r2-upload-record.json`。对象 k
 
 ## 灾难阶段恢复
 
-恢复是人工、低频流程，不纳入健康检查或 DNS 故障切换：
-
-1. 从 `r2-upload-record.json` 获取对象 key，或在 Cloudflare R2 控制台定位对象。
-2. 下载对象并使用独立保存的 `DB_BACKUP_ENCRYPTION_PASSWORD` 解密到隔离目录。
-3. 校验 `backup-manifest.json` 中的 SHA-256，再按迁移文档恢复 `panel.db` 和配置文件。
-4. 重新渲染并校验 Xray 配置，确认探针、Prometheus 和服务健康后再切换业务流量。
+恢复仍是人工操作，不纳入健康检查或 DNS 故障切换。下载对象并用独立保存的 `DB_BACKUP_ENCRYPTION_PASSWORD` 解密后，按[节点备份完整性与快速恢复](node-recovery.md)执行 `validate` 和 `prepare`。准备目录自带单节点 `docker-compose.node.yml`，可直接启动 Xray；恢复后仍须人工完成新主机的 Tailscale、密钥、known_hosts、防火墙、控制面目标和业务验证。
 
 解密结果只是归档文件，不会自动覆盖运行中的配置。R2 凭据仅用于下载对象，不等同于归档解密密码。
 
 ## 排查
 
 - 本地 `.db` 有、归档没有：检查 `DB_BACKUP_BUNDLE_ENABLED`、`DB_BACKUP_BUNDLE_DIR` 的权限和备份容器日志。
-- 归档有、R2 没有：检查 `DB_BACKUP_R2_ENABLED`、R2 凭据、endpoint、bucket 和备份容器网络访问。- 配置文件缺失：查看归档内 `backup-manifest.json` 的 `skippedExtraPaths`，确认路径已挂载且在任务执行时存在。
+- 归档有、R2 没有：检查 `DB_BACKUP_R2_ENABLED`、R2 凭据、endpoint、bucket 和备份容器网络访问。
+- 配置文件缺失：查看 `backup-manifest.json` 的 `skippedExtraPaths` 和 `node-recovery-manifest.json` 的 `missingRequiredArtifacts`。
+- `validate --require-ready` 失败：使用最近一个 `node-recovery-status.json` 为 `recoveryReady=true` 的归档，不要使用当前节点失联后生成的不完整版本。

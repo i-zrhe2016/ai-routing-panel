@@ -12,10 +12,12 @@ from pathlib import Path
 try:
     from build_backup_bundle import create_backup_bundle, parse_extra_paths, prune_bundles
     from collect_remote_backup import collect_remote_configs
+    from node_recovery import validate_backup_bundle
     from upload_backup_r2 import encrypt_bundle, upload_bundle
 except ModuleNotFoundError:
     from scripts.build_backup_bundle import create_backup_bundle, parse_extra_paths, prune_bundles
     from scripts.collect_remote_backup import collect_remote_configs
+    from scripts.node_recovery import validate_backup_bundle
     from scripts.upload_backup_r2 import encrypt_bundle, upload_bundle
 
 
@@ -154,6 +156,50 @@ def build_bundle(backup_path, named_paths=()):
     return bundle_path
 
 
+def write_recovery_status(bundle_path, validated):
+    """Keep a small local readiness record for monitoring and operators."""
+
+    configured_path = str(os.environ.get("DB_BACKUP_RECOVERY_STATUS_PATH", "")).strip()
+    status_path = Path(configured_path) if configured_path else Path(bundle_path).parent / "node-recovery-status.json"
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "checkedAt": datetime.now(timezone.utc).isoformat(),
+        "bundle": str(Path(bundle_path).resolve()),
+        **validated["readiness"],
+    }
+    temporary = status_path.with_name(f".{status_path.name}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, status_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return status_path
+
+
+def enforce_recovery_readiness(bundle_path):
+    validated = validate_backup_bundle(bundle_path)
+    readiness = validated["readiness"]
+    status_path = write_recovery_status(bundle_path, validated)
+    print(
+        f"[backup:recovery] ready={str(readiness['recoveryReady']).lower()} "
+        f"shared={str(readiness['sharedReady']).lower()} status={status_path}",
+        flush=True,
+    )
+    for node in readiness["nodes"]:
+        missing = ",".join(node["missingRequiredArtifacts"]) or "-"
+        print(
+            f"[backup:recovery] role={node['role']} "
+            f"configured={str(node['configured']).lower()} "
+            f"ready={str(node['recoveryReady']).lower()} missing={missing}",
+            flush=True,
+        )
+    if env_enabled("DB_BACKUP_RECOVERY_REQUIRED", "0") and not readiness["recoveryReady"]:
+        raise RuntimeError("node recovery artifacts are incomplete; see node-recovery-status.json")
+    return validated
+
+
 def main():
     backup_code, backup_path = run_backup()
     if backup_code != 0:
@@ -180,6 +226,7 @@ def main():
         upload_path = backup_path
         if bundle_is_enabled:
             upload_path = build_bundle(backup_path, named_paths=named_paths)
+            enforce_recovery_readiness(upload_path)
         else:
             print(
                 "[backup] disaster bundle disabled: DB_BACKUP_BUNDLE_ENABLED is disabled.",

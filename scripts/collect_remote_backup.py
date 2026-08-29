@@ -112,12 +112,24 @@ DEFAULT_KNOWN_HOSTS = "/root/.ssh/known_hosts"
 DEFAULT_AI_KNOWN_HOSTS = "/root/.ssh/known_hosts_ai"
 DEFAULT_DATAPLANE_CONFIG_PATH = "/root/xray-routing-panel/app/xray/runtime/config.json"
 DEFAULT_DATAPLANE_ENV_PATH = "/root/xray-routing-panel/app/xray/.env"
+DEFAULT_DATAPLANE_DEPLOY_ROOT = "/root/xray-routing-panel"
 DEFAULT_AI_CONFIG_PATH = "/etc/xray/config.json"
 DEFAULT_AI_ENV_PATH = "/etc/xray/.env"
+DEFAULT_AI_DEPLOY_ROOT = "/root/xray-routing-panel"
 DEFAULT_NORMAL_TARGET = "root@100.65.108.93"
 DEFAULT_AI_TARGET = ""
 DEFAULT_AI_SSH_PORT = "22"
 DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024
+DEFAULT_NORMAL_REMOTE_PATHS = (
+    DEFAULT_DATAPLANE_CONFIG_PATH,
+    DEFAULT_DATAPLANE_ENV_PATH,
+    "/root/xray-routing-panel/app/xray/runtime/panel-ports.json",
+    "/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json",
+    "/root/xray-routing-panel/app/xray/runtime/client-test.json",
+    "/root/xray-routing-panel/app/xray/runtime/client-share.txt",
+    "/root/xray-routing-panel/app/xray/reports/hourly-domains/latest.json",
+)
+DEFAULT_AI_REMOTE_PATHS = (DEFAULT_AI_CONFIG_PATH, DEFAULT_AI_ENV_PATH)
 
 
 def env_enabled(name: str, default: str = "0") -> bool:
@@ -145,10 +157,11 @@ def parse_paths(value: str, defaults: tuple[str, ...] = ()) -> tuple[str, ...]:
         if item and item not in seen:
             seen.add(item)
             items.append(item)
-    for item in defaults:
-        if item and item not in seen:
-            seen.add(item)
-            items.append(item)
+    if not items:
+        for item in defaults:
+            if item and item not in seen:
+                seen.add(item)
+                items.append(item)
     return tuple(items)
 
 
@@ -203,6 +216,45 @@ def safe_relative_path(remote_path: str) -> Path:
     return Path(*parts) if parts else Path("root")
 
 
+def portable_restore_path(role: str, remote_path: str, deploy_root: str) -> str:
+    """Map a remote file to the directory emitted by ``node_recovery.py``."""
+
+    normalized = Path(remote_path).as_posix()
+    root = Path(deploy_root).as_posix().rstrip("/")
+    if root and (normalized == root or normalized.startswith(f"{root}/")):
+        relative = normalized[len(root) :].lstrip("/")
+        if relative:
+            return relative
+
+    name = Path(normalized).name
+    if name == "config.json":
+        return "app/xray/runtime/config.json"
+    if name == ".env":
+        return "app/xray/.env"
+    if name in {"panel-ports.json", "dynamic-routing.json", "client-test.json", "client-share.txt"}:
+        return f"app/xray/runtime/{name}"
+    if "reports" in Path(normalized).parts:
+        parts = Path(normalized).parts
+        marker = parts.index("reports")
+        return Path("app", "xray", *parts[marker:]).as_posix()
+    return Path("remote", safe_relative_path(normalized)).as_posix()
+
+
+def required_paths(paths: tuple[str, ...], config_hint: str, default_env: str) -> tuple[str, ...]:
+    """Choose the config and env paths even when callers add custom paths first."""
+
+    config = config_hint or next(
+        (path for path in paths if Path(path).name == "config.json"),
+        paths[0] if paths else "",
+    )
+    env = next((path for path in paths if Path(path).name == ".env" and path != config), "")
+    if not env and default_env in paths:
+        env = default_env
+    if not env and config:
+        env = str(Path(config).with_name(".env"))
+    return tuple(path for path in (config, env) if path)
+
+
 @dataclass(frozen=True)
 class RemoteNode:
     role: str
@@ -211,6 +263,8 @@ class RemoteNode:
     known_hosts: str
     ssh_port: str = "22"
     options: tuple[str, ...] = ()
+    required_paths: tuple[str, ...] = ()
+    restore_root: str = ""
 
 
 def build_nodes() -> tuple[RemoteNode, ...]:
@@ -232,14 +286,24 @@ def build_nodes() -> tuple[RemoteNode, ...]:
     ai_config = str(
         os.environ.get("DB_BACKUP_AI_NODE_CONFIG_PATH", os.environ.get("AI_NODE_CONFIG_PATH", ""))
     ).strip()
-    normal_paths = parse_paths(
-        os.environ.get("DB_BACKUP_DATAPLANE_REMOTE_PATHS", ""),
-        (normal_config or DEFAULT_DATAPLANE_CONFIG_PATH, DEFAULT_DATAPLANE_ENV_PATH),
-    )
-    ai_paths = parse_paths(
-        os.environ.get("DB_BACKUP_AI_NODE_REMOTE_PATHS", ""),
-        (ai_config or DEFAULT_AI_CONFIG_PATH, DEFAULT_AI_ENV_PATH),
-    )
+    normal_path_value = os.environ.get("DB_BACKUP_DATAPLANE_REMOTE_PATHS", "")
+    normal_defaults = list(DEFAULT_NORMAL_REMOTE_PATHS)
+    if normal_config:
+        normal_defaults[0] = normal_config
+        normal_defaults[1] = str(Path(normal_config).with_name(".env"))
+    normal_paths = parse_paths(normal_path_value, tuple(normal_defaults))
+    ai_path_value = os.environ.get("DB_BACKUP_AI_NODE_REMOTE_PATHS", "")
+    ai_defaults = list(DEFAULT_AI_REMOTE_PATHS)
+    if ai_config:
+        ai_defaults[0] = ai_config
+        ai_defaults[1] = str(Path(ai_config).with_name(".env"))
+    ai_paths = parse_paths(ai_path_value, tuple(ai_defaults))
+    normal_restore_root = str(
+        os.environ.get("DB_BACKUP_DATAPLANE_DEPLOY_ROOT", DEFAULT_DATAPLANE_DEPLOY_ROOT)
+    ).strip() or DEFAULT_DATAPLANE_DEPLOY_ROOT
+    ai_restore_root = str(
+        os.environ.get("DB_BACKUP_AI_NODE_DEPLOY_ROOT", DEFAULT_AI_DEPLOY_ROOT)
+    ).strip() or DEFAULT_AI_DEPLOY_ROOT
     common_options = split_options(os.environ.get("DB_BACKUP_SSH_OPTIONS", ""))
     normal_options = (
         *common_options,
@@ -275,6 +339,12 @@ def build_nodes() -> tuple[RemoteNode, ...]:
             or default_known_hosts,
             ssh_port=str(os.environ.get("DB_BACKUP_DATAPLANE_SSH_PORT", "22")).strip() or "22",
             options=normal_options,
+            required_paths=required_paths(
+                normal_paths,
+                normal_config,
+                DEFAULT_DATAPLANE_ENV_PATH,
+            ),
+            restore_root=normal_restore_root,
         ),
         RemoteNode(
             role="ai-data-plane",
@@ -289,6 +359,8 @@ def build_nodes() -> tuple[RemoteNode, ...]:
             ).strip()
             or DEFAULT_AI_SSH_PORT,
             options=ai_options,
+            required_paths=required_paths(ai_paths, ai_config, DEFAULT_AI_ENV_PATH),
+            restore_root=ai_restore_root,
         ),
     )
 
@@ -375,25 +447,42 @@ def read_remote(node: RemoteNode, key_path: Path, timeout: int, max_bytes: int) 
 def write_collection(output_dir: Path, node: RemoteNode, payload: dict) -> dict:
     node_dir = output_dir / safe_component(node.role)
     node_dir.mkdir(parents=True, exist_ok=True)
+    required = tuple(node.required_paths or node.paths[:1])
     result = {
         "role": node.role,
         "target": node.target,
         "sshPort": node.ssh_port,
         "knownHosts": node.known_hosts,
         "requestedPaths": list(node.paths),
+        "requiredPaths": list(required),
+        "restoreRoot": node.restore_root,
         "status": "ok",
         "configCollected": False,
+        "recoveryReady": False,
         "files": [],
     }
     collected_files = 0
+    path_statuses = {}
     for item in payload.get("files", []):
         if not isinstance(item, dict):
             continue
         entry = {key: value for key, value in item.items() if key != "data_base64"}
+        remote_path = str(item.get("path", ""))
+        if remote_path:
+            entry["restorePath"] = portable_restore_path(
+                node.role,
+                remote_path,
+                node.restore_root,
+            )
         data_encoded = item.get("data_base64", "")
         if item.get("status") != "ok" or not data_encoded:
+            if item.get("status") == "ok" and not data_encoded:
+                entry["status"] = "missing_data"
             result["files"].append(entry)
-            if item.get("status") not in {"missing"}:
+            path_statuses[remote_path] = entry.get("status", item.get("status"))
+            if entry.get("status") not in {"missing"} and remote_path not in required:
+                result["status"] = "partial"
+            elif remote_path in required:
                 result["status"] = "partial"
             continue
         try:
@@ -402,12 +491,14 @@ def write_collection(output_dir: Path, node: RemoteNode, payload: dict) -> dict:
             entry["status"] = "invalid_base64"
             entry["error"] = str(exc)
             result["status"] = "partial"
+            path_statuses[remote_path] = entry["status"]
             result["files"].append(entry)
             continue
         digest = hashlib.sha256(data).hexdigest()
         if digest != item.get("sha256"):
             entry["status"] = "checksum_mismatch"
             result["status"] = "partial"
+            path_statuses[remote_path] = entry["status"]
             result["files"].append(entry)
             continue
         destination = node_dir / safe_relative_path(str(item["path"]))
@@ -417,9 +508,13 @@ def write_collection(output_dir: Path, node: RemoteNode, payload: dict) -> dict:
         entry["stagedPath"] = destination.relative_to(output_dir).as_posix()
         result["files"].append(entry)
         collected_files += 1
-        if str(item.get("path", "")) == node.paths[0]:
+        path_statuses[remote_path] = "ok"
+        if node.paths and remote_path == node.paths[0]:
             result["configCollected"] = True
-    if collected_files == 0 or not result["configCollected"]:
+    result["recoveryReady"] = bool(required) and all(
+        path_statuses.get(path) == "ok" for path in required
+    )
+    if collected_files == 0 or not result["configCollected"] or not result["recoveryReady"]:
         result["status"] = "partial"
     return result
 
@@ -449,6 +544,9 @@ def collect_nodes(
                     "knownHosts": node.known_hosts,
                     "status": "skipped_no_target",
                     "requestedPaths": list(node.paths),
+                    "requiredPaths": list(node.required_paths or node.paths[:1]),
+                    "restoreRoot": node.restore_root,
+                    "recoveryReady": False,
                 }
             )
             continue
@@ -462,6 +560,9 @@ def collect_nodes(
                     "requestedPaths": list(node.paths),
                     "status": "skipped_no_key",
                     "error": key_error,
+                    "requiredPaths": list(node.required_paths or node.paths[:1]),
+                    "restoreRoot": node.restore_root,
+                    "recoveryReady": False,
                 }
             )
             continue
@@ -469,8 +570,8 @@ def collect_nodes(
             payload = read_remote(node, key_path, timeout, max_bytes)
             node_result = write_collection(output_dir, node, payload)
             results.append(node_result)
-            if required and not node_result.get("configCollected", False):
-                raise RuntimeError(f"no remote configuration file collected for {node.role}")
+            if required and not node_result.get("recoveryReady", False):
+                raise RuntimeError(f"remote recovery artifacts are incomplete for {node.role}")
         except Exception as exc:
             results.append(
                 {
@@ -479,7 +580,10 @@ def collect_nodes(
                     "sshPort": node.ssh_port,
                     "knownHosts": node.known_hosts,
                     "requestedPaths": list(node.paths),
+                    "requiredPaths": list(node.required_paths or node.paths[:1]),
+                    "restoreRoot": node.restore_root,
                     "status": "failed",
+                    "recoveryReady": False,
                     "error": str(exc)[:500],
                 }
             )
