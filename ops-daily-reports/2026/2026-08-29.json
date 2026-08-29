@@ -1,0 +1,317 @@
+{
+  "collection_health": {
+    "gaps": [
+      {
+        "error_class": "prometheus_scrape_gap",
+        "node_role": "normal_data_plane",
+        "source": "prometheus:target_scrape"
+      }
+    ],
+    "node_coverage": {
+      "ai_data_plane": 0.999306,
+      "normal_data_plane": 0.999306
+    },
+    "overall_coverage_ratio": 0.999306,
+    "sources": [
+      {
+        "configured": true,
+        "error_class": "route_history_partial",
+        "files": 1621,
+        "invalid_files": 1,
+        "source": "ai_routing_history",
+        "success": false
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:up",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_data_plane_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_ai_node_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:xray_panel_port_reachable",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:xray_panel_port_probe_timestamp_seconds",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 14,
+        "source": "prometheus:xray_panel_port_traffic_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 7,
+        "source": "prometheus:xray_panel_port_connections_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_target_info",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_last_probe_healthy",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_consecutive_failures",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 16,
+        "source": "prometheus:node_cpu_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 2,
+        "source": "prometheus:node_memory_MemAvailable_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 2,
+        "source": "prometheus:node_memory_MemTotal_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 16,
+        "source": "prometheus:node_filesystem_avail_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 16,
+        "source": "prometheus:node_filesystem_size_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 30,
+        "source": "prometheus:node_network_receive_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 30,
+        "source": "prometheus:node_network_transmit_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_cpu_usage_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_memory_working_set_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_spec_memory_limit_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 5,
+        "source": "prometheus:container_last_seen",
+        "success": true
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "attributes": {
+        "coverage_ratio": 0.999306,
+        "missing_sources": [
+          "prometheus:target_scrape"
+        ]
+      },
+      "evidence_id": "ev-0776325aa76d9b668bff66c9",
+      "evidence_type": "telemetry_insufficient",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-28T16:00:00.000000Z",
+      "source": "prometheus",
+      "source_quality": "partial",
+      "summary": "Prometheus 目标或抓取覆盖不足，无法判断"
+    }
+  ],
+  "generated_at": "2026-08-30T00:10:29+08:00",
+  "generation_health": {
+    "atomic_write": "success",
+    "codex": "failed",
+    "codex_attempts": 2,
+    "codex_error_class": "codex_process_failed",
+    "codex_input": null,
+    "codex_usage": null,
+    "json_schema": "valid",
+    "markdown": "success",
+    "rules": "success"
+  },
+  "generation_mode": "rules_only",
+  "incidents": [
+    {
+      "ended_at": "2026-08-29T16:00:00.000000Z",
+      "evidence_ids": [
+        "ev-0776325aa76d9b668bff66c9"
+      ],
+      "facts": [
+        "目标缺失或抓取覆盖不足。"
+      ],
+      "incident_id": "inc-4403e73ee5b818670fb41165",
+      "kind": "telemetry_gap",
+      "missing_sources": [
+        "prometheus:target_scrape"
+      ],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-U001"
+      ],
+      "started_at": "2026-08-28T16:00:00.000000Z",
+      "status": "unknown"
+    }
+  ],
+  "model_analysis": null,
+  "model_output_schema_version": null,
+  "nodes": [
+    {
+      "matched_rules": [
+        {
+          "evidence_ids": [
+            "ev-0776325aa76d9b668bff66c9"
+          ],
+          "rule_id": "OPS-U001"
+        }
+      ],
+      "node_role": "normal_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 0.999306,
+        "downtime_intervals": [],
+        "prometheus_coverage_ratio": 0.999306,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "unknown",
+      "telemetry": {
+        "coverage_ratio": 0.999306,
+        "missing_sources": [
+          "prometheus:target_scrape"
+        ],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 0.999306,
+        "demand_increases": 14986,
+        "network_coverage_ratio": 0.0,
+        "network_devices": [],
+        "network_received_bytes": 0,
+        "network_total_bytes": 0,
+        "network_transmitted_bytes": 0,
+        "status": "demand_observed"
+      }
+    },
+    {
+      "matched_rules": [],
+      "node_role": "ai_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 0.999306,
+        "downtime_intervals": [],
+        "prometheus_coverage_ratio": 0.999306,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "normal",
+      "telemetry": {
+        "coverage_ratio": 0.999306,
+        "missing_sources": [],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 1.0,
+        "demand_increases": 5758,
+        "network_coverage_ratio": 1.0,
+        "network_devices": [
+          "eth0"
+        ],
+        "network_received_bytes": 153159078,
+        "network_total_bytes": 334779412,
+        "network_transmitted_bytes": 181620334,
+        "status": "demand_observed"
+      }
+    }
+  ],
+  "overall_status": "unknown",
+  "prompt_version": null,
+  "report_date": "2026-08-29",
+  "rule_parameters": {
+    "cpu_pressure_percent": 95.0,
+    "memory_available_pressure_ratio": 0.1,
+    "resource_duration_seconds": 900,
+    "root_disk_pressure_ratio": 0.9,
+    "scrape_step_seconds": 30,
+    "service_down_min_samples": 2,
+    "telemetry_min_coverage_ratio": 0.9
+  },
+  "rules_version": "2.0",
+  "schema_version": "1.0",
+  "timezone": "Asia/Shanghai",
+  "window_end": "2026-08-30T00:00:00+08:00",
+  "window_start": "2026-08-29T00:00:00+08:00"
+}
