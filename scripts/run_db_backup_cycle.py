@@ -100,7 +100,10 @@ def bundle_enabled():
 
 def collect_remote_backup(staging_dir):
     required = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "0")
-    result = collect_remote_configs(Path(staging_dir), required=required)
+    # Keep the node collector's dedicated empty staging directory separate
+    # from optional snapshots (for example ops.db) written by this cycle.
+    node_staging_dir = Path(staging_dir) / "nodes"
+    result = collect_remote_configs(node_staging_dir, required=required)
     for node in result["manifest"]["nodes"]:
         print(
             f"[backup:ssh] role={node['role']} status={node['status']}",

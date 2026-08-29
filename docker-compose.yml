@@ -163,7 +163,7 @@ services:
       - ./scripts:/app/scripts:ro
       - ./:/project:ro
       - /srv/xray-ops:/ops-data:ro
-      - /root/ssh-keys/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
+      - /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
       - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - ./logs:/var/log

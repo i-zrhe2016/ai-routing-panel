@@ -534,7 +534,10 @@ def collect_nodes(
     )
     for node in nodes:
         if not node.target:
-            if required:
+            # The AI data plane may intentionally run as a local Docker
+            # service.  Strict collection must gate configured SSH nodes, not
+            # fail because that optional remote target is unset.
+            if required and node.role != "ai-data-plane":
                 raise RuntimeError(f"missing SSH target for {node.role}")
             results.append(
                 {

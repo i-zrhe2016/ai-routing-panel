@@ -116,6 +116,19 @@ class RemoteBackupTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "missing SSH target"):
                 self.module.collect_nodes(Path(tmpdir), (node,), None, required=True)
 
+    def test_strict_mode_skips_unconfigured_remote_ai_target(self):
+        node = self.module.RemoteNode(
+            role="ai-data-plane",
+            target="",
+            paths=("/etc/xray/config.json", "/etc/xray/.env"),
+            known_hosts="/tmp/known_hosts_ai",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self.module.collect_nodes(Path(tmpdir), (node,), None, required=True)
+
+        self.assertEqual(result[0]["status"], "skipped_no_target")
+        self.assertFalse(result[0]["recoveryReady"])
+
     def test_strict_mode_requires_primary_config_not_only_optional_env(self):
         payload = {
             "files": [

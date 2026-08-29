@@ -45,12 +45,12 @@ node-recovery-manifest.json
 
 ## 密钥与主机校验
 
-- 默认密钥：`/run/secrets/fleet_ssh_key`；Compose 从 `/root/ssh-keys/xray_fleet_ed25519_20260805` 只读挂载。
+- 默认密钥：`/run/secrets/fleet_ssh_key`；Compose 从 `/root/.ssh/xray_fleet_ed25519_20260805` 只读挂载。
 - 普通数据面 known_hosts：`/root/.ssh/known_hosts`。
 - AI 备用不需要 SSH known_hosts；只有显式启用远端 AI 节点时才配置独立 known_hosts。
 - SSH 强制 `BatchMode=yes`、`PreferredAuthentications=publickey`、`PasswordAuthentication=no`、`KbdInteractiveAuthentication=no`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes`，并设置连接和存活超时。
 - `DB_BACKUP_SSH_OPTIONS` 以及节点级 options 只允许无边界风险的网络/日志选项（`-4`、`-6`、`-q`/`-v` 和连接超时/keepalive）；身份、known_hosts、代理和远端命令选项会被拒绝。
-- `/root/ssh-keys` 中的密钥文件如果权限过宽，采集器会复制到任务临时目录并改为 `0600`，避免 OpenSSH 拒绝使用；不会修改源密钥权限。
+- `/root/.ssh` 中的密钥文件如果权限过宽，采集器会复制到任务临时目录并改为 `0600`，避免 OpenSSH 拒绝使用；不会修改源密钥权限。
 
 不要把 root 密码、私钥内容或 R2 Secret Access Key 放在环境变量、日志、Markdown 或归档中。AI 节点当前能够使用统一 fleet 公钥；密码只作为人工应急登录手段，不是自动备份路径。
 
@@ -89,7 +89,7 @@ node-recovery-manifest.json
 在控制面上执行采集器（不会触碰远端状态）：
 
 ```bash
-DB_BACKUP_SSH_KEY_PATH=/root/ssh-keys/xray_fleet_ed25519_20260805 \
+DB_BACKUP_SSH_KEY_PATH=/root/.ssh/xray_fleet_ed25519_20260805 \
 DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.65.108.93 \
 DB_BACKUP_DATAPLANE_SSH_PORT=22 \
 DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts \

@@ -8,6 +8,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -28,6 +29,22 @@ class BackupCycleTest(unittest.TestCase):
     def test_backup_cycle_has_no_legacy_uploader_configuration(self):
         source = RUN_CYCLE_SCRIPT.read_text(encoding="utf-8")
         self.assertNotRegex(source, r"DB_BACKUP_UPLOADER|publish|unpublish|shard")
+
+    def test_remote_collection_uses_nested_staging_directory(self):
+        module = load_module("run_db_backup_cycle_collection", RUN_CYCLE_SCRIPT)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging = Path(tmpdir)
+            (staging / "ops.db").write_bytes(b"ops snapshot")
+            node_staging = staging / "nodes"
+            mocked_result = {
+                "output_dir": node_staging,
+                "manifest": {"nodes": []},
+            }
+            with mock.patch.object(module, "collect_remote_configs", return_value=mocked_result) as collect:
+                result = module.collect_remote_backup(staging)
+
+            collect.assert_called_once_with(node_staging, required=False)
+            self.assertEqual(result, node_staging)
 
     def create_source_db(self, root):
         db_path = root / "panel.db"
