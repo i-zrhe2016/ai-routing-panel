@@ -47,6 +47,23 @@ class R2UploadTest(unittest.TestCase):
             self.assertNotIn("secret", record)
             self.assertEqual(client.args[3], b"encrypted")
 
+    def test_upload_normalizes_legacy_bucket_suffixed_endpoint(self):
+        class Client:
+            def upload_fileobj(self, source, bucket, key, ExtraArgs):
+                self.args = (bucket, key, ExtraArgs, source.read())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bundle.tar.gz"
+            path.write_bytes(b"encrypted")
+            os.environ.update({
+                "DB_BACKUP_R2_BUCKET": "bucket",
+                "DB_BACKUP_R2_ENDPOINT": "https://account.r2.cloudflarestorage.com/bucket",
+                "DB_BACKUP_R2_ACCESS_KEY_ID": "access",
+                "DB_BACKUP_R2_SECRET_ACCESS_KEY": "secret",
+            })
+            record = upload_bundle(path, client=Client())
+            self.assertEqual(record["endpoint"], "https://account.r2.cloudflarestorage.com")
+
 
 if __name__ == "__main__":
     unittest.main()

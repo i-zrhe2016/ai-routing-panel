@@ -6,6 +6,7 @@ import os
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 MAGIC = b"XRAY-R2-AES256GCM\x01"
 
@@ -23,6 +24,23 @@ def _sha256(path):
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def normalize_endpoint(endpoint, bucket):
+    """Accept the current R2 endpoint and the legacy bucket-suffixed form."""
+    parsed = urlsplit(endpoint)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError("DB_BACKUP_R2_ENDPOINT must use HTTPS")
+    if parsed.query or parsed.fragment:
+        raise RuntimeError("DB_BACKUP_R2_ENDPOINT must not include a query or fragment")
+
+    path = parsed.path.rstrip("/")
+    legacy_bucket_path = f"/{bucket}"
+    if path not in ("", legacy_bucket_path):
+        raise RuntimeError(
+            "DB_BACKUP_R2_ENDPOINT must be the R2 base endpoint or include only the bucket path"
+        )
+    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
 def encrypt_bundle(bundle_path, output_path=None, password=None):
@@ -58,8 +76,7 @@ def upload_bundle(bundle_path, record_path=None, client=None):
     endpoint = _required("DB_BACKUP_R2_ENDPOINT")
     access_key = _required("DB_BACKUP_R2_ACCESS_KEY_ID")
     secret_key = _required("DB_BACKUP_R2_SECRET_ACCESS_KEY")
-    if not endpoint.startswith("https://"):
-        raise RuntimeError("DB_BACKUP_R2_ENDPOINT must use HTTPS")
+    endpoint = normalize_endpoint(endpoint, bucket)
     digest = _sha256(bundle)
     if client is None:
         try:
