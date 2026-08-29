@@ -6,6 +6,7 @@ import socket
 import ssl
 import subprocess
 import ipaddress
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -286,10 +287,11 @@ def join_shell_args(args):
 def build_temp_target_path(path_text):
     path = Path(str(path_text))
     suffix = "".join(path.suffixes)
+    token = uuid.uuid4().hex
     if not suffix:
-        return f"{path}.codex-tmp"
+        return f"{path}.codex-tmp-{token}"
     base_name = path.name[: -len(suffix)]
-    return str(path.with_name(f"{base_name}.codex-tmp{suffix}"))
+    return str(path.with_name(f"{base_name}.codex-tmp-{token}{suffix}"))
 
 
 def _cert_common_name(name_field):

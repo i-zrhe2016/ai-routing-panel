@@ -9,7 +9,11 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest import mock
 
-from app.xray.node_control import DataPlaneConfig, DataPlaneController
+from app.xray.node_control import (
+    DataPlaneConfig,
+    DataPlaneController,
+    build_temp_target_path,
+)
 
 
 def load_state_module(temp_root):
@@ -262,7 +266,7 @@ class NodeControlTest(unittest.TestCase):
         self.assertEqual(config_path.read_text(encoding="utf-8"), previous_config)
         self.assertEqual(backup_config_path.read_text(encoding="utf-8"), previous_backup_config)
 
-    def test_remote_sync_keeps_json_suffix_for_temp_config(self):
+    def test_remote_sync_uses_unique_temp_config_with_json_suffix(self):
         source_config = self.root / "config.json"
         source_config.write_text("{}", encoding="utf-8")
         controller = DataPlaneController(
@@ -287,8 +291,20 @@ class NodeControlTest(unittest.TestCase):
         uploaded = controller.sync_generated_files(validate_config=True)
 
         self.assertEqual(uploaded, ["/etc/xray/config.json"])
-        self.assertEqual(tested_paths, ["/etc/xray/config.codex-tmp.json"])
-        self.assertEqual(remote_calls[0][0][-1], "/etc/xray/config.codex-tmp.json")
+        self.assertEqual(len(tested_paths), 1)
+        self.assertRegex(
+            tested_paths[0],
+            r"^/etc/xray/config\.codex-tmp-[0-9a-f]{32}\.json$",
+        )
+        self.assertEqual(remote_calls[0][0][-1], tested_paths[0])
+
+    def test_temp_config_paths_are_unique(self):
+        first = build_temp_target_path("/etc/xray/config.json")
+        second = build_temp_target_path("/etc/xray/config.json")
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.endswith(".json"))
+        self.assertTrue(second.endswith(".json"))
 
     def test_remote_sync_does_not_report_unchanged_config(self):
         source_config = self.root / "config.json"
