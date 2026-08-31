@@ -3,10 +3,12 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from components.xray_ops.codex_runner import (
     CodexAnalysisError,
-    CodexRunResult,
     CodexRunnerConfig,
+    CodexRunResult,
 )
 from components.xray_ops.github_reports import GitHubReportPublisherConfig
 from components.xray_ops.prometheus import PrometheusResult
@@ -15,9 +17,9 @@ from components.xray_ops.reporter import (
     ReporterService,
     due_report_date,
     load_route_history,
+    main,
 )
 from components.xray_ops.storage import OpsStore
-
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 REPORT_DATE = date(2030, 1, 2)
@@ -109,7 +111,7 @@ def _config(tmp_path, route_dir=None):
     )
 
 
-def test_reporter_uses_beijing_day_and_degrades_optional_sources(tmp_path):
+def test_reporter_fails_without_codex_and_records_audit(tmp_path):
     config = _config(tmp_path)
     store = RecordingStore(config.db_path)
     service = ReporterService(
@@ -119,25 +121,66 @@ def test_reporter_uses_beijing_day_and_degrades_optional_sources(tmp_path):
         codex_factory=lambda: FailedCodex(),
     )
 
-    report = service.run_for_date(REPORT_DATE)
+    with pytest.raises(CodexAnalysisError) as caught:
+        service.run_for_date(REPORT_DATE)
 
+    assert caught.value.error_class == "codex_auth_failed"
     assert store.queries == []
-    assert report["window_start"] == "2030-01-02T00:00:00+08:00"
-    assert report["window_end"] == "2030-01-03T00:00:00+08:00"
-    assert report["generation_mode"] == "rules_only"
-    assert report["generation_health"]["codex"] == "failed"
-    assert report["generation_health"]["codex_attempts"] == 2
-    assert report["generation_health"]["codex_error_class"] == "codex_auth_failed"
-    prometheus_sources = [
-        source for source in report["collection_health"]["sources"] if source["source"].startswith("prometheus:")
-    ]
-    assert prometheus_sources
-    assert all(source["error_class"] == "prometheus_client_failed" for source in prometheus_sources)
     json_path = Path(config.report_dir) / "2030-01-02.json"
     markdown_path = Path(config.report_dir) / "2030-01-02.md"
-    assert json.loads(json_path.read_text(encoding="utf-8")) == report
-    assert "Codex 不可用" in markdown_path.read_text(encoding="utf-8")
-    assert store.latest_successful_report("2030-01-02")["generation_mode"] == "rules_only"
+    assert not json_path.exists()
+    assert not markdown_path.exists()
+    assert store.latest_successful_report("2030-01-02") is None
+    with store.connect() as connection:
+        failed_run = connection.execute(
+            "SELECT status, error_class, detail, generation_mode, json_path, markdown_path "
+            "FROM report_runs WHERE report_date = ?",
+            (REPORT_DATE.isoformat(),),
+        ).fetchone()
+    assert dict(failed_run) == {
+        "status": "failed",
+        "error_class": "codex_auth_failed",
+        "detail": "authentication failed",
+        "generation_mode": None,
+        "json_path": None,
+        "markdown_path": None,
+    }
+
+
+def test_scheduler_does_not_accept_rules_only_as_complete_when_codex_is_required(tmp_path):
+    config = _config(tmp_path)
+    service = ReporterService(
+        config,
+        store=OpsStore(config.db_path),
+        prometheus_factory=lambda: EmptyPrometheus(),
+        codex_factory=lambda: FailedCodex(),
+    )
+
+    service.run_for_date(REPORT_DATE, rules_only=True)
+
+    assert service._is_complete(REPORT_DATE.isoformat(), require_codex=False)
+    assert not service._is_complete(REPORT_DATE.isoformat(), require_codex=True)
+    with pytest.raises(CodexAnalysisError):
+        service.run_for_date(REPORT_DATE, skip_if_complete=True)
+    with service.store.connect() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM report_runs WHERE report_date = ?",
+            (REPORT_DATE.isoformat(),),
+        ).fetchone()[0]
+    assert count == 2
+
+
+def test_healthcheck_requires_a_healthy_reporter_heartbeat(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("OPS_DB_PATH", str(db_path))
+    store = OpsStore(db_path)
+    store.initialize()
+    store.set_service_heartbeat("daily_reporter", "degraded", "codex_auth_failed")
+
+    assert main(["healthcheck", "--max-age-seconds", "300"]) == 1
+
+    store.set_service_heartbeat("daily_reporter", "healthy", "2030-01-02")
+    assert main(["healthcheck", "--max-age-seconds", "300"]) == 0
 
 
 def test_reporter_codex_success_is_kept_separate_from_rules(tmp_path):

@@ -16,6 +16,10 @@ AI node-exporter 和 cAdvisor 通过控制面回环 SSH 隧道抓取。先检查
 
 如果报告窗口早于 Prometheus 上线时间，覆盖率为 0% 和状态 `unknown` 是预期结果，不能据此判定业务故障，也不能通过重跑补出不存在的历史样本。应等待一个完整采集窗口后生成新的影子报告。
 
+## Codex 不可用或日报未生成
+
+正常模式要求 Codex 成功完成 schema 校验；Codex 缺失、认证失败、进程失败、超时或输出不合法时，`report_runs` 应记录失败，且不应生成或发布 `rules_only` 报告。先在日报容器中执行 `codex --version`，再检查认证种子和 API 返回状态；不要把旧的 `rules_only` 报告当作当前窗口已完成。`--rules-only` 和 `OPS_FORCE_RULES_ONLY=1` 只用于明确的影子/维护运行。
+
 ## 指标与业务感知冲突
 
 先确认 exporter 与 blackbox 是否测量同一对象，再检查 counter reset 和 label 漂移。Prometheus-only 无法给出日志级根因；需要人工在节点本地按独立安全流程排查，但不得把原始日志导入本子系统。

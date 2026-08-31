@@ -8,11 +8,13 @@ import json
 import os
 import signal
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, time as datetime_time, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as datetime_time
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from .codex_runner import CodexAnalysisError, CodexRunner, CodexRunnerConfig
@@ -24,7 +26,6 @@ from .report_contract import build_report, cleanup_reports, validate_report, wri
 from .rules import classify_report
 from .storage import OpsStore
 from .xray_stats import SERVICE_NAME as XRAY_STATS_SERVICE_NAME
-
 
 REPORT_TIMEZONE = ZoneInfo("Asia/Shanghai")
 REPORT_HOUR = 0
@@ -78,7 +79,7 @@ class ReporterConfig:
     codex: CodexRunnerConfig
 
     @classmethod
-    def from_env(cls) -> "ReporterConfig":
+    def from_env(cls) -> ReporterConfig:
         token = _read_secret_file(str(os.environ.get("OPS_PROMETHEUS_BEARER_TOKEN_FILE", "")).strip())
         return cls(
             db_path=str(os.environ.get("OPS_DB_PATH", "/data/xray-ops/ops.db")),
@@ -284,7 +285,7 @@ class ReporterService:
     def initialize(self) -> None:
         self.store.initialize()
 
-    def _is_complete(self, report_date: str) -> bool:
+    def _is_complete(self, report_date: str, *, require_codex: bool = False) -> bool:
         run = self.store.latest_successful_report(report_date)
         if not run or not run.get("json_path") or not run.get("markdown_path"):
             return False
@@ -295,6 +296,8 @@ class ReporterService:
         try:
             report = json.loads(json_path.read_text(encoding="utf-8"))
             validate_report(report)
+            if require_codex and report.get("generation_mode") != "codex":
+                return False
             return bool(markdown_path.read_text(encoding="utf-8").strip())
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
             return False
@@ -330,9 +333,10 @@ class ReporterService:
         started = utc_now()
         run_id = stable_id("report", report_date.isoformat(), format_timestamp(started), os.getpid(), time.monotonic_ns())
         publish_status: dict[str, Any] = {"status": "disabled"}
+        require_codex = not (rules_only or self.config.force_rules_only)
 
         with report_lock(self.config.lock_path):
-            if skip_if_complete and self._is_complete(report_date.isoformat()):
+            if skip_if_complete and self._is_complete(report_date.isoformat(), require_codex=require_codex):
                 completed = self.store.latest_successful_report(report_date.isoformat())
                 if completed and completed.get("json_path"):
                     return json.loads(Path(completed["json_path"]).read_text(encoding="utf-8"))
@@ -388,7 +392,7 @@ class ReporterService:
                 codex_attempts = 0
                 codex_input_metadata = None
                 codex_usage = None
-                if not (rules_only or self.config.force_rules_only):
+                if require_codex:
                     frozen = {
                         "report_date": report_date.isoformat(),
                         "timezone": "Asia/Shanghai",
@@ -403,27 +407,15 @@ class ReporterService:
                     try:
                         codex_result = self.codex_factory().analyze(frozen)
                     except CodexAnalysisError as exc:
-                        codex_status = "failed"
-                        codex_error_class = exc.error_class
-                        codex_attempts = exc.attempts
-                        if exc.usage:
-                            codex_usage = {
-                                "status": "available",
-                                "provider": "",
-                                "model": "",
-                                "attempts": exc.attempts,
-                                "tokens": exc.usage,
-                                "estimated_price": {
-                                    "status": "unavailable",
-                                    "currency": "USD",
-                                    "amount": None,
-                                    "reason": "pricing_not_configured",
-                                },
-                            }
+                        _emit(
+                            "report_codex_failed",
+                            report_date=report_date.isoformat(),
+                            error_class=exc.error_class,
+                            attempts=exc.attempts,
+                        )
+                        raise
                     except Exception:
-                        codex_status = "failed"
-                        codex_error_class = "codex_internal_error"
-                        codex_attempts = 0
+                        raise CodexAnalysisError("codex_internal_error", 0, "Codex analysis failed") from None
                     else:
                         model_analysis = codex_result.analysis
                         codex_attempts = codex_result.attempts
@@ -476,11 +468,13 @@ class ReporterService:
                     payload_digest=output["payload_digest"],
                 )
             except Exception as exc:
+                error_class = str(getattr(exc, "error_class", type(exc).__name__))
+                detail = str(getattr(exc, "detail", exc))
                 self.store.finish_report_run(
                     run_id,
                     status="failed",
-                    error_class=type(exc).__name__,
-                    detail=str(redact_value(str(exc)))[:500],
+                    error_class=error_class,
+                    detail=str(redact_value(detail))[:500],
                 )
                 raise
 
@@ -550,7 +544,10 @@ class ReporterService:
             scheduled_report_date = due_report_date(now)
             report_date_text = scheduled_report_date.isoformat()
             try:
-                if not self._is_complete(report_date_text):
+                if not self._is_complete(
+                    report_date_text,
+                    require_codex=not self.config.force_rules_only,
+                ):
                     self.store.set_service_heartbeat("daily_reporter", "overdue", report_date_text)
                     self.run_for_date(scheduled_report_date, skip_if_complete=True)
                 elif self.config.github_reports.enabled:
@@ -563,12 +560,14 @@ class ReporterService:
                         )
                 self.store.set_service_heartbeat("daily_reporter", "healthy", report_date_text)
             except Exception as exc:
-                self.store.set_service_heartbeat("daily_reporter", "degraded", type(exc).__name__)
+                error_class = str(getattr(exc, "error_class", type(exc).__name__))
+                detail = str(getattr(exc, "detail", exc))
+                self.store.set_service_heartbeat("daily_reporter", "degraded", error_class)
                 _emit(
                     "report_scheduler_failed",
                     report_date=report_date_text,
-                    error_class=type(exc).__name__,
-                    detail=str(exc)[:500],
+                    error_class=error_class,
+                    detail=str(redact_value(detail))[:500],
                 )
             deadline = time.monotonic() + self.config.scheduler_interval_seconds
             while not stopping:
@@ -608,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
         if not heartbeat:
             return 1
         age = (utc_now() - parse_timestamp(heartbeat["heartbeat_at"])).total_seconds()
-        return 0 if age <= args.max_age_seconds else 1
+        return 0 if heartbeat.get("status") == "healthy" and age <= args.max_age_seconds else 1
     service.run_forever()
     return 0
 

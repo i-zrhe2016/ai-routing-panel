@@ -35,14 +35,19 @@ FROM runtime AS reporter
 
 USER root
 ARG CODEX_CLI_VERSION=0.145.0
-# Codex releases include a standalone statically linked Linux binary. Keeping
-# it separate from the Python runtime removes the Node.js toolchain.
-ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex /usr/local/bin/codex
-RUN chmod 0755 /usr/local/bin/codex
+# The `codex` release asset is a dotslash manifest. Extract the actual
+# statically linked Linux binary from the platform package instead; the
+# reporter image intentionally does not install the dotslash runtime.
+ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex-package-x86_64-unknown-linux-musl.tar.zst /tmp/codex-package.tar.zst
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bubblewrap git openssh-client \
-    && rm -rf /var/lib/apt/lists/*
-RUN codex --version || echo "codex version check skipped; reporter falls back to rules_only when codex is unavailable"
+    && apt-get install -y --no-install-recommends bubblewrap git openssh-client tar zstd \
+    && mkdir -p /opt/codex \
+    && tar --zstd -xf /tmp/codex-package.tar.zst -C /opt/codex \
+    && test -x /opt/codex/bin/codex \
+    && ln -s /opt/codex/bin/codex /usr/local/bin/codex \
+    && rm -f /tmp/codex-package.tar.zst \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/bin/codex --version
 
 ENTRYPOINT ["python", "-m", "components.xray_ops.reporter"]
 CMD ["serve"]

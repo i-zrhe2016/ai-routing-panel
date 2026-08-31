@@ -12,11 +12,13 @@
 2. 对前一自然日执行版本化 range queries，计算覆盖率、counter reset 和两个数据面的日流量增量。
 3. 从 SQLite 读取 `xray-ops-attribution-sampler` 写入的脱敏 user/inbound counter 快照，计算报告窗口内的增量归因。
 4. 将标准化指标交给确定性规则；缺失数据保持 `unknown`。
-5. 从同一份已校验结果生成 JSON 和 Markdown，并原子发布。
-6. 将 Markdown 和 JSON 复制到仓库内 `ops-daily-reports/<year>/`，只提交该目录并推送到 GitHub。
-7. 仅把本次运行元数据和报告归档索引写入 SQLite。
+5. 正常模式将同一份冻结结果交给 Codex 生成受 schema 约束的解释；Codex 缺失、认证失败、调用失败或输出校验失败时，本次日报运行失败，不生成或发布规则-only 报告。
+6. 从同一份已校验结果生成 JSON 和 Markdown，并原子发布。
+7. 将 Markdown 和 JSON 复制到仓库内 `ops-daily-reports/<year>/`，只提交该目录并推送到 GitHub。
+8. 仅把本次运行元数据和报告归档索引写入 SQLite。
 
 Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注缺口的规则报告；无法校验规则结果或无法原子发布时，本次运行失败且不发布半份报告。
+`--rules-only` 或 `OPS_FORCE_RULES_ONLY=1` 仅用于明确的影子/维护运行，不是 Codex 失败时的自动降级路径。
 
 ## 数据面流量
 
@@ -85,6 +87,6 @@ ops-daily-reports/<year>/<date>.json
 
 ## 职责边界
 
-日报器不能从指标反推出日志内容或请求级根因。归因表只说明哪个脱敏 user/inbound counter 增长最多，不说明具体访问了什么域名或内容。模型解释如被启用，只接收脱敏后的规则摘要，超时后降级为 `rules_only`，且不能覆盖规则结论。
+日报器不能从指标反推出日志内容或请求级根因。归因表只说明哪个脱敏 user/inbound counter 增长最多，不说明具体访问了什么域名或内容。模型解释只接收脱敏后的规则摘要，不能覆盖规则结论；正常模式下 Codex 失败会使整次日报失败，不会自动降级为 `rules_only`。
 
 相关文档：[Prometheus Targets](prometheus-targets.md)、[规则边界](fault-classification.md)、[SQLite 审计](report-run-audit.md)。
