@@ -187,19 +187,46 @@
       "summary": "Prometheus 目标或抓取覆盖不足，无法判断"
     }
   ],
-  "generated_at": "2026-08-31T00:10:06+08:00",
+  "generated_at": "2026-08-31T19:32:38+08:00",
   "generation_health": {
     "atomic_write": "success",
-    "codex": "failed",
-    "codex_attempts": 2,
-    "codex_error_class": "codex_process_failed",
-    "codex_input": null,
-    "codex_usage": null,
+    "codex": "success",
+    "codex_attempts": 1,
+    "codex_error_class": "",
+    "codex_input": {
+      "byte_cap": 65536,
+      "evidence_available": 1,
+      "evidence_selected": 1,
+      "evidence_truncated": false,
+      "input_bytes": 5299,
+      "prompt_version": "2.0",
+      "schema_version": "1.0"
+    },
+    "codex_usage": {
+      "attempts": 1,
+      "estimated_price": {
+        "amount": null,
+        "currency": "USD",
+        "reason": "pricing_not_configured",
+        "status": "unavailable"
+      },
+      "model": "",
+      "provider": "",
+      "status": "available",
+      "tokens": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 6912,
+        "input_tokens": 9981,
+        "output_tokens": 823,
+        "reasoning_output_tokens": 467,
+        "total_tokens": 10804
+      }
+    },
     "json_schema": "valid",
     "markdown": "success",
     "rules": "success"
   },
-  "generation_mode": "rules_only",
+  "generation_mode": "codex",
   "incidents": [
     {
       "ended_at": "2026-08-30T16:00:00.000000Z",
@@ -222,8 +249,48 @@
       "status": "unknown"
     }
   ],
-  "model_analysis": null,
-  "model_output_schema_version": null,
+  "model_analysis": {
+    "executive_summary": "2026-08-30整体状态为未知：普通数据面节点因Prometheus目标抓取缺口无法可靠判定；AI数据面节点在输入记录中显示为正常。",
+    "node_explanations": [
+      {
+        "evidence_ids": [
+          "ev-893c8d237990d4638fd5fb9d"
+        ],
+        "explanation": "事实：节点状态为未知，记录存在prometheus:target_scrape缺失，且证据质量为partial；因此无法据此确认服务或资源是否正常。",
+        "node_role": "normal_data_plane"
+      }
+    ],
+    "probable_causes": [
+      {
+        "cause": "推测：Prometheus目标缺失或抓取覆盖不足，导致运维遥测不完整并触发OPS-U001。",
+        "confidence": "high",
+        "evidence_ids": [
+          "ev-893c8d237990d4638fd5fb9d"
+        ],
+        "node_role": "normal_data_plane"
+      }
+    ],
+    "recommended_actions": [
+      {
+        "action": "优先恢复并核查prometheus:target_scrape目标及抓取链路，补齐缺失遥测后再重新判定节点和服务状态。",
+        "evidence_ids": [
+          "ev-893c8d237990d4638fd5fb9d"
+        ],
+        "node_role": "normal_data_plane",
+        "priority": "high"
+      }
+    ],
+    "uncertainties": [
+      {
+        "description": "由于目标抓取证据缺失，普通数据面节点的服务可用性、资源压力和网络状况均不能从本次证据中可靠推断。",
+        "evidence_ids": [
+          "ev-893c8d237990d4638fd5fb9d"
+        ],
+        "node_role": "normal_data_plane"
+      }
+    ]
+  },
+  "model_output_schema_version": "1.0",
   "nodes": [
     {
       "matched_rules": [
@@ -298,7 +365,7 @@
     }
   ],
   "overall_status": "unknown",
-  "prompt_version": null,
+  "prompt_version": "2.0",
   "report_date": "2026-08-30",
   "rule_parameters": {
     "cpu_pressure_percent": 95.0,
