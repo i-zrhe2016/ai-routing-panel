@@ -20,7 +20,8 @@ PROMPT_VERSION = "2.0"
 MODEL_PROMPT = (
     "分析标准输入中的 Xray 每日运维证据。规则状态、规则编号、规则阈值、事件时间和证据 ID 已由程序冻结，"
     "不得修改、删除或重新定性。仅用中文解释已确定的结果，区分事实与推测；原因、建议和不确定项"
-    "必须引用存在的 evidence_ids。不要执行命令，不要访问文件，不要输出 Markdown。"
+    "必须引用存在的 evidence_ids。任何输出项的 evidence_ids 都必须非空且来自输入；如果没有对应证据，"
+    "省略该输出项，不能返回空数组。不要执行命令，不要访问文件，不要输出 Markdown。"
 )
 DEFAULT_MAX_INPUT_BYTES = 64 * 1024
 RETRYABLE_ERRORS = {"codex_timeout", "codex_rate_limited", "codex_process_failed", "codex_exec_failed", "codex_invalid_output"}

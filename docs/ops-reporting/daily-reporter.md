@@ -12,7 +12,7 @@
 2. 对前一自然日执行版本化 range queries，计算覆盖率、counter reset 和两个数据面的日流量增量。
 3. 从 SQLite 读取 `xray-ops-attribution-sampler` 写入的脱敏 user/inbound counter 快照，计算报告窗口内的增量归因。
 4. 将标准化指标交给确定性规则；缺失数据保持 `unknown`。
-5. 正常模式将同一份冻结结果交给 Codex 生成受 schema 约束的解释；Codex 缺失、认证失败、调用失败或输出校验失败时，本次日报运行失败，不生成或发布规则-only 报告。
+5. 正常模式将同一份冻结结果交给 Codex 生成受 schema 约束的解释；每个解释条目必须引用至少一个已有 `evidence_id`，没有对应证据的条目必须省略。Codex 缺失、认证失败、调用失败或输出校验失败时，本次日报运行失败，不生成或发布规则-only 报告。
 6. 从同一份已校验结果生成 JSON 和 Markdown，并原子发布。
 7. 将 Markdown 和 JSON 复制到仓库内 `ops-daily-reports/<year>/`，只提交该目录并推送到 GitHub。
 8. 仅把本次运行元数据和报告归档索引写入 SQLite。
