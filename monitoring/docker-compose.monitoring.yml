@@ -21,6 +21,8 @@ services:
     container_name: control-plane-cadvisor
     restart: unless-stopped
     network_mode: host
+    environment:
+      CADVISOR_HEALTHCHECK_URL: 'http://127.0.0.1:18081/healthz'
     command:
       - '--port=18081'
       - '--docker_only=true'
