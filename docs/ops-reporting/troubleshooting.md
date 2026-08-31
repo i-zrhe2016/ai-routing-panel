@@ -2,6 +2,18 @@
 
 > 权威范围：target、查询和报告故障；不包含 SSH 或原始日志排查
 
+## 2026-08-31 目标抓取恢复记录
+
+普通数据面 target 曾配置为公网地址 `64.186.224.96:19100/18081`。从控制面访问这两个端口失败，而通过 Tailscale 地址 `100.65.108.93:19100/18081` 均返回 HTTP 200，故障根因是 Prometheus 抓取路径与数据面防火墙边界不一致。
+
+已执行：
+
+- 将 `data-plane-node` 和 `data-plane-cadvisor` 的普通数据面 target 固定为 `100.65.108.93`；
+- 恢复控制面面板的 `METRICS_TOKEN`，并让 Prometheus 以仅自身 UID 可读的文件读取同一 token；
+- 启动控制面 node-exporter 和 Prometheus，校验配置及 active targets。
+
+核验结果：Prometheus 的 7 个 active targets 均为 `up`，普通数据面两个 target 的 `up` 值均为 `1`，面板 `/metrics` 带认证返回 HTTP 200。修复前报告窗口的缺失样本不能回填，历史 `unknown` 仍应保留；应等待完整采集窗口后再生成新的报告。
+
 ## Codex 返回 401
 
 如果 `codex login status` 能识别认证方式，但日报日志仍出现 `401 Unauthorized`，先确认运行时 `auth.json` 是官方登录 token，并且对应配置包含 `model_provider = "openai"`。文件存在或 CLI 能读取 profile 不代表服务端验签成功；应在同一个 `CODEX_HOME` 下做一次真实 Codex 请求验证。不要把 `auth.json` 提交到仓库或粘贴到工单。
