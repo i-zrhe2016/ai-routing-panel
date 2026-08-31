@@ -187,7 +187,7 @@
       "summary": "Prometheus 目标或抓取覆盖不足，无法判断"
     }
   ],
-  "generated_at": "2026-08-31T19:32:38+08:00",
+  "generated_at": "2026-08-31T19:40:31+08:00",
   "generation_health": {
     "atomic_write": "success",
     "codex": "success",
@@ -215,11 +215,11 @@
       "status": "available",
       "tokens": {
         "cache_write_input_tokens": 0,
-        "cached_input_tokens": 6912,
-        "input_tokens": 9981,
-        "output_tokens": 823,
-        "reasoning_output_tokens": 467,
-        "total_tokens": 10804
+        "cached_input_tokens": 0,
+        "input_tokens": 10944,
+        "output_tokens": 789,
+        "reasoning_output_tokens": 324,
+        "total_tokens": 11733
       }
     },
     "json_schema": "valid",
@@ -250,19 +250,19 @@
     }
   ],
   "model_analysis": {
-    "executive_summary": "2026-08-30整体状态为未知：普通数据面节点因Prometheus目标抓取缺口无法可靠判定；AI数据面节点在输入记录中显示为正常。",
+    "executive_summary": "2026-08-30 的总体状态为 unknown：普通数据面节点因 Prometheus 目标抓取缺口触发 OPS-U001，无法判定其运行健康度；AI 数据面节点状态为 normal，但输入中没有可引用的证据 ID，故不对其作证据性解释。",
     "node_explanations": [
       {
         "evidence_ids": [
           "ev-893c8d237990d4638fd5fb9d"
         ],
-        "explanation": "事实：节点状态为未知，记录存在prometheus:target_scrape缺失，且证据质量为partial；因此无法据此确认服务或资源是否正常。",
+        "explanation": "事实：节点状态为 unknown，匹配规则 OPS-U001；事件时间为 2026-08-29T16:00:00.000000Z 至 2026-08-30T16:00:00.000000Z。证据显示缺少 prometheus:target_scrape，目标或抓取覆盖不足，因此无法判断节点服务是否正常。",
         "node_role": "normal_data_plane"
       }
     ],
     "probable_causes": [
       {
-        "cause": "推测：Prometheus目标缺失或抓取覆盖不足，导致运维遥测不完整并触发OPS-U001。",
+        "cause": "推测：Prometheus 目标配置、目标可达性或抓取链路存在问题，导致 prometheus:target_scrape 缺失并使规则 OPS-U001 进入 unknown，而非确认服务故障。",
         "confidence": "high",
         "evidence_ids": [
           "ev-893c8d237990d4638fd5fb9d"
@@ -272,7 +272,7 @@
     ],
     "recommended_actions": [
       {
-        "action": "优先恢复并核查prometheus:target_scrape目标及抓取链路，补齐缺失遥测后再重新判定节点和服务状态。",
+        "action": "优先恢复并验证 prometheus:target_scrape 的目标发现、网络可达性和抓取配置；补齐连续监控数据后，再重新评估 OPS-U001 及节点服务状态。",
         "evidence_ids": [
           "ev-893c8d237990d4638fd5fb9d"
         ],
@@ -282,7 +282,7 @@
     ],
     "uncertainties": [
       {
-        "description": "由于目标抓取证据缺失，普通数据面节点的服务可用性、资源压力和网络状况均不能从本次证据中可靠推断。",
+        "description": "由于 prometheus:target_scrape 缺失，无法确认普通数据面节点在该事件窗口内是否实际宕机、重启或发生资源压力；当前 unknown 不应重新定性为正常或故障。",
         "evidence_ids": [
           "ev-893c8d237990d4638fd5fb9d"
         ],
