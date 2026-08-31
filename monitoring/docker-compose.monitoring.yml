@@ -22,6 +22,7 @@ services:
     restart: unless-stopped
     network_mode: host
     command:
+      - '--port=18081'
       - '--docker_only=true'
       - '--housekeeping_interval=30s'
       - '--max_housekeeping_interval=35s'
