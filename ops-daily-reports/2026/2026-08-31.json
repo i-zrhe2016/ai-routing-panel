@@ -1,0 +1,386 @@
+{
+  "collection_health": {
+    "gaps": [
+      {
+        "error_class": "prometheus_scrape_gap",
+        "node_role": "normal_data_plane",
+        "source": "prometheus:target_scrape"
+      }
+    ],
+    "node_coverage": {
+      "ai_data_plane": 1.0,
+      "normal_data_plane": 1.0
+    },
+    "overall_coverage_ratio": 1.0,
+    "sources": [
+      {
+        "configured": true,
+        "error_class": "route_history_partial",
+        "files": 1621,
+        "invalid_files": 1,
+        "source": "ai_routing_history",
+        "success": false
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 9,
+        "source": "prometheus:up",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_data_plane_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_ai_node_running",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 8,
+        "source": "prometheus:xray_panel_port_reachable",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 8,
+        "source": "prometheus:xray_panel_port_probe_timestamp_seconds",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 16,
+        "source": "prometheus:xray_panel_port_traffic_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 8,
+        "source": "prometheus:xray_panel_port_connections_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_target_info",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_last_probe_healthy",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 1,
+        "source": "prometheus:xray_panel_dns_failover_consecutive_failures",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 24,
+        "source": "prometheus:node_cpu_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 3,
+        "source": "prometheus:node_memory_MemAvailable_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 3,
+        "source": "prometheus:node_memory_MemTotal_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_filesystem_avail_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_filesystem_size_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_network_receive_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 20,
+        "source": "prometheus:node_network_transmit_bytes_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_cpu_usage_seconds_total",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_memory_working_set_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_spec_memory_limit_bytes",
+        "success": true
+      },
+      {
+        "configured": true,
+        "error_class": "",
+        "series": 6,
+        "source": "prometheus:container_last_seen",
+        "success": true
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "attributes": {
+        "coverage_ratio": 1.0,
+        "missing_sources": [
+          "prometheus:target_scrape"
+        ]
+      },
+      "evidence_id": "ev-19d5ed11a827bbca44e551e7",
+      "evidence_type": "telemetry_insufficient",
+      "node_role": "normal_data_plane",
+      "observed_at": "2026-08-30T16:00:00.000000Z",
+      "source": "prometheus",
+      "source_quality": "partial",
+      "summary": "Prometheus 目标或抓取覆盖不足，无法判断"
+    }
+  ],
+  "generated_at": "2026-09-01T00:10:30+08:00",
+  "generation_health": {
+    "atomic_write": "success",
+    "codex": "success",
+    "codex_attempts": 1,
+    "codex_error_class": "",
+    "codex_input": {
+      "byte_cap": 65536,
+      "evidence_available": 1,
+      "evidence_selected": 1,
+      "evidence_truncated": false,
+      "input_bytes": 5329,
+      "prompt_version": "2.0",
+      "schema_version": "1.0"
+    },
+    "codex_usage": {
+      "attempts": 1,
+      "estimated_price": {
+        "amount": null,
+        "currency": "USD",
+        "reason": "pricing_not_configured",
+        "status": "unavailable"
+      },
+      "model": "",
+      "provider": "",
+      "status": "available",
+      "tokens": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 0,
+        "input_tokens": 10949,
+        "output_tokens": 571,
+        "reasoning_output_tokens": 94,
+        "total_tokens": 11520
+      }
+    },
+    "json_schema": "valid",
+    "markdown": "success",
+    "rules": "success"
+  },
+  "generation_mode": "codex",
+  "incidents": [
+    {
+      "ended_at": "2026-08-31T16:00:00.000000Z",
+      "evidence_ids": [
+        "ev-19d5ed11a827bbca44e551e7"
+      ],
+      "facts": [
+        "目标缺失或抓取覆盖不足。"
+      ],
+      "incident_id": "inc-bc1d44e2108a830317a03bd3",
+      "kind": "telemetry_gap",
+      "missing_sources": [
+        "prometheus:target_scrape"
+      ],
+      "node_role": "normal_data_plane",
+      "rule_ids": [
+        "OPS-U001"
+      ],
+      "started_at": "2026-08-30T16:00:00.000000Z",
+      "status": "unknown"
+    }
+  ],
+  "model_analysis": {
+    "executive_summary": "事实：2026-08-31 日报总体状态为未知。普通数据平面触发规则 OPS-U001，事件状态为未知，事件区间为 2026-08-30 16:00:00Z 至 2026-08-31 16:00:00Z；缺失来源为 prometheus:target_scrape，因此程序已确定无法判断其实际运行状态。AI 数据平面状态为正常且未匹配规则，但输入没有可用于该节点解释的证据 ID，故不扩展说明。",
+    "node_explanations": [
+      {
+        "evidence_ids": [
+          "ev-19d5ed11a827bbca44e551e7"
+        ],
+        "explanation": "事实：普通数据平面因 Prometheus 目标或抓取覆盖不足而被判定为未知，已匹配规则 OPS-U001。该结论表示监控证据不足，不等同于服务故障。",
+        "node_role": "normal_data_plane"
+      }
+    ],
+    "probable_causes": [
+      {
+        "cause": "推测：Prometheus 的目标发现、抓取配置、目标连通性或抓取链路可能存在异常，导致 prometheus:target_scrape 数据缺失；现有证据不能确定具体环节。",
+        "confidence": "medium",
+        "evidence_ids": [
+          "ev-19d5ed11a827bbca44e551e7"
+        ],
+        "node_role": "normal_data_plane"
+      }
+    ],
+    "recommended_actions": [
+      {
+        "action": "优先核查 Prometheus 目标发现结果、抓取配置、目标端点连通性及抓取错误，恢复 prometheus:target_scrape 数据后重新评估普通数据平面状态。",
+        "evidence_ids": [
+          "ev-19d5ed11a827bbca44e551e7"
+        ],
+        "node_role": "normal_data_plane",
+        "priority": "high"
+      }
+    ],
+    "uncertainties": [
+      {
+        "description": "现有证据只能确认目标或抓取覆盖不足，无法判断普通数据平面是否发生服务中断、性能退化或资源异常，也无法定位数据缺失的具体原因。",
+        "evidence_ids": [
+          "ev-19d5ed11a827bbca44e551e7"
+        ],
+        "node_role": "normal_data_plane"
+      }
+    ]
+  },
+  "model_output_schema_version": "1.0",
+  "nodes": [
+    {
+      "matched_rules": [
+        {
+          "evidence_ids": [
+            "ev-19d5ed11a827bbca44e551e7"
+          ],
+          "rule_id": "OPS-U001"
+        }
+      ],
+      "node_role": "normal_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 1.0,
+        "downtime_intervals": [],
+        "prometheus_coverage_ratio": 1.0,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "unknown",
+      "telemetry": {
+        "coverage_ratio": 1.0,
+        "missing_sources": [
+          "prometheus:target_scrape"
+        ],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 1.0,
+        "demand_increases": 12340,
+        "network_coverage_ratio": 0.170833,
+        "network_devices": [
+          "eth0"
+        ],
+        "network_received_bytes": 904329,
+        "network_total_bytes": 12272632,
+        "network_transmitted_bytes": 11368303,
+        "status": "demand_observed"
+      }
+    },
+    {
+      "matched_rules": [],
+      "node_role": "ai_data_plane",
+      "resources": {
+        "threshold_breaches": []
+      },
+      "service": {
+        "coverage_ratio": 1.0,
+        "downtime_intervals": [],
+        "prometheus_coverage_ratio": 1.0,
+        "restart_events": 0,
+        "target_coverage_ratio": 1.0
+      },
+      "status": "normal",
+      "telemetry": {
+        "coverage_ratio": 1.0,
+        "missing_sources": [],
+        "recorded_gaps": 0
+      },
+      "traffic": {
+        "coverage_ratio": 1.0,
+        "demand_increases": 5758,
+        "network_coverage_ratio": 1.0,
+        "network_devices": [
+          "eth0"
+        ],
+        "network_received_bytes": 2101738923,
+        "network_total_bytes": 4226707538,
+        "network_transmitted_bytes": 2124968615,
+        "status": "demand_observed"
+      }
+    }
+  ],
+  "overall_status": "unknown",
+  "prompt_version": "2.0",
+  "report_date": "2026-08-31",
+  "rule_parameters": {
+    "cpu_pressure_percent": 95.0,
+    "memory_available_pressure_ratio": 0.1,
+    "resource_duration_seconds": 900,
+    "root_disk_pressure_ratio": 0.9,
+    "scrape_step_seconds": 30,
+    "service_down_min_samples": 2,
+    "telemetry_min_coverage_ratio": 0.9
+  },
+  "rules_version": "2.0",
+  "schema_version": "1.0",
+  "timezone": "Asia/Shanghai",
+  "window_end": "2026-09-01T00:00:00+08:00",
+  "window_start": "2026-08-31T00:00:00+08:00"
+}
