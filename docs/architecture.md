@@ -129,7 +129,9 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 AI 观测链路：`xray-ai-node` 将 Xray metrics 绑定到 `127.0.0.1:31097`，面板读取后在
 `/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定 `127.0.0.1:18081`，
 Prometheus 同时采集 `xray-ai-node` 的容器级 CPU、内存和网络总量。AI access log 只
-保留在控制面日志目录，集中日志链路仅采集 `ai-error.log`。
+保留在控制面日志目录，集中日志链路仅采集 `ai-error.log`。面板增量读取
+`ai-access.log`，在最近窗口内按目标域名、端口和网络协议聚合请求量，输出
+`xray_panel_ai_destination_*` Top 指标；Xray access log 不提供按目标拆分的字节量。
 
 ## 关键运行产物
 

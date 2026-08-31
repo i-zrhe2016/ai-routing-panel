@@ -66,6 +66,9 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |
 | `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；本机 Docker 生产当前为 `127.0.0.1:27166` |
 | `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；本机默认 `http://127.0.0.1:31097/debug/vars`，只允许回环或受控管理网 |
+| `AI_NODE_ACCESS_LOG_PATH` | AI access log 路径；默认 `/app/xray/logs/ai-access.log`，只供控制面做本机域名/端口分析 |
+| `AI_NODE_DESTINATION_WINDOW_SECONDS` | AI 域名/端口请求分析窗口，默认 `600` 秒 |
+| `AI_NODE_DESTINATION_MAX_LABELS` | 每次展开的高流量域名/端口 Top 数，默认 `50`，用于限制 Prometheus 标签基数 |
 | `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；当前为 `100.87.76.6` |
 
 节点备份默认请求普通数据面的配置、`.env`、运行时辅助文件和最新报告；远端部署根可用 `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` / `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 配置。节点备份清单和恢复命令见[节点备份完整性与快速恢复](node-recovery.md)。

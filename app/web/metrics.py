@@ -6,9 +6,10 @@ from node_exporter, not this endpoint.
 
 The handler is strictly read-only on the scrape path: it reads the tables the
 background maintenance loop keeps fresh, reads the AI node's loopback-only
-expvar endpoint, and never calls ``sync_traffic_state``/``dns_failover_status``/
-probes (any of which may do I/O). The data-plane status check and AI metrics
-read are wrapped in TTL caches.
+expvar endpoint, and incrementally tails the local AI access log for bounded
+destination aggregates. It never calls ``sync_traffic_state``/
+``dns_failover_status``/probes (any of which may do I/O). The data-plane status
+check and AI metrics reads are wrapped in TTL caches.
 
 The format is hand-rolled (no ``prometheus_client`` dependency) to keep the
 panel on Flask + stdlib.
@@ -16,14 +17,26 @@ panel on Flask + stdlib.
 
 import hmac
 import json
+import re
+import threading
 import time
-from datetime import datetime
+from collections import Counter, deque
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from flask import Response, request
 
-from ..config import AI_NODE_METRICS_URL, METRICS_DP_TTL, METRICS_TOKEN, XRAY_STATS_QUERY_TIMEOUT
+from ..config import (
+    AI_NODE_ACCESS_LOG_PATH,
+    AI_NODE_DESTINATION_MAX_LABELS,
+    AI_NODE_DESTINATION_WINDOW_SECONDS,
+    AI_NODE_METRICS_URL,
+    METRICS_DP_TTL,
+    METRICS_TOKEN,
+    XRAY_STATS_QUERY_TIMEOUT,
+)
 from .core import route, state
 
 # Cache for the data-plane running check (the one SSH call on this path).
@@ -36,6 +49,28 @@ _AI_METRICS_CACHE = {
     "egress_received": 0,
     "egress_sent": 0,
 }
+_AI_ACCESS_LINE_RE = re.compile(
+    r"\baccepted\s+(?P<network>tcp|udp):(?P<target>\S+)"
+)
+_AI_LOG_TIMESTAMP_RE = re.compile(
+    r"^(?P<timestamp>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)"
+)
+_AI_DESTINATION_READ_CHUNK_BYTES = 8 * 1024 * 1024
+_AI_DESTINATION_CACHE = {
+    "ts": 0.0,
+    "available": 0,
+    "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
+    "requests": [],
+    "other_requests": 0,
+}
+_AI_DESTINATION_LOG_STATE = {
+    "path": "",
+    "inode": None,
+    "offset": 0,
+    "partial": "",
+    "events": deque(),
+}
+_AI_DESTINATION_LOCK = threading.Lock()
 
 
 def _esc(value):
@@ -132,6 +167,203 @@ def _ai_node_metrics_cached():
         _AI_METRICS_CACHE.update(result)
         _AI_METRICS_CACHE["ts"] = now
     return _AI_METRICS_CACHE
+
+
+def _parse_ai_log_timestamp(line, fallback):
+    match = _AI_LOG_TIMESTAMP_RE.match(line)
+    if not match:
+        return fallback
+    raw = match.group("timestamp")
+    for format_string in ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S"):
+        try:
+            parsed = datetime.strptime(raw, format_string).replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            continue
+    return fallback
+
+
+def _split_ai_destination(target):
+    target = str(target or "").rstrip(".,")
+    if target.startswith("["):
+        closing = target.find("]")
+        if closing < 0 or target[closing + 1 : closing + 2] != ":":
+            return None
+        host = target[1:closing]
+        port = target[closing + 2 :]
+    else:
+        if ":" not in target:
+            return None
+        host, port = target.rsplit(":", 1)
+    if not port.isdigit():
+        return None
+    port_number = int(port)
+    if port_number < 0 or port_number > 65535:
+        return None
+    host = host.strip().strip("[]").lower().rstrip(".")
+    if not host:
+        return None
+    return host, str(port_number)
+
+
+def _parse_ai_access_line(line, fallback_timestamp=None):
+    """Parse one Xray access-log accepted line into a bounded destination key."""
+    if not isinstance(line, str):
+        return None
+    match = _AI_ACCESS_LINE_RE.search(line)
+    if not match:
+        return None
+    destination = _split_ai_destination(match.group("target"))
+    if destination is None:
+        return None
+    fallback = time.time() if fallback_timestamp is None else float(fallback_timestamp)
+    host, port = destination
+    return {
+        "timestamp": _parse_ai_log_timestamp(line, fallback),
+        "domain": host,
+        "port": port,
+        "network": match.group("network"),
+    }
+
+
+def _summarize_ai_destination_events(events, now, window_seconds, max_labels):
+    """Return top recent destinations while bounding Prometheus label count."""
+    cutoff = float(now) - int(window_seconds)
+    counts = Counter()
+    last_seen = {}
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        try:
+            timestamp = float(event["timestamp"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if timestamp < cutoff:
+            continue
+        key = (event.get("domain"), event.get("port"), event.get("network"))
+        if not all(key):
+            continue
+        counts[key] += 1
+        last_seen[key] = max(timestamp, last_seen.get(key, timestamp))
+
+    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    top = ordered[: int(max_labels)]
+    top_count = sum(count for _, count in top)
+    return {
+        "available": 1,
+        "window_seconds": int(window_seconds),
+        "requests": [
+            {
+                "domain": key[0],
+                "port": key[1],
+                "network": key[2],
+                "requests": count,
+                "requests_per_second": count / max(1, int(window_seconds)),
+                "last_seen": last_seen[key],
+            }
+            for key, count in top
+        ],
+        "other_requests": max(0, sum(counts.values()) - top_count),
+    }
+
+
+def _read_ai_destination_metrics():
+    """Tail the AI access log and aggregate recent accepted destinations."""
+    if not AI_NODE_ACCESS_LOG_PATH:
+        return {
+            "available": 0,
+            "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
+            "requests": [],
+            "other_requests": 0,
+        }
+
+    path = Path(AI_NODE_ACCESS_LOG_PATH)
+    now = time.time()
+    try:
+        info = path.stat()
+    except OSError:
+        return {
+            "available": 0,
+            "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
+            "requests": [],
+            "other_requests": 0,
+        }
+
+    with _AI_DESTINATION_LOCK:
+        state = _AI_DESTINATION_LOG_STATE
+        reset = (
+            state["path"] != str(path)
+            or state["inode"] != info.st_ino
+            or info.st_size < state["offset"]
+        )
+        if reset:
+            state.update(
+                {
+                    "path": str(path),
+                    "inode": info.st_ino,
+                    "offset": 0,
+                    "partial": "",
+                    "events": deque(),
+                }
+            )
+
+        initial_tail = state["offset"] == 0 and info.st_size > _AI_DESTINATION_READ_CHUNK_BYTES
+        if initial_tail:
+            state["offset"] = info.st_size - _AI_DESTINATION_READ_CHUNK_BYTES
+
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(state["offset"])
+                chunk = handle.read(_AI_DESTINATION_READ_CHUNK_BYTES)
+                state["offset"] = handle.tell()
+        except OSError:
+            return {
+                "available": 0,
+                "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
+                "requests": [],
+                "other_requests": 0,
+            }
+
+        text = state["partial"] + chunk
+        lines = text.splitlines()
+        if text and not text.endswith(("\n", "\r")):
+            state["partial"] = lines.pop() if lines else text
+        else:
+            state["partial"] = ""
+        if initial_tail and lines:
+            lines = lines[1:]
+
+        for line in lines:
+            event = _parse_ai_access_line(line, fallback_timestamp=now)
+            if event is not None:
+                state["events"].append(event)
+
+        cutoff = now - AI_NODE_DESTINATION_WINDOW_SECONDS
+        while state["events"] and state["events"][0]["timestamp"] < cutoff:
+            state["events"].popleft()
+        return _summarize_ai_destination_events(
+            state["events"],
+            now,
+            AI_NODE_DESTINATION_WINDOW_SECONDS,
+            AI_NODE_DESTINATION_MAX_LABELS,
+        )
+
+
+def _ai_destination_metrics_cached():
+    now = time.monotonic()
+    if now - _AI_DESTINATION_CACHE["ts"] >= METRICS_DP_TTL:
+        try:
+            result = _read_ai_destination_metrics()
+        except (OSError, TypeError, ValueError):
+            result = {
+                "available": 0,
+                "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
+                "requests": [],
+                "other_requests": 0,
+            }
+        _AI_DESTINATION_CACHE.update(result)
+        _AI_DESTINATION_CACHE["ts"] = now
+    return _AI_DESTINATION_CACHE
 
 
 class _Renderer:
@@ -370,6 +602,68 @@ def _collect():
         "xray_panel_ai_node_egress_bytes_total",
         ai_metrics["egress_sent"],
         {"direction": "sent"},
+    )
+
+    ai_destinations = _ai_destination_metrics_cached()
+    r.family(
+        "xray_panel_ai_destination_log_available",
+        "gauge",
+        "AI access log is readable for destination analysis (1/0).",
+    )
+    r.sample("xray_panel_ai_destination_log_available", ai_destinations["available"])
+    r.family(
+        "xray_panel_ai_destination_window_seconds",
+        "gauge",
+        "Recent AI destination request analysis window in seconds.",
+    )
+    r.sample(
+        "xray_panel_ai_destination_window_seconds",
+        ai_destinations["window_seconds"],
+    )
+    r.family(
+        "xray_panel_ai_destination_requests",
+        "gauge",
+        "Accepted AI node requests in the recent analysis window by destination.",
+    )
+    r.family(
+        "xray_panel_ai_destination_requests_per_second",
+        "gauge",
+        "Average accepted AI node requests per second in the recent analysis window.",
+    )
+    r.family(
+        "xray_panel_ai_destination_last_seen_timestamp_seconds",
+        "gauge",
+        "Unix time when the AI destination was last accepted in the recent window.",
+    )
+    for destination in ai_destinations["requests"]:
+        labels = {
+            "domain": destination["domain"],
+            "port": destination["port"],
+            "network": destination["network"],
+        }
+        r.sample(
+            "xray_panel_ai_destination_requests",
+            destination["requests"],
+            labels,
+        )
+        r.sample(
+            "xray_panel_ai_destination_requests_per_second",
+            destination["requests_per_second"],
+            labels,
+        )
+        r.sample(
+            "xray_panel_ai_destination_last_seen_timestamp_seconds",
+            int(destination["last_seen"]),
+            labels,
+        )
+    r.family(
+        "xray_panel_ai_destination_other_requests",
+        "gauge",
+        "Recent AI destination requests omitted after the top-label limit.",
+    )
+    r.sample(
+        "xray_panel_ai_destination_other_requests",
+        ai_destinations["other_requests"],
     )
 
     # --- Backup Xray mode ------------------------------------------------

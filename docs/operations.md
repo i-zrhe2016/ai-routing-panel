@@ -28,6 +28,7 @@
 - 存活/可用性：`up`、`port_reachable`(gauge, 来自 TCP 探针)、`port_probe_timestamp_seconds`
 - 数据面：`data_plane_configured`/`data_plane_running`(gauge, 带 `mode` 标签)
 - AI 节点：`ai_node_configured`/`ai_node_running`(gauge, 带 `mode` 标签)、`ai_node_metrics_available`(gauge)、`ai_node_traffic_bytes_total` 和 `ai_node_egress_bytes_total`(counter, `direction` 标签)
+- AI 域名/端口：`ai_destination_log_available`、`ai_destination_window_seconds`、`ai_destination_requests`、`ai_destination_requests_per_second`、`ai_destination_last_seen_timestamp_seconds`（`domain`/`port`/`network` 标签，仅展开最近窗口 Top 50）和 `ai_destination_other_requests`
 - DNS 故障切换：`dns_failover_enabled`、`dns_failover_target_info`、`dns_failover_last_probe_healthy`、`dns_failover_consecutive_failures`/`_successes`、`dns_failover_peak_window_active`
 - AI 路由：`ai_domains_total`、`ai_domain_hits_total`、`ai_domains_last_update_timestamp_seconds`
 
@@ -35,6 +36,8 @@
 
 - 本机备用 AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。AI Xray metrics 只监听 `127.0.0.1:31097`，由面板聚合后进入 Prometheus。远端 AI 模式才需要单独配置 AI 主机的监控 target。
 - 控制面 cAdvisor 监听 `127.0.0.1:18081`，用于采集 `xray-ai-node` 容器级 CPU、内存和网络总量；该总量不能替代 Xray 入站/出站业务计数。
+- AI 域名/端口指标来自本机 `ai-access.log` 的 `accepted` 记录，默认聚合最近 10 分钟请求量；access log 没有按目标拆分的字节数，不应把请求量指标解释为 per-domain 字节量。
+- 高流量查询：`topk(20, xray_panel_ai_destination_requests)`；高请求速率查询：`topk(20, xray_panel_ai_destination_requests_per_second)`。
 - 控制面 Prometheus 的普通数据面和控制面 targets 应显示 `up`；若远端 AI target 出现 `timeout` 或 `connection refused`，再检查远端 AI 节点的 exporter 容器和端口监听。
 
 AI 路由状态至少应同时查看：

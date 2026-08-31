@@ -104,6 +104,17 @@ AI_NODE_API_SERVER = os.environ.get("AI_NODE_API_SERVER", "127.0.0.1:10085").str
 AI_NODE_METRICS_URL = os.environ.get(
     "AI_NODE_METRICS_URL", "http://127.0.0.1:31097/debug/vars"
 ).strip()
+AI_NODE_ACCESS_LOG_PATH = os.environ.get(
+    "AI_NODE_ACCESS_LOG_PATH", str(BASE_DIR / "xray" / "logs" / "ai-access.log")
+).strip()
+AI_NODE_DESTINATION_WINDOW_SECONDS = parse_positive_env_int(
+    os.environ.get("AI_NODE_DESTINATION_WINDOW_SECONDS", "600"),
+    "AI_NODE_DESTINATION_WINDOW_SECONDS",
+)
+AI_NODE_DESTINATION_MAX_LABELS = parse_positive_env_int(
+    os.environ.get("AI_NODE_DESTINATION_MAX_LABELS", "50"),
+    "AI_NODE_DESTINATION_MAX_LABELS",
+)
 AI_NODE_PROBE_HOST = os.environ.get("AI_NODE_PROBE_HOST", "").strip()
 AI_NODE_CONFIG_OUT = Path(
     os.environ.get("AI_NODE_CONFIG_OUT", XRAY_CONFIG_PATH.parent / "config-ai-node.json")

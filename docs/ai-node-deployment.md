@@ -97,6 +97,21 @@ curl -fsS http://127.0.0.1:9090/api/v1/targets
 `xray_panel_ai_node_egress_bytes_total` 是 AI 节点 `direct` 出站方向累计字节。
 Xray 重启会使其 counter 从零开始，查询应使用 Prometheus 的 `rate()` 或 `increase()`。
 
+域名/端口分析由面板增量读取 `ai-access.log` 中的 `accepted tcp|udp:<目标>:<端口>`
+记录，聚合最近 10 分钟的请求量并只暴露 Top 50，避免把未限制的目标域名直接变成
+Prometheus 标签。可用指标为：
+
+- `xray_panel_ai_destination_requests{domain,port,network}`：最近窗口请求量；
+- `xray_panel_ai_destination_requests_per_second{domain,port,network}`：最近窗口平均请求速率；
+- `xray_panel_ai_destination_last_seen_timestamp_seconds{domain,port,network}`：最后一次请求时间；
+- `xray_panel_ai_destination_other_requests`：因 Top 50 限制未展开的请求量。
+
+例如使用 `topk(20, xray_panel_ai_destination_requests)` 或
+`topk(20, xray_panel_ai_destination_requests_per_second)` 查看高流量域名/端口。
+Xray access log 不包含按目标拆分的字节数，因此这些指标表示请求流量；AI 节点总字节量
+仍以 `xray_panel_ai_node_traffic_bytes_total` 和
+`xray_panel_ai_node_egress_bytes_total` 为准。
+
 控制面 cAdvisor 使用 `127.0.0.1:18081`，Prometheus target 为
 `control-plane-cadvisor`；它提供 `xray-ai-node` 容器的 CPU、内存和网络总量，
 不替代 Xray 按入站方向的业务计数。
