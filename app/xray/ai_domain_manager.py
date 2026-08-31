@@ -258,7 +258,25 @@ def save_log_state(path, state):
     save_json(path, serializable)
 
 
-def sync_log(log_path, state):
+def sync_log(log_path, state, data_plane_controller=None, lookback_seconds=3600, now=None):
+    if data_plane_controller is not None and data_plane_controller.supports_logs():
+        current_time = now or utc_now()
+        cutoff = current_time - timedelta(seconds=lookback_seconds)
+        payload = data_plane_controller.read_access_log_delta(
+            state["log_inode"],
+            state["log_offset"],
+            since_epoch=cutoff.timestamp(),
+        )
+        if not payload["exists"]:
+            return
+        for line in str(payload["data"]).splitlines():
+            parsed = parse_log_line(line)
+            if parsed is not None:
+                state["events"].append(parsed)
+        state["log_inode"] = payload["inode"]
+        state["log_offset"] = int(payload["offset"])
+        return
+
     if not log_path.exists():
         return
 
@@ -752,14 +770,28 @@ def _save_ai_domains_to_panel_db_once(panel_db_path, report, decisions):
 
     observed_ai_items = [item for item in report["domains"] if item["classification"] == "ai"]
     observed_ai_by_domain = {item["domain"]: item for item in observed_ai_items}
-    ai_domains = sorted(
-        domain
-        for domain, item in decisions["domains"].items()
-        if item.get("classification") == "ai"
-    )
     conn = connect_panel_db(panel_db_path)
     try:
         ensure_ai_domain_schema(conn)
+
+        historical_ai_domains = {
+            row["domain"]
+            for row in conn.execute(
+                "SELECT DISTINCT domain FROM ai_domain_observations WHERE classification = 'ai'"
+            ).fetchall()
+        }
+        historical_ai_domains.update(
+            row["domain"]
+            for row in conn.execute(
+                "SELECT domain FROM ai_domains WHERE classification = 'ai' AND total_hits > 0"
+            ).fetchall()
+        )
+        ai_domains = sorted(
+            domain
+            for domain, item in decisions["domains"].items()
+            if item.get("classification") == "ai"
+            and (domain in observed_ai_by_domain or domain in historical_ai_domains)
+        )
 
         for item in observed_ai_items:
             decision = decisions["domains"].get(item["domain"], {})
@@ -885,13 +917,14 @@ def _save_ai_domains_to_panel_db_once(panel_db_path, report, decisions):
             )
             status["domains_upserted"] += 1
 
-        stale_domains = [
-            domain
-            for domain, item in decisions["domains"].items()
-            if item.get("classification") != "ai"
-        ]
-        if stale_domains:
-            conn.executemany("DELETE FROM ai_domains WHERE domain = ?", ((domain,) for domain in stale_domains))
+        if ai_domains:
+            placeholders = ", ".join("?" for _ in ai_domains)
+            conn.execute(
+                f"DELETE FROM ai_domains WHERE domain NOT IN ({placeholders})",
+                ai_domains,
+            )
+        else:
+            conn.execute("DELETE FROM ai_domains")
 
         conn.commit()
         status["status"] = "written"
@@ -1691,6 +1724,11 @@ def build_data_plane_controller(args):
     if getattr(args, "ai_upstream_candidates", None):
         upstream_host = str(args.ai_upstream_candidates[0]["upstream_host"])
         upstream_port = int(args.ai_upstream_candidates[0]["upstream_port"])
+    access_log_path = str(getattr(args, "data_plane_access_log_path", "") or "").strip()
+    if not access_log_path and args.data_plane_ssh_target and args.data_plane_config_path:
+        config_path = Path(args.data_plane_config_path)
+        if config_path.name == "config.json" and config_path.parent.name == "runtime":
+            access_log_path = str(config_path.parent.parent / "logs" / "access.log")
     return DataPlaneController(
         DataPlaneConfig(
             role="data_plane",
@@ -1708,6 +1746,7 @@ def build_data_plane_controller(args):
             ssh_known_hosts_file=str(getattr(args, "data_plane_ssh_known_hosts_file", "") or "").strip(),
             config_path=args.data_plane_config_path,
             dynamic_routing_path=args.data_plane_dynamic_routing_path,
+            access_log_path=access_log_path,
             source_config_path=args.config_out,
             source_dynamic_routing_path=args.dynamic_routing_path,
             upstream_host=upstream_host,
@@ -1803,15 +1842,21 @@ def classify_pending_domains(decisions, decisions_path, observed_domains, args):
 
 def run_once(args):
     now = utc_now()
+    data_plane_controller = build_data_plane_controller(args)
     log_state = load_log_state(args.log_state_path)
-    sync_log(args.log_path, log_state)
+    sync_log(
+        args.log_path,
+        log_state,
+        data_plane_controller=data_plane_controller,
+        lookback_seconds=args.lookback_seconds,
+        now=now,
+    )
     cutoff = purge_old_events(log_state, args.lookback_seconds, now)
 
     decisions = load_decisions(args.classification_state_path)
     observed_domains = {item["domain"] for item in log_state["events"]}
     sync_builtin_domain_decisions(decisions, args.classification_state_path, observed_domains)
     panel_target = read_panel_target(args.panel_db_path, args.panel_route_listen_port)
-    data_plane_controller = build_data_plane_controller(args)
     manual_mode = read_ai_routing_manual_mode(args.panel_db_path)
     if manual_mode == "forced_fallback":
         ai_target = {
@@ -1988,6 +2033,7 @@ def build_args():
     args.data_plane_restart_command = os.environ.get("DATAPLANE_RESTART_COMMAND", "").strip()
     args.data_plane_config_path = os.environ.get("DATAPLANE_CONFIG_PATH", "").strip()
     args.data_plane_dynamic_routing_path = os.environ.get("DATAPLANE_DYNAMIC_ROUTING_PATH", "").strip()
+    args.data_plane_access_log_path = os.environ.get("DATAPLANE_ACCESS_LOG_PATH", "").strip()
     args.codex_classifier_enabled = env_bool("CODEX_CLASSIFIER_ENABLED", "1")
     args.codex_source_home = Path(os.environ.get("CODEX_SOURCE_HOME", "/host-codex-home"))
     args.codex_runtime_home = Path(

@@ -8,21 +8,24 @@ AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过 Tails
 
 [查看 PlantUML 源文件](diagrams/ai-routing-flow.puml)
 
-1. 从 `app/xray/logs/access.log` 读取最近一小时访问域名
+每小时流量分析与入库/分流细节见：[PlantUML 流程图](diagrams/ai-hourly-analysis.svg) · [源文件](diagrams/ai-hourly-analysis.puml)
+
+1. 每小时读取最近一小时普通数据面 `access.log`；远端 SSH 模式直接在数据面读取，避免把整份日志复制到控制面
 2. 先应用内建 AI 域名规则
 3. 对未知域名优先调用本机 `codex`
 4. 如 `codex` 不可用，再回退到 OpenAI 兼容接口
-5. 生成动态路由、小时报表和数据库聚合结果
-6. 探测主、备 AI 候选并按当前模式选择目标
-7. 路由变化时重新渲染并重启数据面
+5. 仅将已观测且分类为 `ai` 的域名写入 `panel.db` 的 `ai_domains` 和 `ai_domain_observations`，历史 AI 域名保留累计结果
+6. 生成只包含 AI 域名的动态路由、小时报表
+7. 探测主、备 AI 候选并按当前模式选择目标
+8. 路由变化时重新渲染并重启数据面
 
-AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产候选为主 `nat.qq.pw:27166`、备 `100.87.76.6:27166`；截至 2026 年 8 月 23 日，主候选不可达，动态路由已选中备用候选。
+AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。非 AI 域名以及尚未完成分类的域名不进入动态规则，继续使用普通 DMIT 数据面的默认 `freedom` outbound 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产候选为主 `nat.qq.pw:27166`、备 `100.87.76.6:27166`；截至 2026 年 8 月 23 日，主候选不可达，动态路由已选中备用候选。
 
 ## 输入与输出
 
 输入：
 
-- `app/xray/logs/access.log`
+- 普通数据面 `access.log`（SSH 模式由 `DATAPLANE_ACCESS_LOG_PATH` 指定；留空时可从 `DATAPLANE_CONFIG_PATH` 推导）
 - `app/xray/.env`
 - 可选 `app/xray/ai-proxy-outbound.json`
 
@@ -32,7 +35,7 @@ AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALIT
 - `app/xray/runtime/dynamic-routing.json`
 - `app/xray/reports/hourly-domains/latest.json`
 - `app/xray/reports/hourly-domains/latest.txt`
-- `data/panel.db` 中的 `ai_domains` 和 `ai_domain_observations`
+- `data/panel.db` 中仅保存已观测且分类为 `ai` 的域名及每小时窗口观测
 
 ## AI 上游选择
 

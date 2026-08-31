@@ -42,8 +42,9 @@
   - 在 DNS 切换后接管入口流量
   - 详见 [dns-failover.md](dns-failover.md)
 - `xray-ai-domain-manager`
-  - 读取 `app/xray/logs/access.log`
-  - 输出 `dynamic-routing.json`、小时域名报表和 `ai_domains` 聚合
+  - 每小时读取普通数据面 `access.log`（远端模式通过 SSH 增量读取）
+  - 仅将已观测的 AI 分类域名写入 `panel.db` 的 `ai_domains` / `ai_domain_observations`，保留历史累计
+  - 输出只包含 AI 域名的 `dynamic-routing.json` 和小时域名报表；非 AI 域名由 DMIT 普通数据面 freedom 直出
   - AI 上游不可达时按模式切换候选；全部候选不可达时删除 `dynamic-routing.json`，流量回退数据面直出
 - `xray-routing-panel-db-backup`
   - 负责 `panel.db` 定时备份、控制面配置归档，并在打包前调用只读 SSH 采集普通数据面实际配置

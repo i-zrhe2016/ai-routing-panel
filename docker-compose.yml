@@ -249,6 +249,7 @@ services:
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
       DATAPLANE_SSH_KEY_FILE: "${DATAPLANE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
       DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      DATAPLANE_ACCESS_LOG_PATH: "${DATAPLANE_ACCESS_LOG_PATH:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

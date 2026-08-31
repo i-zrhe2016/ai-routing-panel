@@ -31,7 +31,7 @@
 | `DATAPLANE_AI_REPORT_PATH` | 远端 `reports/hourly-domains/latest.json` 路径 |
 | `DATAPLANE_PANEL_DB_PATH` | 远端 `panel.db` 路径，用于回传 AI 域名聚合快照 |
 | `DATAPLANE_PANEL_PORTS_PATH` | 远端 `panel-ports.json` 路径 |
-| `DATAPLANE_ACCESS_LOG_PATH` | 远端 `access.log` 路径 |
+| `DATAPLANE_ACCESS_LOG_PATH` | 远端 `access.log` 路径；AI 管理器每小时通过 SSH 增量读取；留空且 `DATAPLANE_CONFIG_PATH` 使用 `.../runtime/config.json` 时，自动推导同级 `.../logs/access.log` |
 | `DATAPLANE_RESTART_COMMAND` | 远端数据面重启命令 |
 | `DATAPLANE_PROBE_HOST` | TCP 探针连接目标；远端模式下应指向远端入口 IP 或域名 |
 | `DB_BACKUP_RECOVERY_REQUIRED` | 节点恢复材料不完整时是否阻止灾备归档继续上传；默认 `0`，完整性状态仍会写入报告 |

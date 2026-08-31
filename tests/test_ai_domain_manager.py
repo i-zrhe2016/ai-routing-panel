@@ -3,6 +3,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -57,6 +58,89 @@ class AiDomainManagerTest(unittest.TestCase):
 
         self.assertEqual(status["status"], "skipped")
         self.assertEqual(status["reason"], "database_locked")
+
+    def test_save_ai_domains_persists_observed_ai_and_omits_unobserved_builtins(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "panel.db"
+            db_path.touch()
+            report = {
+                "generated_at": "2026-08-31T12:00:00+00:00",
+                "window_start": "2026-08-31T11:00:00+00:00",
+                "window_end": "2026-08-31T12:00:00+00:00",
+                "domains": [
+                    {
+                        "domain": "api.openai.com",
+                        "hits": 3,
+                        "classification": "ai",
+                        "reason": "AI API",
+                        "protocols": ["tcp"],
+                        "first_seen": "2026-08-31T11:10:00+00:00",
+                        "last_seen": "2026-08-31T11:50:00+00:00",
+                    }
+                ],
+            }
+            decisions = {
+                "domains": {
+                    "api.openai.com": {
+                        "classification": "ai",
+                        "reason": "AI API",
+                        "source": "builtin",
+                        "model": "test",
+                    },
+                    "chatgpt.com": {
+                        "classification": "ai",
+                        "reason": "known AI",
+                        "source": "builtin",
+                        "model": "test",
+                    },
+                }
+            }
+
+            status = ai_domain_manager.save_ai_domains_to_panel_db(db_path, report, decisions)
+
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    "SELECT domain, total_hits FROM ai_domains ORDER BY domain"
+                ).fetchall()
+                observations = conn.execute(
+                    "SELECT domain, hits FROM ai_domain_observations"
+                ).fetchall()
+
+        self.assertEqual(status["status"], "written")
+        self.assertEqual(rows, [("api.openai.com", 3)])
+        self.assertEqual(observations, [("api.openai.com", 3)])
+
+    def test_sync_log_reads_recent_remote_access_log(self):
+        controller = mock.Mock()
+        controller.supports_logs.return_value = True
+        controller.read_access_log_delta.return_value = {
+            "exists": True,
+            "inode": "remote-inode",
+            "offset": 256,
+            "data": (
+                "2026/08/31 11:30:00.000000 from 127.0.0.1:1234 "
+                "accepted tcp:api.openai.com:443 [panel-31098 -> ai_proxy]\n"
+            ),
+        }
+        state = {"log_inode": "", "log_offset": 0, "events": []}
+        now = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+
+        ai_domain_manager.sync_log(
+            Path("/does/not/exist"),
+            state,
+            data_plane_controller=controller,
+            lookback_seconds=3600,
+            now=now,
+        )
+
+        controller.read_access_log_delta.assert_called_once_with(
+            "",
+            0,
+            since_epoch=(now - timedelta(hours=1)).timestamp(),
+        )
+        self.assertEqual(state["log_inode"], "remote-inode")
+        self.assertEqual(state["log_offset"], 256)
+        self.assertEqual(state["events"][0]["domain"], "api.openai.com")
 
     def test_read_ai_routing_manual_mode_defaults_and_reads_persisted_value(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -351,6 +435,7 @@ class AiDomainManagerTest(unittest.TestCase):
         mocked_controller_builder.return_value = mock.Mock(
             is_configured=mock.Mock(return_value=False),
             supports_restart=mock.Mock(return_value=False),
+            supports_logs=mock.Mock(return_value=False),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:

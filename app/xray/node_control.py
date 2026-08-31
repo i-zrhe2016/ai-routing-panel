@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 REMOTE_FILE_DELTA_SCRIPT = """
+from datetime import datetime, timezone
 import json
 import os
 import sys
@@ -19,6 +20,29 @@ import sys
 path = sys.argv[1]
 recorded_inode = sys.argv[2]
 offset = int(sys.argv[3])
+since_epoch = None
+if len(sys.argv) > 4 and sys.argv[4]:
+    try:
+        since_epoch = float(sys.argv[4])
+    except ValueError:
+        since_epoch = None
+
+
+def is_after_cutoff(line):
+    if since_epoch is None:
+        return True
+    parts = line.split(" ", 2)
+    if len(parts) < 2:
+        return False
+    timestamp = f"{parts[0]} {parts[1]}"
+    for format_string in ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S"):
+        try:
+            parsed = datetime.strptime(timestamp, format_string).replace(tzinfo=timezone.utc)
+            return parsed.timestamp() >= since_epoch
+        except ValueError:
+            continue
+    return False
+
 result = {
     "exists": False,
     "inode": "",
@@ -37,7 +61,10 @@ if recorded_inode != current_inode or stat.st_size < offset:
 
 with open(path, "r", encoding="utf-8", errors="ignore") as handle:
     handle.seek(offset)
-    data = handle.read()
+    if since_epoch is None:
+        data = handle.read()
+    else:
+        data = "".join(line for line in handle if is_after_cutoff(line))
     offset = handle.tell()
 
 result = {
@@ -1062,18 +1089,21 @@ class DataPlaneController:
 
         return False
 
-    def read_access_log_delta(self, recorded_inode, offset):
+    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None):
         if not self.supports_logs():
             return {"exists": False, "inode": "", "offset": 0, "data": ""}
+        command_args = [
+            "python3",
+            "-c",
+            REMOTE_FILE_DELTA_SCRIPT,
+            self.config.access_log_path,
+            str(recorded_inode or ""),
+            str(int(offset or 0)),
+        ]
+        if since_epoch is not None:
+            command_args.append(str(float(since_epoch)))
         completed = self._run_remote(
-            [
-                "python3",
-                "-c",
-                REMOTE_FILE_DELTA_SCRIPT,
-                self.config.access_log_path,
-                str(recorded_inode or ""),
-                str(int(offset or 0)),
-            ],
+            command_args,
             f"{self.config.label} 访问日志读取失败",
         )
         try:

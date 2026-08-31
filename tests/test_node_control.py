@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest import mock
@@ -12,6 +13,7 @@ from unittest import mock
 from app.xray.node_control import (
     DataPlaneConfig,
     DataPlaneController,
+    REMOTE_FILE_DELTA_SCRIPT,
     build_temp_target_path,
 )
 
@@ -330,6 +332,56 @@ class NodeControlTest(unittest.TestCase):
         uploaded = controller.sync_generated_files(validate_config=True)
 
         self.assertEqual(uploaded, [])
+
+    def test_remote_access_log_script_filters_by_timestamp_and_keeps_final_offset(self):
+        log_path = self.root / "access.log"
+        log_path.write_text(
+            "2026/08/31 10:59:59.000000 old accepted tcp:old.example.com:443 [direct]\n"
+            "2026/08/31 11:30:00.000000 recent accepted tcp:api.openai.com:443 [direct]\n",
+            encoding="utf-8",
+        )
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        cutoff = datetime(2026, 8, 31, 11, 0, tzinfo=timezone.utc).timestamp()
+
+        completed = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), "", "0", str(cutoff)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertNotIn("old.example.com", payload["data"])
+        self.assertIn("api.openai.com", payload["data"])
+        self.assertEqual(payload["offset"], log_path.stat().st_size)
+
+    def test_remote_access_log_delta_passes_optional_timestamp_cutoff(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                access_log_path="/var/log/xray/access.log",
+            )
+        )
+        calls = []
+
+        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
+            calls.append(args)
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"exists": true, "inode": "1", "offset": 12, "data": ""}',
+                stderr="",
+            )
+
+        controller._run_remote = fake_run_remote
+
+        result = controller.read_access_log_delta("1", 8, since_epoch=123.5)
+
+        self.assertTrue(result["exists"])
+        self.assertEqual(calls[0][-1], "123.5")
 
     def test_remote_dynamic_routing_sync_updates_local_copy(self):
         local_path = self.root / "dynamic-routing.json"
