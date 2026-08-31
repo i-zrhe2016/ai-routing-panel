@@ -8,7 +8,7 @@
 
 ## Target 为 down
 
-依次检查 Prometheus `/targets` 的错误、DNS/路由、exporter 进程、监听地址、TLS/认证和防火墙来源限制。不得临时向公网放开指标端口；使用与 Prometheus 相同的授权源验证。
+普通数据面 exporter 应使用其 Tailscale 地址（当前为 `100.65.108.93`），不要从控制面通过公网地址抓取。依次检查 Prometheus `/targets` 的错误、Tailscale 路由、exporter 进程、监听地址、TLS/认证和防火墙来源限制。不得临时向公网放开指标端口；使用与 Prometheus 相同的授权源验证。
 
 ## AI Targets 为 down
 

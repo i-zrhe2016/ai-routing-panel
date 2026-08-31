@@ -21,7 +21,7 @@
 
 ## 当前生产 Targets
 
-截至 2026-08-05，共有 7 个 targets：控制面面板、控制面 node-exporter、普通数据面的 node-exporter/cAdvisor、AI 数据面的 node-exporter/cAdvisor，以及 Prometheus 自身。AI 两个 target 使用控制面回环隧道端口 `127.0.0.1:19101` 和 `127.0.0.1:18082`；普通数据面仍由控制面直接抓取受防火墙限制的指标端口。
+截至 2026-08-05，共有 7 个 targets：控制面面板、控制面 node-exporter、普通数据面的 node-exporter/cAdvisor、AI 数据面的 node-exporter/cAdvisor，以及 Prometheus 自身。AI 两个 target 使用控制面回环隧道端口 `127.0.0.1:19101` 和 `127.0.0.1:18082`；普通数据面的 node-exporter/cAdvisor 使用控制面可达的 Tailscale 地址 `100.65.108.93`，避免经公网地址访问被数据面防火墙丢弃。
 
 生产节点序列必须提供稳定的 `node_id`、`node_role`、`environment` 和 `region`。当前 `node_id` 使用 `control-01`、`normal-01`、`ai-01`，环境为 `production`。权威地域尚未确认时使用受控值 `unknown`，不得猜测机房位置。
 
