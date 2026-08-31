@@ -2,6 +2,10 @@
 
 > 权威范围：target、查询和报告故障；不包含 SSH 或原始日志排查
 
+## Codex 返回 401
+
+如果 `codex login status` 能识别认证方式，但日报日志仍出现 `401 Unauthorized`，先确认运行时 `auth.json` 是官方登录 token，并且对应配置包含 `model_provider = "openai"`。文件存在或 CLI 能读取 profile 不代表服务端验签成功；应在同一个 `CODEX_HOME` 下做一次真实 Codex 请求验证。不要把 `auth.json` 提交到仓库或粘贴到工单。
+
 ## Target 为 down
 
 依次检查 Prometheus `/targets` 的错误、DNS/路由、exporter 进程、监听地址、TLS/认证和防火墙来源限制。不得临时向公网放开指标端口；使用与 Prometheus 相同的授权源验证。

@@ -392,6 +392,9 @@ class CodexRunner:
             if isinstance(item, dict) and item.get("evidence_id")
         }
         prompt = MODEL_PROMPT
+        provider_config_args = _provider_config_args(self.config)
+        if not provider_config_args:
+            provider_config_args = ["-c", 'model_provider="openai"']
         last_error_class = "codex_process_failed"
         accumulated_usage: dict[str, int] | None = None
         for attempt in range(1, self.config.max_attempts + 1):
@@ -405,7 +408,7 @@ class CodexRunner:
                 "--skip-git-repo-check",
                 "--ignore-user-config",
                 "--ignore-rules",
-                *_provider_config_args(self.config),
+                *provider_config_args,
                 "--ephemeral",
                 "--sandbox",
                 "read-only",

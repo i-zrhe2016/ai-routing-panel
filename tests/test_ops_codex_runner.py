@@ -124,6 +124,7 @@ def test_runner_uses_isolated_config_and_structured_output(tmp_path, monkeypatch
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert "--ignore-user-config" in command
     assert "--ignore-rules" in command
+    assert 'model_provider="openai"' in command
     assert "--output-schema" in command
     assert "--model" not in command and "-m" not in command
     disabled_features = {

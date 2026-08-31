@@ -20,6 +20,8 @@
 Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注缺口的规则报告；无法校验规则结果或无法原子发布时，本次运行失败且不发布半份报告。
 `--rules-only` 或 `OPS_FORCE_RULES_ONLY=1` 仅用于明确的影子/维护运行，不是 Codex 失败时的自动降级路径。
 
+官方登录 token 配套的 Codex 配置使用 `model_provider = "openai"`。日报器执行时仍忽略任意用户配置以保持隔离，但在未配置自定义 provider 时会显式传入这个内置 provider，避免把官方 token 发到错误的默认 provider；运行时 `auth.json` 和 `config.toml` 均应由宿主机以只读方式提供。
+
 ## 数据面流量
 
 每个节点段落都会展示普通数据面和 AI 数据面的日总流量、入站流量、出站流量、网络流量覆盖率和计入接口列表。流量来源为 Prometheus 中 `job="data-plane-node"` 的 `node_network_receive_bytes_total` 与 `node_network_transmit_bytes_total`，按 `node_role` 分别汇总。
