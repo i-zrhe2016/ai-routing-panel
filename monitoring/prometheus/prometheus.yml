@@ -73,6 +73,17 @@ scrape_configs:
           region: unknown
           component: cadvisor
 
+  - job_name: control-plane-cadvisor
+    static_configs:
+      - targets: ["127.0.0.1:18081"]
+        labels:
+          host: panel
+          node_id: control-01
+          node_role: control_plane
+          environment: production
+          region: unknown
+          component: cadvisor
+
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]

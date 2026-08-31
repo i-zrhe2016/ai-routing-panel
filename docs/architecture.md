@@ -42,7 +42,7 @@
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `config-backup.json`（控制面备用）
 - 对普通数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
 - 对 AI 节点做本机 Docker 状态检查和重启；显式配置远端目标时改用 SSH，配置上传能力由 `AI_NODE_CONFIG_PATH` 单独控制，生产当前保持关闭
-- 以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）；管理后台「监控」标签把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
+- 读取本机 AI Xray 的回环 `/debug/vars`，只聚合入站/直出累计字节；以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）。管理后台「监控」标签把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
 
 ### 普通数据面
 
@@ -56,7 +56,7 @@
 
 - 当前为控制面本机 Docker `xray-ai-node` 上的独立 VLESS + REALITY Xray；也支持部署到远端独立机器
 - 监听 `AI_UPSTREAM_PORT`，通过 VLESS + REALITY 接收普通数据面 `ai_proxy` outbound 转发的 AI 域名流量
-- freedom 直出，不做域名分类、不运行 `ai_domain_manager`、无 panel-ports、无 access.log 采集
+- freedom 直出，不做域名分类、不运行 `ai_domain_manager`、无 panel-ports；记录独立 `ai-access.log`/`ai-error.log`，并通过回环 metrics 暴露入站与直出字节计数
 - 使用独立于普通数据面的 REALITY 凭据；两端隧道字段必须按 [AI 节点独立凭据](ai-node-credentials.md) 保持匹配
 - 本机模式通过 Docker 做状态检查和重启；远端模式通过 SSH 管理。生产当前以空 `AI_NODE_CONFIG_PATH` 禁止自动上传配置
 - 部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，故障处理见 [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)
@@ -126,6 +126,11 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；本机 AI 配置来自 `config/`，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
 13. 首页读取三节点状态、双 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
+AI 观测链路：`xray-ai-node` 将 Xray metrics 绑定到 `127.0.0.1:31097`，面板读取后在
+`/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定 `127.0.0.1:18081`，
+Prometheus 同时采集 `xray-ai-node` 的容器级 CPU、内存和网络总量。AI access log 只
+保留在控制面日志目录，集中日志链路仅采集 `ai-error.log`。
+
 ## 关键运行产物
 
 - `data/panel.db`：端口、租户、流量和 AI 域名聚合
@@ -143,4 +148,5 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 - `app/xray/runtime/client-test.json`：本地客户端测试配置
 - `app/xray/runtime/dynamic-routing.json`：AI 动态路由片段（AI 节点不可达时被删除）
 - `app/xray/reports/hourly-domains/latest.json`：最近一小时域名报告
-- `app/xray/logs/access.log`：连接和域名观测输入
+- `app/xray/logs/access.log`：普通数据面连接和域名观测输入
+- `app/xray/logs/ai-access.log` / `ai-error.log`：AI 节点本地连接与错误日志

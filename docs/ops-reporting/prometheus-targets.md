@@ -13,7 +13,7 @@
 | `job` | exporter 类型 | `node`、`xray`、`blackbox` |
 | `instance` | 实际抓取端点 | `host:port` |
 | `node_id` | 稳定、非敏感节点 ID | `normal-01` |
-| `node_role` | 节点角色 | `normal_data_plane`、`ai_data_plane` |
+| `node_role` | 节点角色 | `control_plane`、`normal_data_plane`、`ai_data_plane` |
 | `environment` | 环境 | `production`、`staging` |
 | `region` | 部署区域 | 受控枚举 |
 
@@ -21,7 +21,7 @@
 
 ## 当前生产 Targets
 
-截至 2026-08-05，共有 7 个 targets：控制面面板、控制面 node-exporter、普通数据面的 node-exporter/cAdvisor、AI 数据面的 node-exporter/cAdvisor，以及 Prometheus 自身。AI 两个 target 使用控制面回环隧道端口 `127.0.0.1:19101` 和 `127.0.0.1:18082`；普通数据面的 node-exporter/cAdvisor 使用控制面可达的 Tailscale 地址 `100.65.108.93`，避免经公网地址访问被数据面防火墙丢弃。
+当前配置共有 8 个 targets：控制面面板、控制面 node-exporter/cAdvisor、普通数据面的 node-exporter/cAdvisor、AI 数据面的 node-exporter/cAdvisor，以及 Prometheus 自身。普通数据面的 node-exporter/cAdvisor 使用控制面可达的 Tailscale 地址 `100.65.108.93`，避免经公网地址访问被数据面防火墙丢弃。AI 本机备用的 Xray `/debug/vars` 不作为 Prometheus 独立 target，而由面板 `/metrics` 聚合并鉴权后暴露。
 
 生产节点序列必须提供稳定的 `node_id`、`node_role`、`environment` 和 `region`。当前 `node_id` 使用 `control-01`、`normal-01`、`ai-01`，环境为 `production`。权威地域尚未确认时使用受控值 `unknown`，不得猜测机房位置。
 

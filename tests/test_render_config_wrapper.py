@@ -241,10 +241,23 @@ class AiNodeConfigTest(unittest.TestCase):
 
         self.assertEqual(config["outbounds"], [{"protocol": "freedom", "tag": "direct"}])
         self.assertNotIn("routing", config)
-        self.assertNotIn("api", config)
-        self.assertNotIn("stats", config)
-        self.assertNotIn("policy", config)
-        self.assertEqual(config["log"], {"loglevel": "warning"})
+        self.assertEqual(
+            config["log"],
+            {
+                "loglevel": "warning",
+                "access": "/var/log/xray/ai-access.log",
+                "error": "/var/log/xray/ai-error.log",
+            },
+        )
+        self.assertEqual(
+            config["metrics"],
+            {"tag": "ai-metrics", "listen": "127.0.0.1:31097"},
+        )
+        self.assertEqual(config["stats"], {})
+        self.assertTrue(config["policy"]["system"]["statsInboundUplink"])
+        self.assertTrue(config["policy"]["system"]["statsInboundDownlink"])
+        self.assertTrue(config["policy"]["system"]["statsOutboundUplink"])
+        self.assertTrue(config["policy"]["system"]["statsOutboundDownlink"])
         self.assertEqual(len(config["inbounds"]), 1)
         self.assertEqual(config["inbounds"][0]["protocol"], "vless")
         self.assertEqual(config["inbounds"][0]["port"], 27166)
@@ -339,6 +352,7 @@ class AiNodeConfigTest(unittest.TestCase):
             ai_config = json.loads(ai_node_out.read_text(encoding="utf-8"))
             self.assertEqual(ai_config["outbounds"], [{"protocol": "freedom", "tag": "direct"}])
             self.assertNotIn("routing", ai_config)
+            self.assertEqual(ai_config["metrics"]["listen"], "127.0.0.1:31097")
 
     def test_cli_renders_backup_without_upstream_url(self):
         with tempfile.TemporaryDirectory() as tmpdir:

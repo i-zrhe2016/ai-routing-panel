@@ -65,6 +65,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
 | `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |
 | `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；本机 Docker 生产当前为 `127.0.0.1:27166` |
+| `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；本机默认 `http://127.0.0.1:31097/debug/vars`，只允许回环或受控管理网 |
 | `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；当前为 `100.87.76.6` |
 
 节点备份默认请求普通数据面的配置、`.env`、运行时辅助文件和最新报告；远端部署根可用 `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` / `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 配置。节点备份清单和恢复命令见[节点备份完整性与快速恢复](node-recovery.md)。
@@ -218,7 +219,7 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 
 - `AI_NODE_SSH_TARGET` 生效后，AI 节点模式为 `ssh`；当前留空时由 `AI_NODE_CONTAINER_NAME=xray-ai-node` 使用本机 Docker 模式
 - `AI_NODE_CONFIG_PATH` 非空时控制面才具备上传 `config-ai-node.json` 的能力；生产当前显式留空以禁止上传
-- `AI_NODE_API_SERVER` 用于远端 Socket 状态检查；当前最小 AI 配置不启用 Stats API
+- `AI_NODE_API_SERVER` 用于 AI 业务 Socket 状态检查；`AI_NODE_METRICS_URL` 用于读取仅回环开放的 Xray expvar 流量指标
 - AI 节点使用独立 REALITY 凭据，字段契约见 [AI 节点独立凭据](ai-node-credentials.md)
 - 详见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)
 

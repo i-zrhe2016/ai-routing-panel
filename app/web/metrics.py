@@ -4,26 +4,38 @@ Exposes the panel's already-collected state (traffic, probes, DNS failover, AI
 routing, data-plane status) for scraping by Prometheus. Host CPU/mem/disk come
 from node_exporter, not this endpoint.
 
-The handler is strictly read-only and SSH-free on the scrape path: it reads the
-tables the background maintenance loop keeps fresh and never calls
-``sync_traffic_state``/``dns_failover_status``/probes (any of which may do I/O).
-The single SSH call (``data_plane_running``) is wrapped in a TTL cache.
+The handler is strictly read-only on the scrape path: it reads the tables the
+background maintenance loop keeps fresh, reads the AI node's loopback-only
+expvar endpoint, and never calls ``sync_traffic_state``/``dns_failover_status``/
+probes (any of which may do I/O). The data-plane status check and AI metrics
+read are wrapped in TTL caches.
 
 The format is hand-rolled (no ``prometheus_client`` dependency) to keep the
 panel on Flask + stdlib.
 """
 
 import hmac
+import json
 import time
 from datetime import datetime
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 from flask import Response, request
 
-from ..config import METRICS_DP_TTL, METRICS_TOKEN
+from ..config import AI_NODE_METRICS_URL, METRICS_DP_TTL, METRICS_TOKEN, XRAY_STATS_QUERY_TIMEOUT
 from .core import route, state
 
 # Cache for the data-plane running check (the one SSH call on this path).
 _DP_CACHE = {"val": 0, "ts": 0.0}
+_AI_METRICS_CACHE = {
+    "ts": 0.0,
+    "available": 0,
+    "received": 0,
+    "sent": 0,
+    "egress_received": 0,
+    "egress_sent": 0,
+}
 
 
 def _esc(value):
@@ -55,6 +67,71 @@ def _data_plane_running_cached():
             _DP_CACHE["val"] = 0
         _DP_CACHE["ts"] = now
     return _DP_CACHE["val"]
+
+
+def _read_ai_node_metrics():
+    """Read the loopback-only Xray expvar endpoint and keep only byte totals."""
+    if not AI_NODE_METRICS_URL:
+        return None
+    parsed = urlsplit(AI_NODE_METRICS_URL)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    request = Request(AI_NODE_METRICS_URL, headers={"Accept": "application/json"})
+    with urlopen(request, timeout=max(1, int(XRAY_STATS_QUERY_TIMEOUT))) as response:
+        payload = json.loads(response.read(8 * 1024 * 1024).decode("utf-8"))
+    return _parse_ai_node_metrics_payload(payload)
+
+
+def _parse_ai_node_metrics_payload(payload):
+    """Reduce Xray expvar data to bounded, direction-only byte counters."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("stats"), dict):
+        return None
+
+    stats = payload["stats"]
+    inbound = stats.get("inbound")
+    outbound = stats.get("outbound")
+    if not isinstance(inbound, dict) or not isinstance(outbound, dict):
+        return None
+
+    result = {
+        "available": 1,
+        "received": 0,
+        "sent": 0,
+        "egress_received": 0,
+        "egress_sent": 0,
+    }
+    for tag, counters in inbound.items():
+        if not str(tag).startswith("panel-") or not isinstance(counters, dict):
+            continue
+        result["received"] += max(0, int(counters.get("uplink", 0) or 0))
+        result["sent"] += max(0, int(counters.get("downlink", 0) or 0))
+    for tag, counters in outbound.items():
+        if str(tag) != "direct" or not isinstance(counters, dict):
+            continue
+        result["egress_sent"] += max(0, int(counters.get("uplink", 0) or 0))
+        result["egress_received"] += max(0, int(counters.get("downlink", 0) or 0))
+    return result
+
+
+def _ai_node_metrics_cached():
+    now = time.monotonic()
+    if now - _AI_METRICS_CACHE["ts"] >= METRICS_DP_TTL:
+        try:
+            result = _read_ai_node_metrics()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            result = None
+        if result is None:
+            result = {
+                "available": 0,
+                "received": 0,
+                "sent": 0,
+                "egress_received": 0,
+                "egress_sent": 0,
+            }
+        _AI_METRICS_CACHE.update(result)
+        _AI_METRICS_CACHE["ts"] = now
+    return _AI_METRICS_CACHE
 
 
 class _Renderer:
@@ -255,6 +332,44 @@ def _collect():
     r.sample(
         "xray_panel_ai_node_running",
         1 if ai_node_status.get("reachable") else 0,
+    )
+
+    ai_metrics = _ai_node_metrics_cached()
+    r.family(
+        "xray_panel_ai_node_metrics_available",
+        "gauge",
+        "AI node Xray metrics endpoint is available (1/0).",
+    )
+    r.sample("xray_panel_ai_node_metrics_available", ai_metrics["available"])
+    r.family(
+        "xray_panel_ai_node_traffic_bytes_total",
+        "counter",
+        "Cumulative AI node inbound traffic bytes by proxy direction.",
+    )
+    r.sample(
+        "xray_panel_ai_node_traffic_bytes_total",
+        ai_metrics["received"],
+        {"direction": "received"},
+    )
+    r.sample(
+        "xray_panel_ai_node_traffic_bytes_total",
+        ai_metrics["sent"],
+        {"direction": "sent"},
+    )
+    r.family(
+        "xray_panel_ai_node_egress_bytes_total",
+        "counter",
+        "Cumulative AI node direct-egress traffic bytes by direction.",
+    )
+    r.sample(
+        "xray_panel_ai_node_egress_bytes_total",
+        ai_metrics["egress_received"],
+        {"direction": "received"},
+    )
+    r.sample(
+        "xray_panel_ai_node_egress_bytes_total",
+        ai_metrics["egress_sent"],
+        {"direction": "sent"},
     )
 
     # --- Backup Xray mode ------------------------------------------------

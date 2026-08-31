@@ -22,6 +22,7 @@ node "Control Plane" as control #EFF6FF {
   component "Optional Backup Xray\nrelay or direct" as backup #FEF3C7
   component "Prometheus" as prometheus #FEE2E2
   component "Grafana" as grafana #F3E8FF
+  component "Control Node Exporter + cAdvisor" as controlMetrics #F3F4F6
   component "Daily Reporter\nrules-only shadow mode" as reporter #DCFCE7
   database "Report audit and files" as reports #E5E7EB
   component "AI exporter SSH tunnel\nloopback only" as tunnel #E0E7FF
@@ -37,6 +38,7 @@ node "AI Upstream Pool" as aiPool #FFF7ED {
   component "Primary AI\nnat.qq.pw:27166" as primaryAi #FED7AA
   component "Backup AI\nlocal Docker xray-ai-node\n100.87.76.6:27166" as backupAi #FED7AA
   component "Independent Xray\nfreedom egress" as aiEgress #FFEDD5
+  component "Local AI Xray metrics\n127.0.0.1:31097" as localAiMetrics #F3F4F6
   component "node-exporter + cAdvisor\nwhen remotely deployed" as aiMetrics #F3F4F6
 }
 
@@ -64,6 +66,7 @@ panel ..> dns : failover updates
 panel ..> backup : render and manage
 backup ..> backupAi : relay when enabled
 backup ..> internet : direct fallback
+panel --> localAiMetrics : loopback /debug/vars
 
 aiController --> dynamicRoute : generate selected route
 normalXray --> aiController : access.log / route status
@@ -72,6 +75,7 @@ control ..> tailnet : SSH manage normal data plane
 tailnet ..> normal : strict host-key + public-key SSH
 
 panel --> prometheus : authenticated /metrics
+controlMetrics --> prometheus : host + container metrics
 normalMetrics --> prometheus : metrics
 aiMetrics --> tunnel : exporter HTTP
 tunnel --> prometheus : loopback forwards

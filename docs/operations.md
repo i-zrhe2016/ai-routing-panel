@@ -19,7 +19,7 @@
 - 鉴权：必须设置 `METRICS_TOKEN`。
   - 未设置时端点返回 `404`（默认不对外开放）。
   - 设置后需带请求头 `Authorization: Bearer <METRICS_TOKEN>`，否则返回 `401`。
-- 可选 `METRICS_DP_TTL`（默认 `30` 秒）：缓存数据面存活检测（抓取路径上唯一的 SSH 调用），避免高频/并发抓取叠加 SSH。
+- 可选 `METRICS_DP_TTL`（默认 `30` 秒）：缓存数据面存活检测和 AI Xray 指标读取，避免高频/并发抓取叠加 I/O。
 - 抓取路径严格只读、不触发流量同步与探针，可放心按 15–30s 抓取。
 
 暴露的指标（前缀 `xray_panel_`）：
@@ -27,13 +27,14 @@
 - 业务：`port_traffic_bytes_total`(counter, `port`/`note`/`direction`)、`port_connections_total`(counter)、`ports_total`/`ports_enabled`/`ports_active`/`ports_expired`/`ports_quota`/`ports_disabled`(gauge)
 - 存活/可用性：`up`、`port_reachable`(gauge, 来自 TCP 探针)、`port_probe_timestamp_seconds`
 - 数据面：`data_plane_configured`/`data_plane_running`(gauge, 带 `mode` 标签)
-- AI 节点：`ai_node_configured`/`ai_node_running`(gauge, 带 `mode` 标签)
+- AI 节点：`ai_node_configured`/`ai_node_running`(gauge, 带 `mode` 标签)、`ai_node_metrics_available`(gauge)、`ai_node_traffic_bytes_total` 和 `ai_node_egress_bytes_total`(counter, `direction` 标签)
 - DNS 故障切换：`dns_failover_enabled`、`dns_failover_target_info`、`dns_failover_last_probe_healthy`、`dns_failover_consecutive_failures`/`_successes`、`dns_failover_peak_window_active`
 - AI 路由：`ai_domains_total`、`ai_domain_hits_total`、`ai_domains_last_update_timestamp_seconds`
 
 > `traffic`/`connections` 为 counter，但“重置流量并启用”/配额恢复会清零累计值——这是合法的 counter reset，`rate()`/`increase()` 能正确处理。
 
-- 本机备用 AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。远端 AI 模式才需要单独配置 AI 主机的监控 target。
+- 本机备用 AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。AI Xray metrics 只监听 `127.0.0.1:31097`，由面板聚合后进入 Prometheus。远端 AI 模式才需要单独配置 AI 主机的监控 target。
+- 控制面 cAdvisor 监听 `127.0.0.1:18081`，用于采集 `xray-ai-node` 容器级 CPU、内存和网络总量；该总量不能替代 Xray 入站/出站业务计数。
 - 控制面 Prometheus 的普通数据面和控制面 targets 应显示 `up`；若远端 AI target 出现 `timeout` 或 `connection refused`，再检查远端 AI 节点的 exporter 容器和端口监听。
 
 AI 路由状态至少应同时查看：
@@ -76,7 +77,7 @@ scrape_configs:
 
 ### 监控栈启停
 
-监控栈由 `monitoring/docker-compose.monitoring.yml` 定义，包括 node_exporter、Prometheus
+监控栈由 `monitoring/docker-compose.monitoring.yml` 定义，包括 node_exporter、cAdvisor、Prometheus
 和 Grafana；Prometheus 配置及 Grafana provisioning/dashboard 也全部位于 `monitoring/`。
 
 ```bash

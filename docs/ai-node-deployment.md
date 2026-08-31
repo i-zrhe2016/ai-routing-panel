@@ -11,6 +11,8 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 ```text
 控制面 `100.87.76.6`
   ├─ Docker: xray-ai-node ──▶ 0.0.0.0:27166
+  │                         ├─▶ 127.0.0.1:31097/debug/vars
+  │                         └─▶ /var/log/xray/ai-{access,error}.log
   └─ 本机状态检查/重启
 
 主数据面
@@ -59,16 +61,23 @@ AI 节点使用 `AI_NODE_*` 独立 UUID、REALITY 私钥、公钥和 Short ID，
 
 ## AI 节点监控采集
 
-本机 AI 容器与控制面共享主机监控；业务端口 `27166` 不承担监控流量。
+本机 AI 容器与控制面共享主机监控；业务端口 `27166` 不承担监控流量。Xray
+额外开启仅回环可访问的 expvar 指标端点，面板只提取有界的入站/直出字节计数，
+再由受保护的 `/metrics` 暴露给 Prometheus。`ai-access.log` 保留在本机用于域名/端口
+分析，不进入 Loki；`ai-error.log` 可由控制面 Fluent Bit 采集。
 
 | 端点 | 服务 | 指标路径 | 采集目标 | 说明 |
 | --- | --- | --- | --- | --- |
-| 控制面监控端点 | Node Exporter/cAdvisor | `/metrics` | `control-plane` | 控制面与本机 AI 容器的主机、容器指标 |
+| Xray 指标 | AI Xray | `/debug/vars` | `127.0.0.1:31097` | 入站与 `direct` 出站累计字节，仅绑定回环 |
+| 控制面监控端点 | Node Exporter/cAdvisor | `/metrics` | `control-plane` | 控制面主机与 `xray-ai-node` 容器网络指标 |
+| 面板指标 | Routing Panel | `/metrics` | Prometheus | 汇总 AI Xray 字节指标，需 Bearer token |
 
 当前 AI 节点容器部署为：
 
 ```text
 xray-ai-node        → host network → :27166（业务端口，不得修改）
+                    → 127.0.0.1:31097（Xray metrics，不得公网开放）
+                    → app/xray/logs/ai-access.log、ai-error.log
 ```
 
 部署或变更监控容器时，不得删除或重建 `xray-ai-node` 业务容器。
@@ -78,8 +87,19 @@ xray-ai-node        → host network → :27166（业务端口，不得修改）
 ```bash
 docker inspect xray-ai-node --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
 docker exec xray-ai-node /usr/local/bin/xray run -test -config /etc/xray/config.json
+curl -fsS http://127.0.0.1:31097/debug/vars >/dev/null
+stat /root/ai-routing-panel/app/xray/logs/ai-access.log /root/ai-routing-panel/app/xray/logs/ai-error.log
 curl -fsS http://127.0.0.1:9090/api/v1/targets
 ```
+
+面板 Prometheus 指标中，`xray_panel_ai_node_metrics_available=1` 表示 Xray
+指标端点可读；`xray_panel_ai_node_traffic_bytes_total` 是 AI 入站方向累计字节，
+`xray_panel_ai_node_egress_bytes_total` 是 AI 节点 `direct` 出站方向累计字节。
+Xray 重启会使其 counter 从零开始，查询应使用 Prometheus 的 `rate()` 或 `increase()`。
+
+控制面 cAdvisor 使用 `127.0.0.1:18081`，Prometheus target 为
+`control-plane-cadvisor`；它提供 `xray-ai-node` 容器的 CPU、内存和网络总量，
+不替代 Xray 按入站方向的业务计数。
 
 本机 Docker 模式只要求控制面共享的 Node Exporter/cAdvisor targets 为 `up`；远端 AI 模式才需要额外的两个 AI targets。Grafana 的 AI 主机面板按 `node_role="ai_data_plane"` 区分 AI 节点，容器面板按 `host="ai-data-plane"` 和 `name` 区分容器。生产环境应在远端 AI 节点防火墙中仅允许控制面访问 `27168/27169`，不要将监控端口用于公网开放服务。
 
@@ -115,12 +135,14 @@ AI_NODE_SSH_TARGET=
 AI_NODE_CONTAINER_NAME=xray-ai-node
 AI_NODE_PROBE_HOST=100.87.76.6
 AI_NODE_API_SERVER=127.0.0.1:27166
+AI_NODE_METRICS_URL=http://127.0.0.1:31097/debug/vars
 AI_NODE_CONFIG_PATH=
 ```
 
 关键语义：
 
-- `AI_NODE_API_SERVER=127.0.0.1:27166`：本机 Docker 模式使用的 TCP 业务端口；当前 AI 配置不启用 Xray Stats API。
+- `AI_NODE_API_SERVER=127.0.0.1:27166`：本机 Docker 模式使用的 TCP 业务端口，用于节点存活检查。
+- `AI_NODE_METRICS_URL`：面板读取 AI Xray expvar 的地址；默认只允许控制面回环地址，不得改成公网监听。
 - `AI_NODE_CONFIG_PATH=`：显式留空会使 `supports_sync=false`，禁止控制面上传配置。
 - `AI_NODE_CONTAINER_NAME=xray-ai-node` 提供本机容器状态检查和重启能力。
 

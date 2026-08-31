@@ -352,15 +352,36 @@ def build_ai_node_values(values: dict[str, str]) -> dict[str, str]:
 
 
 def build_ai_node_config(values: dict[str, str]) -> dict:
-    """Build a minimal VLESS+REALITY config with independent AI credentials."""
+    """Build the AI VLESS+REALITY config with local observability enabled."""
     ai_values = build_ai_node_values(values)
     listen_port = int(
         values.get("AI_NODE_LISTEN_PORT", "").strip()
         or values.get("AI_UPSTREAM_PORT", "").strip()
         or "27166"
     )
+    metrics_listen = (
+        str(values.get("AI_NODE_METRICS_LISTEN", "127.0.0.1:31097")).strip()
+        or "127.0.0.1:31097"
+    )
     return {
-        "log": {"loglevel": ai_values["XRAY_LOGLEVEL"]},
+        "log": {
+            "loglevel": ai_values["XRAY_LOGLEVEL"],
+            "access": "/var/log/xray/ai-access.log",
+            "error": "/var/log/xray/ai-error.log",
+        },
+        "metrics": {
+            "tag": "ai-metrics",
+            "listen": metrics_listen,
+        },
+        "stats": {},
+        "policy": {
+            "system": {
+                "statsInboundUplink": True,
+                "statsInboundDownlink": True,
+                "statsOutboundUplink": True,
+                "statsOutboundDownlink": True,
+            }
+        },
         "inbounds": [build_reality_inbound(ai_values, listen_port)],
         "outbounds": [{"protocol": "freedom", "tag": "direct"}],
     }

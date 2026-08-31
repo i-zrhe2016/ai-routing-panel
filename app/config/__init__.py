@@ -101,6 +101,9 @@ AI_NODE_DOCKER_BIN = os.environ.get("AI_NODE_DOCKER_BIN", "docker").strip() or "
 AI_NODE_RESTART_COMMAND = os.environ.get("AI_NODE_RESTART_COMMAND", "").strip()
 AI_NODE_CONFIG_PATH = os.environ.get("AI_NODE_CONFIG_PATH", "/etc/xray/config.json").strip()
 AI_NODE_API_SERVER = os.environ.get("AI_NODE_API_SERVER", "127.0.0.1:10085").strip()
+AI_NODE_METRICS_URL = os.environ.get(
+    "AI_NODE_METRICS_URL", "http://127.0.0.1:31097/debug/vars"
+).strip()
 AI_NODE_PROBE_HOST = os.environ.get("AI_NODE_PROBE_HOST", "").strip()
 AI_NODE_CONFIG_OUT = Path(
     os.environ.get("AI_NODE_CONFIG_OUT", XRAY_CONFIG_PATH.parent / "config-ai-node.json")

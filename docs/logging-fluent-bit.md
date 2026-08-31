@@ -10,7 +10,7 @@
 
 | 组件 | 部署位置 | 职责 |
 | --- | --- | --- |
-| Fluent Bit Agent | 三台 Docker 主机 | 读取 Docker JSON 日志、Xray `error.log`、allowlist 内的 systemd 错误日志；本地 filesystem 缓冲；通过 Tailscale 推送 |
+| Fluent Bit Agent | 三台 Docker 主机 | 读取 Docker JSON 日志、Xray `error.log`/`ai-error.log`、allowlist 内的 systemd 错误日志；本地 filesystem 缓冲；通过 Tailscale 推送 |
 | Loki | 独立日志中心主机 | 单实例 filesystem 存储、LogQL 查询、7 天保留 |
 | Grafana | 控制面监控主机 | 通过 `GRAFANA_LOKI_URL` 查询远端 Loki |
 | Tailscale | 四个主机端点 | 提供 Agent 到 Loki、Grafana 到 Loki 的 tailnet 网络边界 |
@@ -29,7 +29,7 @@
 
 控制面 Loki 绑定 `100.87.76.6:3100`，Grafana 使用现有本机 `3001` 入口。控制面和普通数据面 Agent 使用相同的 parser 和低基数 label 配置，原配置会在滚动更新前保留为带时间戳的 `.bak` 文件。
 
-当前验收结果：控制面 `/healthz` 返回 `ok=true` 且数据面可达；Loki 可按 `category="business"` 查询到 `dns_failover.checked` 业务事件；Grafana 的 `Control Plane Business Logs` dashboard 已加载。AI 数据面当前没有可采集的 `error.log` 文件，因此暂未形成 AI 日志流，但 Agent 正常运行且没有投递错误。
+当前验收结果：控制面 `/healthz` 返回 `ok=true` 且数据面可达；Loki 可按 `category="business"` 查询到 `dns_failover.checked` 业务事件；Grafana 的 `Control Plane Business Logs` dashboard 已加载。AI 备用的 `ai-error.log` 纳入控制面 Agent 的采集范围；高频 `ai-access.log` 只保留在本机，不进入 Loki。
 
 ## 控制面业务日志
 
@@ -51,12 +51,13 @@ PANEL_SLOW_REQUEST_MS=1000
 采集：
 
 - `/var/lib/docker/containers/*/*-json.log` 中的容器 stdout/stderr；
-- 配置目录映射到 `/var/log/xray/error.log` 的 Xray 错误日志；
+- 配置目录映射到 `/var/log/xray/error.log` 和 `/var/log/xray/ai-error.log` 的 Xray 错误日志；
 - `docker.service`、`containerd.service`、`tailscaled.service` 和可选 `xray.service` 的 journal 错误级别日志。
 
 明确不采集：
 
 - Xray `access.log`；
+- Xray `ai-access.log`（仅本机用于域名/端口分析，不进入集中日志）；
 - 请求 body、数据库、`.env`、REALITY 私钥、SSH 私钥、Cloudflare Token；
 - 未列入 allowlist 的 systemd unit；
 - 客户端订阅 token、Authorization header 和其他敏感业务字段。
