@@ -12,12 +12,19 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .ai_domains import (
+    AI_ANALYSIS_STATUSES,
+    CLASSIFICATIONS,
+    CODEX_STATUSES,
+    SOURCE_BUCKETS,
+    TRAFFIC_DIRECTIONS,
+    empty_ai_domain_analysis,
+)
 from .codex_runner import MODEL_OUTPUT_SCHEMA_VERSION, PROMPT_VERSION, validate_model_analysis
 from .models import parse_timestamp, utc_now
 from .redaction import redact_value
 
-
-REPORT_SCHEMA_VERSION = "1.0"
+REPORT_SCHEMA_VERSION = "1.1"
 REPORT_SCHEMA_FILENAME = "daily-report-v1.schema.json"
 STATUSES = {"normal", "suspected", "fault", "unknown"}
 GENERATION_MODES = {"codex", "rules_only"}
@@ -39,6 +46,7 @@ ROOT_FIELDS = {
     "incidents",
     "evidence",
     "collection_health",
+    "ai_domain_analysis",
     "model_analysis",
     "generation_health",
 }
@@ -58,7 +66,13 @@ def build_report(
     generation_mode: str,
     model_analysis: dict[str, Any] | None,
     generation_health: dict[str, Any],
+    ai_domain_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if ai_domain_analysis is None:
+        ai_domain_analysis = empty_ai_domain_analysis(
+            window_start.astimezone(ZoneInfo("UTC")),
+            window_end.astimezone(ZoneInfo("UTC")),
+        )
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "rules_version": classification["rules_version"],
@@ -76,6 +90,7 @@ def build_report(
         "incidents": classification["incidents"],
         "evidence": classification["evidence"],
         "collection_health": collection_health,
+        "ai_domain_analysis": ai_domain_analysis,
         "model_analysis": model_analysis,
         "generation_health": generation_health,
     }
@@ -86,7 +101,7 @@ def build_report(
 
 def validate_report(report: Any) -> None:
     if not isinstance(report, dict) or set(report) != ROOT_FIELDS:
-        raise ValueError("report root fields do not match schema version 1.0")
+        raise ValueError("report root fields do not match schema version 1.1")
     if report.get("schema_version") != REPORT_SCHEMA_VERSION:
         raise ValueError("unsupported report schema version")
     if report.get("generation_mode") not in GENERATION_MODES:
@@ -163,6 +178,192 @@ def validate_report(report: Any) -> None:
         validate_model_analysis(report["model_analysis"], evidence_roles)
     if not isinstance(report.get("collection_health"), dict) or not isinstance(report.get("generation_health"), dict):
         raise ValueError("report health fields must be objects")
+    _validate_ai_domain_analysis(report.get("ai_domain_analysis"))
+
+
+def _validate_count_map(value: Any, keys: tuple[str, ...], field_name: str) -> None:
+    if not isinstance(value, dict) or set(value) != set(keys):
+        raise ValueError(f"{field_name} must contain the fixed classification buckets")
+    for key in keys:
+        count = value.get(key)
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise ValueError(f"{field_name}.{key} must be a non-negative integer")
+
+
+def _validate_ai_domain_route(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != {
+        "outbound_tag",
+        "path",
+        "target",
+        "hits",
+        "window_count",
+        "statuses",
+    }:
+        raise ValueError("AI domain traffic route has an invalid shape")
+    if value.get("outbound_tag") not in {"ai_proxy", "direct", "unknown"}:
+        raise ValueError("AI domain traffic route has an invalid outbound tag")
+    if value.get("path") not in {"ai_node", "normal_data_plane", "unknown"}:
+        raise ValueError("AI domain traffic route has an invalid path")
+    if value.get("target") is not None:
+        target = value["target"]
+        if not isinstance(target, dict) or set(target) - {"upstream_host", "upstream_port"}:
+            raise ValueError("AI domain traffic route has an invalid target")
+        if not isinstance(target.get("upstream_host"), str) or not target["upstream_host"].strip():
+            raise ValueError("AI domain traffic route target host is invalid")
+        if "upstream_port" in target and (
+            not isinstance(target["upstream_port"], int)
+            or isinstance(target["upstream_port"], bool)
+            or not 1 <= target["upstream_port"] <= 65535
+        ):
+            raise ValueError("AI domain traffic route target port is invalid")
+    if not isinstance(value.get("hits"), int) or value["hits"] < 0:
+        raise ValueError("AI domain traffic route hits are invalid")
+    if not isinstance(value.get("window_count"), int) or value["window_count"] < 1:
+        raise ValueError("AI domain traffic route window_count is invalid")
+    if not isinstance(value.get("statuses"), list) or not all(isinstance(item, str) for item in value["statuses"]):
+        raise ValueError("AI domain traffic route statuses are invalid")
+
+
+def _validate_ai_domain_item(value: Any) -> None:
+    required = {
+        "domain",
+        "hits",
+        "classification",
+        "reason",
+        "source",
+        "model",
+        "first_seen",
+        "last_seen",
+        "protocols",
+        "traffic_direction",
+        "traffic_routes",
+        "is_new",
+        "codex_classifications",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("AI domain item has an invalid shape")
+    if not isinstance(value.get("domain"), str) or not value["domain"].strip():
+        raise ValueError("AI domain item domain is invalid")
+    if not isinstance(value.get("hits"), int) or value["hits"] < 0:
+        raise ValueError("AI domain item hits are invalid")
+    if value.get("classification") not in CLASSIFICATIONS:
+        raise ValueError("AI domain item classification is invalid")
+    for field in ("reason", "source", "model"):
+        if not isinstance(value.get(field), str):
+            raise ValueError(f"AI domain item {field} is invalid")
+    for field in ("first_seen", "last_seen"):
+        if value[field] is not None:
+            try:
+                parse_timestamp(value[field])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"AI domain item {field} is invalid") from exc
+    if not isinstance(value.get("protocols"), list) or not all(isinstance(item, str) for item in value["protocols"]):
+        raise ValueError("AI domain item protocols are invalid")
+    if value.get("traffic_direction") not in TRAFFIC_DIRECTIONS:
+        raise ValueError("AI domain item traffic direction is invalid")
+    if not isinstance(value.get("traffic_routes"), list):
+        raise ValueError("AI domain item traffic routes are invalid")
+    for route in value["traffic_routes"]:
+        _validate_ai_domain_route(route)
+    if not isinstance(value.get("is_new"), bool):
+        raise ValueError("AI domain item is_new is invalid")
+    if not isinstance(value.get("codex_classifications"), list):
+        raise ValueError("AI domain item Codex classifications are invalid")
+    for item in value["codex_classifications"]:
+        if not isinstance(item, dict) or set(item) != {"classification", "reason", "model", "observed_at"}:
+            raise ValueError("AI domain item Codex classification has an invalid shape")
+        if item["classification"] not in CLASSIFICATIONS or not all(
+            isinstance(item.get(field), str) for field in ("reason", "model", "observed_at")
+        ):
+            raise ValueError("AI domain item Codex classification is invalid")
+
+
+def _validate_ai_domain_analysis(value: Any) -> None:
+    required = {
+        "status",
+        "window_start",
+        "window_end",
+        "domain_count",
+        "observed_hits",
+        "new_domain_count",
+        "new_domain_hits",
+        "classification_counts",
+        "classification_hits",
+        "source_counts",
+        "traffic_direction_counts",
+        "domains",
+        "new_domains",
+        "codex",
+        "sources",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("AI domain analysis has an invalid shape")
+    if value.get("status") not in AI_ANALYSIS_STATUSES:
+        raise ValueError("AI domain analysis status is invalid")
+    for field in ("window_start", "window_end"):
+        try:
+            parse_timestamp(value[field])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"AI domain analysis {field} is invalid") from exc
+    for field in ("domain_count", "observed_hits", "new_domain_count", "new_domain_hits"):
+        if not isinstance(value.get(field), int) or value[field] < 0:
+            raise ValueError(f"AI domain analysis {field} is invalid")
+    _validate_count_map(value["classification_counts"], CLASSIFICATIONS, "classification_counts")
+    _validate_count_map(value["classification_hits"], CLASSIFICATIONS, "classification_hits")
+    _validate_count_map(value["source_counts"], SOURCE_BUCKETS, "source_counts")
+    _validate_count_map(value["traffic_direction_counts"], TRAFFIC_DIRECTIONS, "traffic_direction_counts")
+    if not isinstance(value.get("domains"), list) or not isinstance(value.get("new_domains"), list):
+        raise ValueError("AI domain analysis domain arrays are invalid")
+    for item in value["domains"]:
+        _validate_ai_domain_item(item)
+    for item in value["new_domains"]:
+        _validate_ai_domain_item(item)
+        if not item["is_new"]:
+            raise ValueError("AI domain analysis new_domains contains an old domain")
+    if value["domain_count"] != len(value["domains"]):
+        raise ValueError("AI domain analysis domain_count does not match domains")
+    if value["new_domain_count"] != len(value["new_domains"]):
+        raise ValueError("AI domain analysis new_domain_count does not match new_domains")
+    codex = value.get("codex")
+    if not isinstance(codex, dict) or set(codex) != {
+        "status",
+        "classified_count",
+        "ai_count",
+        "not_ai_count",
+        "domains",
+        "pending_domains",
+        "error_class",
+    }:
+        raise ValueError("AI domain analysis Codex section has an invalid shape")
+    if codex["status"] not in CODEX_STATUSES:
+        raise ValueError("AI domain analysis Codex status is invalid")
+    for field in ("classified_count", "ai_count", "not_ai_count"):
+        if not isinstance(codex.get(field), int) or codex[field] < 0:
+            raise ValueError(f"AI domain analysis Codex {field} is invalid")
+    if not isinstance(codex.get("error_class"), str) or not isinstance(codex.get("pending_domains"), list):
+        raise ValueError("AI domain analysis Codex status details are invalid")
+    for item in codex["domains"]:
+        if not isinstance(item, dict) or set(item) != {"domain", "classification", "reason", "model", "observed_at"}:
+            raise ValueError("AI domain analysis Codex domain has an invalid shape")
+        if item["classification"] not in CLASSIFICATIONS or not all(
+            isinstance(item.get(field), str) for field in ("domain", "reason", "model", "observed_at")
+        ):
+            raise ValueError("AI domain analysis Codex domain is invalid")
+    if codex["classified_count"] != len(codex["domains"]):
+        raise ValueError("AI domain analysis Codex classified_count does not match domains")
+    if not isinstance(value.get("sources"), list):
+        raise ValueError("AI domain analysis sources are invalid")
+    for source in value["sources"]:
+        if not isinstance(source, dict) or not all(
+            isinstance(source.get(field), expected)
+            for field, expected in (
+                ("source", str),
+                ("configured", bool),
+                ("success", bool),
+                ("error_class", str),
+            )
+        ):
+            raise ValueError("AI domain analysis source health is invalid")
 
 
 def _escape(value: Any) -> str:
@@ -258,6 +459,136 @@ def _render_node(node: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _classification_label(value: str) -> str:
+    return {"ai": "AI", "not_ai": "非 AI", "unknown": "未知"}.get(value, value)
+
+
+def _traffic_direction_label(value: str) -> str:
+    return {
+        "ai_proxy": "AI 节点（ai_proxy）",
+        "direct": "DMIT 直出（direct）",
+        "mixed": "混合导向",
+        "unknown": "未知",
+    }.get(value, value)
+
+
+def _format_ai_route(route: dict[str, Any]) -> str:
+    target = route.get("target") or {}
+    target_text = ""
+    if target.get("upstream_host"):
+        target_text = str(target["upstream_host"])
+        if target.get("upstream_port"):
+            target_text += f":{target['upstream_port']}"
+    tag = route.get("outbound_tag", "unknown")
+    if tag == "ai_proxy":
+        path = f"AI 节点（{tag}）"
+        if target_text:
+            path += f" → `{_escape(target_text)}`"
+    elif tag == "direct":
+        path = "DMIT 直出（direct）"
+    else:
+        path = "未知"
+    status = str(route.get("status", "") or "").strip()
+    hits = int(route.get("hits", 0) or 0)
+    suffix = f"，{hits} 次"
+    if status:
+        suffix += f"，{_escape(status)}"
+    return path + suffix
+
+
+def _format_ai_routes(item: dict[str, Any]) -> str:
+    routes = item.get("traffic_routes") or []
+    if not routes:
+        return "未知"
+    return "；".join(_format_ai_route(route) for route in routes)
+
+
+def _render_ai_domain_analysis(analysis: dict[str, Any]) -> list[str]:
+    counts = analysis["classification_counts"]
+    hits = analysis["classification_hits"]
+    sources = analysis["source_counts"]
+    directions = analysis["traffic_direction_counts"]
+    codex = analysis["codex"]
+    lines = [
+        "## AI 域名分类与流量导向",
+        "",
+        f"- 数据状态：`{_escape(analysis['status'])}`",
+        f"- 日内观测域名：{int(analysis['domain_count'])} 个，合计 {int(analysis['observed_hits'])} 次请求",
+        f"- 分类：AI {int(counts['ai'])} 个（{int(hits['ai'])} 次）、非 AI {int(counts['not_ai'])} 个（{int(hits['not_ai'])} 次）、"
+        f"未知 {int(counts['unknown'])} 个（{int(hits['unknown'])} 次）",
+        f"- 每日新增域名：{int(analysis['new_domain_count'])} 个（{int(analysis['new_domain_hits'])} 次请求）",
+        f"- 流量导向：AI 节点 {int(directions['ai_proxy'])} 个、DMIT 直出 {int(directions['direct'])} 个、"
+        f"混合 {int(directions['mixed'])} 个、未知 {int(directions['unknown'])} 个",
+        f"- 分类来源：内建 {int(sources['builtin'])} 个、Codex {int(sources['codex'])} 个、"
+        f"OpenAI 兼容接口 {int(sources['openai'])} 个、其他 {int(sources['other'])} 个、未知 {int(sources['unknown'])} 个",
+        "",
+        "### Codex 域名分类",
+        "",
+        f"- 状态：`{_escape(codex['status'])}`；已分类 {int(codex['classified_count'])} 个，"
+        f"AI {int(codex['ai_count'])} 个，非 AI {int(codex['not_ai_count'])} 个",
+    ]
+    if codex.get("error_class"):
+        lines.append(f"- 未完成域名：{int(len(codex.get('pending_domains') or []))} 个；错误分类：`{_escape(codex['error_class'])}`")
+    if codex.get("pending_domains"):
+        lines.append(f"- 待分类：{_escape(', '.join(codex['pending_domains']))}")
+    if codex.get("domains"):
+        lines.extend(["", "| 域名 | 分类 | 原因 | 模型 | 时间 |", "| --- | --- | --- | --- | --- |"])
+        for item in codex["domains"]:
+            lines.append(
+                f"| `{_escape(item['domain'])}` | {_classification_label(item['classification'])} | "
+                f"{_escape(item['reason'])} | `{_escape(item['model'])}` | {_escape(item['observed_at'])} |"
+            )
+    else:
+        lines.append("无逐项 Codex 分类记录。")
+
+    lines.extend(["", "### 每日新增域名", ""])
+    new_domains = analysis.get("new_domains") or []
+    if new_domains:
+        lines.extend(
+            [
+                "| 域名 | 分类 | 命中 | 流量导向 | 分类来源/模型 | 原因 |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in new_domains:
+            source = item["source"] + (f" / {item['model']}" if item["model"] else "")
+            lines.append(
+                f"| `{_escape(item['domain'])}` | {_classification_label(item['classification'])} | {int(item['hits'])} | "
+                f"{_format_ai_routes(item)} | `{_escape(source)}` | {_escape(item['reason'])} |"
+            )
+    else:
+        lines.append("无。")
+
+    lines.extend(["", "### 每个域名的流量导向", ""])
+    domains = analysis.get("domains") or []
+    if domains:
+        lines.extend(
+            [
+                "| 域名 | 分类 | 命中 | 导向 | 分类来源/模型 | 原因 | 首次/最后观测 |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in domains:
+            source = item["source"] + (f" / {item['model']}" if item["model"] else "")
+            observed = f"{_escape(item['first_seen'])} / {_escape(item['last_seen'])}"
+            lines.append(
+                f"| `{_escape(item['domain'])}` | {_classification_label(item['classification'])} | {int(item['hits'])} | "
+                f"{_format_ai_routes(item)}（{_traffic_direction_label(item['traffic_direction'])}） | "
+                f"`{_escape(source)}` | {_escape(item['reason'])} | {observed} |"
+            )
+    else:
+        lines.append("报告窗口内无可用域名观测。")
+    lines.extend(["", "### AI 域名数据源", "", "| 数据源 | 已配置 | 成功 | 记录 | 错误分类 |", "| --- | --- | --- | --- | --- |"])
+    for source in analysis.get("sources", []):
+        lines.append(
+            f"| `{_escape(source.get('source'))}` | {_escape(source.get('configured'))} | "
+            f"{_escape(source.get('success'))} | {int(source.get('records', 0) or 0)} | "
+            f"{_escape(source.get('error_class'))} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     validate_report(report)
     collection = report["collection_health"]
@@ -286,6 +617,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     for node in report["nodes"]:
         lines.extend(_render_node(node))
 
+    lines.extend(_render_ai_domain_analysis(report["ai_domain_analysis"]))
     lines.extend(["## 流量中断", ""])
     traffic_incidents = [item for item in report["incidents"] if item.get("kind") == "traffic_gap"]
     if traffic_incidents:

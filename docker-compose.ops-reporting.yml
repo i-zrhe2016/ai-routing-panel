@@ -39,6 +39,7 @@ services:
       OPS_PROMETHEUS_URL: "${OPS_PROMETHEUS_URL:-http://127.0.0.1:9090}"
       OPS_PROMETHEUS_TIMEOUT_SECONDS: "10"
       OPS_AI_ROUTING_REPORT_DIR: /inputs/ai-routing
+      OPS_AI_PANEL_DB_PATH: /panel-data/panel.db
       OPS_FORCE_RULES_ONLY: "${OPS_FORCE_RULES_ONLY:-0}"
       OPS_CODEX_SOURCE_HOME: /host-codex-home
       OPS_CODEX_HOME: /data/xray-ops/codex-home
@@ -76,6 +77,10 @@ services:
       - type: bind
         source: "${OPS_AI_ROUTING_REPORT_HOST_DIR:-./app/xray/reports/hourly-domains}"
         target: /inputs/ai-routing
+        read_only: true
+      - type: bind
+        source: "${OPS_PANEL_DB_HOST_DIR:-./data}"
+        target: /panel-data
         read_only: true
       - type: bind
         source: "${OPS_CODEX_AUTH_SEED_HOST_PATH:?set OPS_CODEX_AUTH_SEED_HOST_PATH}"

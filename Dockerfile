@@ -13,6 +13,7 @@ RUN apt-get update \
         docker-cli \
         openssh-client \
         tar \
+        zstd \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /data /app/xray/runtime /app/xray/logs
 
@@ -28,10 +29,15 @@ COPY app/static/admin /app/static/admin
 COPY app/static/portal /app/static/portal
 COPY app/static/landing /app/static/landing
 COPY --from=xray-core /usr/local/bin/xray /usr/local/bin/xray
-# The AI-domain manager uses the standalone Codex binary. No Node runtime or
-# package manager is needed in the application image.
-ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex /usr/local/bin/codex
-RUN chmod 0755 /usr/local/bin/codex
+# The AI-domain manager uses the standalone Codex binary. The `codex` release
+# asset is a dotslash manifest, so extract the platform package instead; no
+# Node runtime or package manager is needed in the application image.
+ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex-package-x86_64-unknown-linux-musl.tar.zst /tmp/codex-package.tar.zst
+RUN mkdir -p /opt/codex \
+    && tar --zstd -xf /tmp/codex-package.tar.zst -C /opt/codex \
+    && test -x /opt/codex/bin/codex \
+    && ln -s /opt/codex/bin/codex /usr/local/bin/codex \
+    && rm -f /tmp/codex-package.tar.zst
 
 ENV DATA_DIR=/data \
     DB_PATH=/data/panel.db \

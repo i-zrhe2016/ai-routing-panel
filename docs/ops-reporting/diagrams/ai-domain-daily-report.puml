@@ -1,0 +1,30 @@
+@startuml
+!theme plain
+title AI Domain Daily Report Data Flow
+left to right direction
+
+actor "普通数据面" as normal #E0F2FE
+component "xray-ai-domain-manager\n每小时" as manager #CCFBF1
+database "panel.db\nai_domains + observations" as paneldb #FEF3C7
+folder "小时域名报表\nhistory/*.json" as hourly #F3E8FF
+component "xray-ops-daily-reporter\nAsia/Shanghai 自然日" as reporter #DBEAFE
+component "Codex\n运维解释" as codex #FCE7F3
+database "日报 JSON / Markdown\nops-daily-reports" as reports #E5E7EB
+
+normal --> manager : access.log 域名增量
+manager --> paneldb : AI 分类与每小时命中
+manager --> hourly : 域名、分类、路由状态
+hourly --> reporter : 日窗口聚合
+paneldb --> reporter : 只读补充历史/来源/模型
+reporter --> codex : 有界 AI 分类摘要 + 规则证据
+codex --> reporter : 受 schema 约束的解释
+reporter --> reports : ai_domain_analysis\n原子发布
+
+note right of reporter
+每个域名输出：
+分类、命中次数、
+direct / ai_proxy / mixed、
+Codex 来源和理由。
+历史路由缺失则 unknown。
+end note
+@enduml

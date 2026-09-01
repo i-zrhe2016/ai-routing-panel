@@ -142,6 +142,48 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(state["log_offset"], 256)
         self.assertEqual(state["events"][0]["domain"], "api.openai.com")
 
+    def test_domain_report_records_classifier_and_effective_traffic_route(self):
+        observed_at = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+        state = {
+            "events": [
+                {"domain": "chatgpt.com", "protocol": "tcp", "seen_at": observed_at},
+                {"domain": "example.com", "protocol": "tcp", "seen_at": observed_at},
+            ]
+        }
+        decisions = {
+            "domains": {
+                "chatgpt.com": {
+                    "classification": "ai",
+                    "reason": "known AI",
+                    "source": "codex",
+                    "model": "gpt-5.5",
+                },
+                "example.com": {
+                    "classification": "not_ai",
+                    "reason": "ordinary site",
+                    "source": "codex",
+                    "model": "gpt-5.5",
+                },
+            }
+        }
+
+        report = ai_domain_manager.build_domain_report(
+            state,
+            observed_at - timedelta(hours=1),
+            observed_at,
+            decisions,
+            {"upstream_host": "nat.qq.pw", "upstream_port": 27166},
+            None,
+            {"status": "applied", "reason": ""},
+        )
+        domains = {item["domain"]: item for item in report["domains"]}
+
+        self.assertEqual(domains["chatgpt.com"]["source"], "codex")
+        self.assertEqual(domains["chatgpt.com"]["model"], "gpt-5.5")
+        self.assertEqual(domains["chatgpt.com"]["traffic_route"]["outbound_tag"], "ai_proxy")
+        self.assertEqual(domains["chatgpt.com"]["traffic_route"]["target"]["upstream_host"], "nat.qq.pw")
+        self.assertEqual(domains["example.com"]["traffic_route"]["outbound_tag"], "direct")
+
     def test_read_ai_routing_manual_mode_defaults_and_reads_persisted_value(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "panel.db"

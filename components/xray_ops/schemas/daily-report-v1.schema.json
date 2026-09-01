@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Xray operations daily report v1",
+  "title": "Xray operations daily report v1.1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,11 +20,12 @@
     "incidents",
     "evidence",
     "collection_health",
+    "ai_domain_analysis",
     "model_analysis",
     "generation_health"
   ],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"const": "1.1"},
     "rules_version": {"type": "string", "minLength": 1},
     "rule_parameters": {"$ref": "#/$defs/rule_parameters"},
     "prompt_version": {"type": ["string", "null"]},
@@ -51,6 +52,7 @@
       "items": {"$ref": "#/$defs/evidence"}
     },
     "collection_health": {"$ref": "#/$defs/collection_health"},
+    "ai_domain_analysis": {"$ref": "#/$defs/ai_domain_analysis"},
     "model_analysis": {
       "oneOf": [
         {"$ref": "model-analysis.schema.json"},
@@ -391,6 +393,175 @@
           "type": "array",
           "items": {"$ref": "#/$defs/collection_gap"}
         }
+      }
+    },
+    "ai_domain_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "window_start",
+        "window_end",
+        "domain_count",
+        "observed_hits",
+        "new_domain_count",
+        "new_domain_hits",
+        "classification_counts",
+        "classification_hits",
+        "source_counts",
+        "traffic_direction_counts",
+        "domains",
+        "new_domains",
+        "codex",
+        "sources"
+      ],
+      "properties": {
+        "status": {"enum": ["available", "empty", "partial", "unknown", "not_configured"]},
+        "window_start": {"type": "string", "format": "date-time"},
+        "window_end": {"type": "string", "format": "date-time"},
+        "domain_count": {"type": "integer", "minimum": 0},
+        "observed_hits": {"type": "integer", "minimum": 0},
+        "new_domain_count": {"type": "integer", "minimum": 0},
+        "new_domain_hits": {"type": "integer", "minimum": 0},
+        "classification_counts": {"$ref": "#/$defs/classification_counts"},
+        "classification_hits": {"$ref": "#/$defs/classification_counts"},
+        "source_counts": {"$ref": "#/$defs/source_counts"},
+        "traffic_direction_counts": {"$ref": "#/$defs/traffic_direction_counts"},
+        "domains": {"type": "array", "items": {"$ref": "#/$defs/ai_domain"}},
+        "new_domains": {"type": "array", "items": {"$ref": "#/$defs/ai_domain"}},
+        "codex": {"$ref": "#/$defs/ai_codex"},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/source_health"}}
+      }
+    },
+    "classification_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ai", "not_ai", "unknown"],
+      "properties": {
+        "ai": {"type": "integer", "minimum": 0},
+        "not_ai": {"type": "integer", "minimum": 0},
+        "unknown": {"type": "integer", "minimum": 0}
+      }
+    },
+    "source_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["builtin", "codex", "openai", "other", "unknown"],
+      "properties": {
+        "builtin": {"type": "integer", "minimum": 0},
+        "codex": {"type": "integer", "minimum": 0},
+        "openai": {"type": "integer", "minimum": 0},
+        "other": {"type": "integer", "minimum": 0},
+        "unknown": {"type": "integer", "minimum": 0}
+      }
+    },
+    "traffic_direction_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ai_proxy", "direct", "mixed", "unknown"],
+      "properties": {
+        "ai_proxy": {"type": "integer", "minimum": 0},
+        "direct": {"type": "integer", "minimum": 0},
+        "mixed": {"type": "integer", "minimum": 0},
+        "unknown": {"type": "integer", "minimum": 0}
+      }
+    },
+    "ai_route_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upstream_host"],
+      "properties": {
+        "upstream_host": {"type": "string", "minLength": 1},
+        "upstream_port": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    },
+    "ai_route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outbound_tag", "path", "target", "hits", "window_count", "statuses"],
+      "properties": {
+        "outbound_tag": {"enum": ["ai_proxy", "direct", "unknown"]},
+        "path": {"enum": ["ai_node", "normal_data_plane", "unknown"]},
+        "target": {"oneOf": [{"$ref": "#/$defs/ai_route_target"}, {"type": "null"}]},
+        "hits": {"type": "integer", "minimum": 0},
+        "window_count": {"type": "integer", "minimum": 1},
+        "statuses": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "ai_codex_classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "reason", "model", "observed_at"],
+      "properties": {
+        "classification": {"enum": ["ai", "not_ai", "unknown"]},
+        "reason": {"type": "string"},
+        "model": {"type": "string"},
+        "observed_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "ai_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "hits",
+        "classification",
+        "reason",
+        "source",
+        "model",
+        "first_seen",
+        "last_seen",
+        "protocols",
+        "traffic_direction",
+        "traffic_routes",
+        "is_new",
+        "codex_classifications"
+      ],
+      "properties": {
+        "domain": {"type": "string", "minLength": 1},
+        "hits": {"type": "integer", "minimum": 0},
+        "classification": {"enum": ["ai", "not_ai", "unknown"]},
+        "reason": {"type": "string"},
+        "source": {"type": "string"},
+        "model": {"type": "string"},
+        "first_seen": {"type": ["string", "null"], "format": "date-time"},
+        "last_seen": {"type": ["string", "null"], "format": "date-time"},
+        "protocols": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "traffic_direction": {"enum": ["ai_proxy", "direct", "mixed", "unknown"]},
+        "traffic_routes": {"type": "array", "items": {"$ref": "#/$defs/ai_route"}},
+        "is_new": {"type": "boolean"},
+        "codex_classifications": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ai_codex_classification"}
+        }
+      }
+    },
+    "ai_codex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "classified_count", "ai_count", "not_ai_count", "domains", "pending_domains", "error_class"],
+      "properties": {
+        "status": {"enum": ["success", "partial", "unavailable", "not_used", "unknown"]},
+        "classified_count": {"type": "integer", "minimum": 0},
+        "ai_count": {"type": "integer", "minimum": 0},
+        "not_ai_count": {"type": "integer", "minimum": 0},
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domain", "classification", "reason", "model", "observed_at"],
+            "properties": {
+              "domain": {"type": "string", "minLength": 1},
+              "classification": {"enum": ["ai", "not_ai", "unknown"]},
+              "reason": {"type": "string"},
+              "model": {"type": "string"},
+              "observed_at": {"type": "string", "format": "date-time"}
+            }
+          }
+        },
+        "pending_domains": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "error_class": {"type": "string"}
       }
     },
     "generation_health": {

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .ai_domains import build_ai_domain_analysis, codex_context, empty_ai_domain_analysis
 from .codex_runner import CodexAnalysisError, CodexRunner, CodexRunnerConfig
 from .github_reports import GitHubReportPublisher, GitHubReportPublisherConfig
 from .models import format_timestamp, parse_timestamp, stable_id, utc_now
@@ -77,6 +78,7 @@ class ReporterConfig:
     force_rules_only: bool
     github_reports: GitHubReportPublisherConfig
     codex: CodexRunnerConfig
+    ai_panel_db_path: str = ""
 
     @classmethod
     def from_env(cls) -> ReporterConfig:
@@ -97,6 +99,7 @@ class ReporterConfig:
             force_rules_only=_env_bool("OPS_FORCE_RULES_ONLY", False),
             github_reports=GitHubReportPublisherConfig.from_env(),
             codex=CodexRunnerConfig.from_env(),
+            ai_panel_db_path=str(os.environ.get("OPS_AI_PANEL_DB_PATH", "/panel-data/panel.db")).strip(),
         )
 
 
@@ -361,6 +364,19 @@ class ReporterService:
                             "files": 0,
                         },
                     )
+                try:
+                    ai_domain_analysis = build_ai_domain_analysis(
+                        self.config.ai_routing_report_dir,
+                        self.config.ai_panel_db_path,
+                        start_utc,
+                        end_utc,
+                    )
+                except Exception:
+                    ai_domain_analysis = empty_ai_domain_analysis(
+                        start_utc,
+                        end_utc,
+                        reason="ai_domain_analysis_failed",
+                    )
                 stats_query_start = format_timestamp(
                     start_utc - timedelta(seconds=self.config.xray_stats_window_padding_seconds)
                 )
@@ -384,6 +400,7 @@ class ReporterService:
                     route_history=route_history,
                     xray_stats=self._xray_stats_health(xray_traffic_samples),
                 )
+                collection_health["sources"].extend(ai_domain_analysis.get("sources", []))
 
                 model_analysis = None
                 generation_mode = "rules_only"
@@ -403,6 +420,7 @@ class ReporterService:
                         "incidents": classification["incidents"],
                         "evidence": classification["evidence"],
                         "collection_health": collection_health,
+                        "ai_domain_analysis": codex_context(ai_domain_analysis),
                     }
                     try:
                         codex_result = self.codex_factory().analyze(frozen)
@@ -457,6 +475,7 @@ class ReporterService:
                     generation_mode=generation_mode,
                     model_analysis=model_analysis,
                     generation_health=generation_health,
+                    ai_domain_analysis=ai_domain_analysis,
                 )
                 output = write_report_atomic(self.config.report_dir, report)
                 self.store.finish_report_run(

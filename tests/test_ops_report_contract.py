@@ -187,7 +187,8 @@ def test_packaged_report_schema_matches_contract_root():
 
     assert schema["$schema"].endswith("2020-12/schema")
     assert set(schema["required"]) == ROOT_FIELDS
-    assert schema["properties"]["schema_version"]["const"] == "1.0"
+    assert schema["properties"]["schema_version"]["const"] == "1.1"
+    assert "ai_domain_analysis" in schema["properties"]
     traffic_properties = schema["$defs"]["node"]["properties"]["traffic"]["properties"]
     assert "network_total_bytes" in traffic_properties
     assert "network_devices" in traffic_properties
@@ -208,6 +209,7 @@ def test_rules_only_versions_and_markdown_section_order(monkeypatch):
         "## 执行摘要",
         "## 普通数据面",
         "## AI 数据面",
+        "## AI 域名分类与流量导向",
         "## 流量中断",
         "## 故障时间线",
         "## 资源风险",

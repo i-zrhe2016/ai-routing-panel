@@ -1539,9 +1539,58 @@ def write_routing_fragment(path, ai_domains, proxy_payload):
 
 
 def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, route_status):
+    route_status_code = str(route_status.get("status", "unknown") or "unknown").strip()
+
+    def domain_route(classification):
+        if classification != "ai":
+            return {
+                "outbound_tag": "direct",
+                "path": "normal_data_plane",
+                "target": None,
+                "status": route_status_code,
+                "reason": "classification_not_ai",
+            }
+        if route_status_code == "applied":
+            target = None
+            if isinstance(ai_target, dict) and ai_target.get("upstream_host"):
+                target = {
+                    "upstream_host": ai_target["upstream_host"],
+                    "upstream_port": int(ai_target["upstream_port"]),
+                }
+            return {
+                "outbound_tag": "ai_proxy",
+                "path": "ai_node",
+                "target": target,
+                "status": route_status_code,
+                "reason": str(route_status.get("reason", "") or "").strip(),
+            }
+        if route_status_code in {
+            "disabled",
+            "idle",
+            "fallback_to_primary",
+            "manual_fallback",
+            "manual_target_unreachable",
+            "pending_proxy_template",
+        }:
+            return {
+                "outbound_tag": "direct",
+                "path": "normal_data_plane",
+                "target": None,
+                "status": route_status_code,
+                "reason": str(route_status.get("reason", "") or "").strip() or "ai_route_not_applied",
+            }
+        return {
+            "outbound_tag": "unknown",
+            "path": "unknown",
+            "target": None,
+            "status": route_status_code,
+            "reason": str(route_status.get("reason", "") or "").strip() or "route_status_unavailable",
+        }
+
     domains = {}
     protocols = {}
     for item in state["events"]:
+        decision = decisions["domains"].get(item["domain"], {})
         domain_item = domains.setdefault(
             item["domain"],
             {
@@ -1550,8 +1599,10 @@ def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, 
                 "first_seen": item["seen_at"],
                 "last_seen": item["seen_at"],
                 "protocols": set(),
-                "classification": decisions["domains"].get(item["domain"], {}).get("classification", "unknown"),
-                "reason": decisions["domains"].get(item["domain"], {}).get("reason", ""),
+                "classification": decision.get("classification", "unknown"),
+                "reason": decision.get("reason", ""),
+                "source": str(decision.get("source", "") or "").strip(),
+                "model": str(decision.get("model", "") or "").strip(),
             },
         )
         domain_item["hits"] += 1
@@ -1572,6 +1623,9 @@ def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, 
                 "protocols": sorted(item["protocols"]),
                 "classification": item["classification"],
                 "reason": item["reason"],
+                "source": item["source"] or "unknown",
+                "model": item["model"],
+                "traffic_route": domain_route(item["classification"]),
             }
             for item in domains.values()
         ),
@@ -1658,6 +1712,7 @@ def write_domain_report(output_dir, report):
             protocols = ",".join(item["protocols"])
             lines.append(
                 f"{item['domain']}\thits={item['hits']}\tclass={item['classification']}\t"
+                f"source={item.get('source', 'unknown')}\troute={item.get('traffic_route', {}).get('outbound_tag', 'unknown')}\t"
                 f"last_seen={item['last_seen']}\tprotocols={protocols}"
             )
     else:

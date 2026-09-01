@@ -1,8 +1,10 @@
 # 每日日报器
 
-> 权威范围：Prometheus 查询、脱敏归因快照、规则执行和报告发布
+> 权威范围：Prometheus 查询、脱敏归因快照、AI 域名聚合、规则执行和报告发布
 
 日报器每天按 `Asia/Shanghai` 自然日查询 Prometheus HTTP API，并读取本地 SQLite 中已脱敏的 Xray counter 快照。日报器本身不访问 SSH，不读取原始日志，不部署 exporter，也不执行修复。
+
+当前日报 JSON/Markdown 契约版本为 `1.1`；旧版 `1.0` 报告不会被当作当前日期的完整报告，调度器会在下一次运行时重新生成。
 
 截至 2026-08-05，生产日报器以 `OPS_FORCE_RULES_ONLY=1` 影子模式运行。首份 2026-08-04 报告因窗口早于 Prometheus 上线而为 `unknown`，仅用于验证缺口处理、审计和原子发布，不作为业务状态结论。
 
@@ -11,8 +13,8 @@
 1. 验证 Prometheus 可用性、必需 labels 和 target 唯一性。
 2. 对前一自然日执行版本化 range queries，计算覆盖率、counter reset 和两个数据面的日流量增量。
 3. 从 SQLite 读取 `xray-ops-attribution-sampler` 写入的脱敏 user/inbound counter 快照，计算报告窗口内的增量归因。
-4. 将标准化指标交给确定性规则；缺失数据保持 `unknown`。
-5. 正常模式将同一份冻结结果交给 Codex 生成受 schema 约束的解释；每个解释条目必须引用至少一个已有 `evidence_id`，没有对应证据的条目必须省略。Codex 缺失、认证失败、调用失败或输出校验失败时，本次日报运行失败，不生成或发布规则-only 报告。
+4. 读取 AI 管理器的小时域名报表和 `panel.db` 的 `ai_domains` / `ai_domain_observations`，汇总分类、每日新增域名、每个域名的命中次数与流量导向；相同域名在窗口内发生出口变化时保留为 `mixed`。
+5. 将标准化指标与有界的 AI 域名摘要交给确定性规则和 Codex；域名逐项的 `source`、`model`、`reason` 来自管理器每小时分类结果，日报不会重新猜测历史分类。Codex 缺失、认证失败、调用失败或输出校验失败时，本次日报运行失败，不生成或发布规则-only 报告。
 6. 从同一份已校验结果生成 JSON 和 Markdown，并原子发布。
 7. 将 Markdown 和 JSON 复制到仓库内 `ops-daily-reports/<year>/`，只提交该目录并推送到 GitHub。
 8. 仅把本次运行元数据和报告归档索引写入 SQLite。
@@ -27,6 +29,19 @@ Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注
 每个节点段落都会展示普通数据面和 AI 数据面的日总流量、入站流量、出站流量、网络流量覆盖率和计入接口列表。流量来源为 Prometheus 中 `job="data-plane-node"` 的 `node_network_receive_bytes_total` 与 `node_network_transmit_bytes_total`，按 `node_role` 分别汇总。
 
 日报只计入数据面主机上的公网/物理网络接口前缀：`eth`、`ens`、`enp`、`eno`、`enx`、`bond`、`wan`。`lo`、Docker bridge、veth、Tailscale 等虚拟或管理链路不会进入日报总流量，避免把监控隧道和容器内部转发重复计数。
+
+## AI 域名分类与流量导向
+
+AI 域名分析使用 `ai_domain_analysis` 字段写入日报 JSON，并在 Markdown 中固定展示四部分：
+
+- 分类汇总：AI、非 AI、未知域名数量以及各类命中次数。
+- 每日新增域名：按保留的小时历史和 `first_seen` 判断；历史数据缺失时不会宣称“首次出现”。
+- 每个域名的流量导向：`ai_proxy` 表示普通数据面动态规则已将流量送往选中的 AI 上游；`direct` 表示 DMIT 普通数据面直出；`mixed` 表示报告窗口内发生过两种导向；证据不足时为 `unknown`。
+- Codex 分类：展示管理器已记录的 Codex 域名、分类理由、模型和待分类/不可用状态。日报的运维 Codex 也会接收有界的汇总和域名上下文，用于解释总体情况。
+
+小时域名历史是请求命中次数和路由状态的来源，`panel.db` 以只读方式补充 AI 域名的累计分类、来源和每小时观察。日报不会读取原始访问日志，也不会把当前出口倒推成没有历史记录的过去出口。
+
+数据流图：[AI 域名日报汇总](diagrams/ai-domain-daily-report.svg) · [PlantUML 源文件](diagrams/ai-domain-daily-report.puml)
 
 ## 脱敏归因
 
@@ -48,6 +63,8 @@ Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注
 | `OPS_XRAY_STATS_AI_CONTAINER` | `xray` | 远端 Xray 容器名。 |
 | `OPS_XRAY_STATS_AI_METRICS_PORT` | `31097` | 容器内 `/debug/vars` 端口。 |
 | `OPS_XRAY_STATS_WINDOW_PADDING_SECONDS` | `900` | 日报计算归因时读取窗口前后的采样缓冲。 |
+| `OPS_PANEL_DB_HOST_DIR` | 部署时必填；本地默认为 `./data` | 宿主机 `panel.db` 所在目录，以只读方式挂载到日报容器。 |
+| `OPS_AI_PANEL_DB_PATH` | `/panel-data/panel.db` | 只读的 `panel.db` 路径，用于补充 AI 域名历史和分类来源。 |
 
 ## GitHub 归档
 
@@ -89,6 +106,6 @@ ops-daily-reports/<year>/<date>.json
 
 ## 职责边界
 
-日报器不能从指标反推出日志内容或请求级根因。归因表只说明哪个脱敏 user/inbound counter 增长最多，不说明具体访问了什么域名或内容。模型解释只接收脱敏后的规则摘要，不能覆盖规则结论；正常模式下 Codex 失败会使整次日报失败，不会自动降级为 `rules_only`。
+日报器不能从指标反推出原始日志内容或请求级根因。AI 域名区块只保存域名级聚合命中次数、分类结果和已记录的路由状态，不保存 URL、请求内容或客户端身份；它不能证明单个请求在每一秒的真实出口。归因表只说明哪个脱敏 user/inbound counter 增长最多，不说明具体访问内容。模型解释不能覆盖规则结论；正常模式下 Codex 失败会使整次日报失败，不会自动降级为 `rules_only`。
 
 相关文档：[Prometheus Targets](prometheus-targets.md)、[规则边界](fault-classification.md)、[SQLite 审计](report-run-audit.md)。
