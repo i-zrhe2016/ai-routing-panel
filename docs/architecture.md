@@ -115,7 +115,7 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 1. 管理员在 Web UI 或 `POST /api/ports` 修改端口状态。
 2. `panel.db` 持久化端口、租户、流量和 AI 聚合数据。
 3. `panel-ports.json` 记录当前有效监听端口。
-4. `render_config.py` 合并 `app/xray/.env`、`panel-ports.json` 和可选 `dynamic-routing.json`，生成 `config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `client-test.json`。
+4. `render_config.py` 合并 `app/xray/.env`、`panel-ports.json` 和可选 `dynamic-routing.json`，生成 `config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `client-test.json`；`xray-ai-domain-manager` 重渲染时必须继续使用同目录的 `panel-ports.json`，避免周期任务覆盖有效监听端口。
 5. 控制面通过 SSH 将 `config.json` 推送到普通数据面；AI 节点配置同步由 `AI_NODE_CONFIG_PATH` 独立控制，生产当前禁用自动上传。
 6. 普通数据面加载 `config.json` 并通过 Xray API 提供 `statsquery`。
 7. `xray-ai-domain-manager` 每小时从普通数据面 `access.log` 读取域名，探测双 AI 候选，将 AI 观测写入 `panel.db`，并输出只含 AI 域名的路由产物；人工切换会立即触发一次 `--once` 重算。

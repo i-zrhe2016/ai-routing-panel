@@ -1724,6 +1724,7 @@ def write_domain_report(output_dir, report):
 
 def rerender_config(render_script, env_file, config_out, client_out, share_out, dynamic_routing_file):
     render_entry = str(render_script).strip() or DEFAULT_RENDER_MODULE
+    panel_ports_file = Path(config_out).with_name("panel-ports.json")
     command = [sys.executable]
     if render_entry.endswith(".py") or "/" in render_entry or "\\" in render_entry:
         command.append(render_entry)
@@ -1741,6 +1742,8 @@ def rerender_config(render_script, env_file, config_out, client_out, share_out, 
             str(share_out),
             "--dynamic-routing-file",
             str(dynamic_routing_file),
+            "--panel-ports-file",
+            str(panel_ports_file),
         ]
     )
     completed = subprocess.run(command, capture_output=True, text=True, check=False)

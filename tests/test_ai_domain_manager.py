@@ -25,6 +25,27 @@ class _FakeHttpResponse:
 
 
 class AiDomainManagerTest(unittest.TestCase):
+    @mock.patch.object(ai_domain_manager.subprocess, "run")
+    def test_rerender_config_passes_panel_ports_file_next_to_config(self, mocked_run):
+        mocked_run.return_value = mock.Mock(returncode=0, stderr="", stdout="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ai_domain_manager.rerender_config(
+                "app.xray.render_config",
+                root / "xray.env",
+                root / "runtime" / "config.json",
+                root / "runtime" / "client-test.json",
+                root / "runtime" / "client-share.txt",
+                root / "runtime" / "dynamic-routing.json",
+            )
+
+        command = mocked_run.call_args.args[0]
+        self.assertEqual(
+            command[command.index("--panel-ports-file") + 1],
+            str(root / "runtime" / "panel-ports.json"),
+        )
+
     def test_sqlite_lock_retry_retries_transient_lock(self):
         attempts = []
 
