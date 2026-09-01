@@ -1751,6 +1751,7 @@ def build_data_plane_controller(args):
             ssh_options=tuple(args.data_plane_ssh_options),
             ssh_key_file=str(getattr(args, "data_plane_ssh_key_file", "") or "").strip(),
             ssh_known_hosts_file=str(getattr(args, "data_plane_ssh_known_hosts_file", "") or "").strip(),
+            remote_command_timeout=float(getattr(args, "data_plane_remote_command_timeout", 8.0) or 8.0),
             config_path=args.data_plane_config_path,
             dynamic_routing_path=args.data_plane_dynamic_routing_path,
             access_log_path=access_log_path,
@@ -2064,6 +2065,10 @@ def build_args():
     args.ai_upstreams = read_env_or_file("AI_UPSTREAMS", "", env_file_values)
     args.ai_upstream_fallbacks = read_env_or_file("AI_UPSTREAM_FALLBACKS", "", env_file_values)
     args.ai_upstream_fallback_url = read_env_or_file("AI_UPSTREAM_FALLBACK_URL", "", env_file_values)
+    args.data_plane_remote_command_timeout = parse_positive_float(
+        os.environ.get("DATAPLANE_REMOTE_COMMAND_TIMEOUT", "8"),
+        "DATAPLANE_REMOTE_COMMAND_TIMEOUT",
+    )
     args.ai_upstream_probe_timeout_seconds = parse_positive_float(
         read_env_or_file("AI_UPSTREAM_PROBE_TIMEOUT_SECONDS", "3", env_file_values),
         "AI_UPSTREAM_PROBE_TIMEOUT_SECONDS",

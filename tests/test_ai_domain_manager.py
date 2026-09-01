@@ -156,6 +156,32 @@ class AiDomainManagerTest(unittest.TestCase):
             self.assertEqual(ai_domain_manager.read_ai_routing_manual_mode(db_path), "forced_fallback")
             self.assertEqual(ai_domain_manager.read_ai_routing_manual_mode(Path(tmpdir) / "missing.db"), "auto")
 
+    def test_build_data_plane_controller_uses_remote_command_timeout(self):
+        args = mock.Mock(
+            ai_upstream_candidates=[{"upstream_host": "primary.example.com", "upstream_port": 27166}],
+            data_plane_access_log_path="",
+            data_plane_ssh_target="root@example.com",
+            data_plane_config_path="/root/xray/runtime/config.json",
+            data_plane_api_server="127.0.0.1:10085",
+            data_plane_xray_bin="/usr/local/bin/xray",
+            data_plane_local_bin="",
+            data_plane_docker_bin="docker",
+            data_plane_container_name="xray",
+            data_plane_restart_command="",
+            data_plane_ssh_bin="ssh",
+            data_plane_ssh_options=(),
+            data_plane_ssh_key_file="/run/secrets/fleet_ssh_key",
+            data_plane_ssh_known_hosts_file="/root/.ssh/known_hosts",
+            data_plane_remote_command_timeout=30.0,
+            data_plane_dynamic_routing_path="/root/xray/runtime/dynamic-routing.json",
+            config_out=Path("/tmp/config.json"),
+            dynamic_routing_path=Path("/tmp/dynamic-routing.json"),
+        )
+
+        controller = ai_domain_manager.build_data_plane_controller(args)
+
+        self.assertEqual(controller.config.remote_command_timeout, 30.0)
+
     @mock.patch.object(ai_domain_manager, "probe_ai_upstream_candidate")
     def test_select_ai_target_can_manually_select_backup(self, mocked_probe):
         mocked_probe.side_effect = [
