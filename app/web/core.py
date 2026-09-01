@@ -828,7 +828,7 @@ def build_port_token_subscription_response(subscription_token, output_format):
         abort(404)
 
     port = state.get_port_subscription_record_by_token(subscription_token)
-    if port is None:
+    if port is None or port.get("status") != "active":
         abort(404)
 
     if output_format == "v2ray":

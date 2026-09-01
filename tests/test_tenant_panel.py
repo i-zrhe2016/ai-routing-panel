@@ -408,6 +408,27 @@ class TenantPanelTest(unittest.TestCase):
         body = new_subscription_response.get_data(as_text=True)
         self.assertIn("port: 32001", body)
 
+    def test_inactive_port_does_not_serve_a_subscription(self):
+        disabled = self.create_port(32002, "Tenant Disabled")
+        expired = self.create_port(32003, "Tenant Expired")
+
+        with self.panel.state.connect() as conn:
+            conn.execute(
+                "UPDATE ports SET enabled = 0 WHERE id = ?",
+                (disabled["id"],),
+            )
+            conn.execute(
+                "UPDATE ports SET expires_at = ? WHERE id = ?",
+                ("2000-01-01T00:00:00+00:00", expired["id"]),
+            )
+            conn.commit()
+
+        for port in (disabled, expired):
+            response = self.client.get(
+                f"/tenant-subscriptions/{port['subscription_token']}/clash"
+            )
+            self.assertEqual(response.status_code, 404)
+
     def test_expired_ports_are_deleted_during_maintenance(self):
         port = self.create_port(33001, "Tenant Expired")
 

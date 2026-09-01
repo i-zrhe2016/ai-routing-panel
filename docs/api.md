@@ -25,6 +25,8 @@
 - `/tenant-subscriptions/<subscription_token>/clash`：Clash 订阅
 - `/tenant-subscriptions/<subscription_token>/v2ray`：V2Ray 订阅
 
+订阅 token 只对运行中的端口下发配置；端口停用、过期或达到流量上限时返回 `404`，避免客户端继续拿到无法连接的旧配置。
+
 历史兼容订阅路径仍保留：
 
 - `/<token>/<listen_port>`
