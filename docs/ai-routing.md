@@ -19,6 +19,8 @@ AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过 Tails
 7. 探测主、备 AI 候选并按当前模式选择目标
 8. 路由变化时重新渲染并重启数据面
 
+内建强制 AI 域名族覆盖 ChatGPT/OpenAI（`chatgpt.com`、`openai.com`、`oaistatic.com`、`oaiusercontent.com`）和 Claude/Anthropic（`claude.ai`、`anthropic.com`、`claude.com`、`claudeusercontent.com`）。这些域名的子域名也会匹配；实际观测到的域名才写入数据库聚合表。
+
 AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。非 AI 域名以及尚未完成分类的域名不进入动态规则，继续使用普通 DMIT 数据面的默认 `freedom` outbound 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产候选为主 `nat.qq.pw:27166`、备 `100.87.76.6:27166`；截至 2026 年 8 月 23 日，主候选不可达，动态路由已选中备用候选。
 
 ## 输入与输出

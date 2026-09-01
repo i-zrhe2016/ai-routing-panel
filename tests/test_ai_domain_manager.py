@@ -231,6 +231,19 @@ class AiDomainManagerTest(unittest.TestCase):
         ):
             self.assertTrue(ai_domain_manager.matches_forced_ai_route_domain(domain))
 
+    def test_chatgpt_and_claude_domain_families_are_forced_to_ai_route(self):
+        for domain in (
+            "chatgpt.com",
+            "chat.openai.com",
+            "api.openai.com",
+            "cdn.oaistatic.com",
+            "files.oaiusercontent.com",
+            "claude.ai",
+            "console.anthropic.com",
+            "assets.claudeusercontent.com",
+        ):
+            self.assertTrue(ai_domain_manager.matches_forced_ai_route_domain(domain))
+
     def test_default_ai_redirect_uses_ipv4(self):
         payload, reason = ai_domain_manager.render_proxy_template(
             Path("/does/not/exist"),

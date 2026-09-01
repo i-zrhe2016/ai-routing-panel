@@ -41,6 +41,13 @@ FORCED_AI_ROUTE_DOMAIN_SUFFIXES = (
     "gemini.gstatic.com",
     "generativelanguage.googleapis.com",
     "scholar.google.com",
+    # Keep ChatGPT's web/API traffic and its static/upload hosts on the same
+    # AI egress. Routing only chatgpt.com misses OpenAI API and asset traffic.
+    "chatgpt.com",
+    "openai.com",
+    "oaistatic.com",
+    "oaiusercontent.com",
+    # Keep Claude's web/API and generated-content hosts on the same AI egress.
     "anthropic.com",
     "api.ip.sb",
     "api.ipify.org",
