@@ -1794,6 +1794,11 @@ def build_data_plane_controller(args):
         config_path = Path(args.data_plane_config_path)
         if config_path.name == "config.json" and config_path.parent.name == "runtime":
             access_log_path = str(config_path.parent.parent / "logs" / "access.log")
+    data_plane_config_path = str(getattr(args, "data_plane_config_path", "") or "").strip()
+    panel_ports_path = ""
+    if data_plane_config_path:
+        panel_ports_path = str(Path(data_plane_config_path).with_name("panel-ports.json"))
+    source_panel_ports_path = Path(args.config_out).with_name("panel-ports.json")
     return DataPlaneController(
         DataPlaneConfig(
             role="data_plane",
@@ -1813,8 +1818,10 @@ def build_data_plane_controller(args):
             config_path=args.data_plane_config_path,
             dynamic_routing_path=args.data_plane_dynamic_routing_path,
             access_log_path=access_log_path,
+            panel_ports_path=panel_ports_path,
             source_config_path=args.config_out,
             source_dynamic_routing_path=args.dynamic_routing_path,
+            source_panel_ports_path=source_panel_ports_path,
             upstream_host=upstream_host,
             upstream_port=upstream_port,
         )
@@ -2004,13 +2011,17 @@ def run_once(args):
     )
     current_config = args.config_out.read_text(encoding="utf-8") if args.config_out.is_file() else ""
     config_changed = current_config != previous_config
+    remote_config_changed = False
     if data_plane_controller.is_configured():
         # Sync on every management cycle. The rendered config can be unchanged
         # while the remote source fragment was deleted or replaced manually;
         # keeping both artifacts synchronized makes the next panel render safe.
+        synced_paths = []
         if data_plane_controller.supports_sync():
-            data_plane_controller.sync_generated_files(validate_config=True)
-        if config_changed and data_plane_controller.supports_restart():
+            synced_paths = data_plane_controller.sync_generated_files(validate_config=True)
+            remote_config_path = str(getattr(args, "data_plane_config_path", "") or "").strip()
+            remote_config_changed = bool(remote_config_path and remote_config_path in {str(path) for path in synced_paths})
+        if (config_changed or remote_config_changed) and data_plane_controller.supports_restart():
             data_plane_controller.restart()
     elif config_changed and args.restart_command:
         restart_xray_command(args.restart_command, args.docker_timeout_seconds)
@@ -2020,7 +2031,7 @@ def run_once(args):
     report = build_domain_report(log_state, cutoff, now, decisions, ai_target, panel_target, route_status)
     if pending_without_classifier:
         report["route_status"]["pending_domains_without_classifier"] = pending_without_classifier
-    report["route_status"]["config_changed"] = config_changed
+    report["route_status"]["config_changed"] = config_changed or remote_config_changed
     report["panel_db_status"] = save_ai_domains_to_panel_db(args.panel_db_path, report, decisions)
     write_domain_report(args.report_output_dir, report)
     save_log_state(args.log_state_path, log_state)

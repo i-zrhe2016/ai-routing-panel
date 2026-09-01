@@ -244,6 +244,70 @@ class AiDomainManagerTest(unittest.TestCase):
         controller = ai_domain_manager.build_data_plane_controller(args)
 
         self.assertEqual(controller.config.remote_command_timeout, 30.0)
+        self.assertEqual(controller.config.panel_ports_path, "/root/xray/runtime/panel-ports.json")
+        self.assertEqual(controller.config.source_panel_ports_path, Path("/tmp/panel-ports.json"))
+
+    def test_run_once_restarts_when_remote_config_was_replaced(self):
+        controller = mock.Mock()
+        controller.is_configured.return_value = True
+        controller.supports_sync.return_value = True
+        controller.sync_generated_files.return_value = ["/root/xray/runtime/config.json"]
+        controller.supports_restart.return_value = True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_out = root / "runtime" / "config.json"
+            config_out.parent.mkdir()
+            config_out.write_text("same", encoding="utf-8")
+            dynamic_routing_path = root / "runtime" / "dynamic-routing.json"
+            args = mock.Mock(
+                log_state_path=root / "log-state.json",
+                log_path=root / "access.log",
+                lookback_seconds=3600,
+                classification_state_path=root / "decisions.json",
+                panel_db_path=root / "panel.db",
+                panel_route_listen_port=None,
+                ai_upstream_candidates=[{"upstream_host": "ai.example.com", "upstream_port": 27166}],
+                ai_upstream_probe_timeout_seconds=2.0,
+                batch_size=50,
+                codex_classifier_enabled=False,
+                openai_classifier_enabled=False,
+                proxy_template_path=root / "missing-template.json",
+                dynamic_routing_path=dynamic_routing_path,
+                render_script="app.xray.render_config",
+                env_file=root / "xray.env",
+                config_out=config_out,
+                client_out=root / "runtime" / "client-test.json",
+                share_out=root / "runtime" / "client-share.txt",
+                data_plane_config_path="/root/xray/runtime/config.json",
+                restart_command="",
+                restart_container_name="",
+                docker_timeout_seconds=5,
+                report_output_dir=root / "reports",
+            )
+
+            with mock.patch.object(ai_domain_manager, "build_data_plane_controller", return_value=controller), \
+                mock.patch.object(ai_domain_manager, "sync_log"), \
+                mock.patch.object(ai_domain_manager, "sync_builtin_domain_decisions"), \
+                mock.patch.object(ai_domain_manager, "read_ai_routing_manual_mode", return_value="auto"), \
+                mock.patch.object(
+                    ai_domain_manager,
+                    "select_ai_target",
+                    return_value={
+                        "probe_status": "all_reachable",
+                        "is_reachable": True,
+                        "upstream_host": "ai.example.com",
+                        "upstream_port": 27166,
+                        "candidates": [],
+                    },
+                ), \
+                mock.patch.object(ai_domain_manager, "rerender_config", side_effect=lambda *_args: config_out.write_text("same", encoding="utf-8")), \
+                mock.patch.object(ai_domain_manager, "save_ai_domains_to_panel_db", return_value={}), \
+                mock.patch.object(ai_domain_manager, "write_domain_report"), \
+                mock.patch.object(ai_domain_manager, "save_log_state"):
+                ai_domain_manager.run_once(args)
+
+        controller.restart.assert_called_once_with()
 
     @mock.patch.object(ai_domain_manager, "probe_ai_upstream_candidate")
     def test_select_ai_target_can_manually_select_backup(self, mocked_probe):
