@@ -1,0 +1,38 @@
+@startuml
+!theme plain
+
+title Clash REALITY health-check timeout diagnosis
+
+start
+
+:Clash health check reports timeout;
+:Run domestic multi-carrier TCP test\nfor the REALITY entry port;
+
+if (TCP reachable?) then (yes: 127/128)
+  :Run a full VLESS + REALITY request\nfrom independent external clients;
+else (no)
+  :Inspect DNS, firewall and upstream network;
+  stop
+endif
+
+if (Health target returns HTTP 204?) then (no: connection reset)
+  :Compare subscription and server fields\nwithout printing credentials;
+else (yes)
+  :Inspect the Clash core and health-check URL;
+  stop
+endif
+
+:UUID, public key, short ID, SNI and flow match;
+:Start a temporary Xray instance\nwith the same inbound configuration;
+
+if (Temporary instance returns HTTP 204?) then (yes)
+  :Fault boundary is the running\nproduction Xray process;
+  :Restart only xray-reality-local;
+  :Verify container health, external HTTP 204\nand resumed access logs;
+else (no)
+  :Repair the generated REALITY configuration;
+endif
+
+stop
+
+@enduml

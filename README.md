@@ -139,6 +139,7 @@ docker compose up -d --build xray-routing-panel-db-backup
 | 部署独立 AI 数据面 | [AI 节点部署](docs/ai-node-deployment.md) → [AI 节点独立凭据](docs/ai-node-credentials.md) |
 | 查看 AI 主机与容器监控 | [AI 节点部署](docs/ai-node-deployment.md#ai-节点监控采集) → [运维与排障](docs/operations.md#prometheus-监控metrics) |
 | 排查 ChatGPT/OpenAI 路由 | [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) |
+| 排查 Clash REALITY 节点测速超时 | [Clash REALITY 健康检查超时排障](docs/troubleshooting/clash-reality-health-check-timeout.md) |
 | 配置故障切换 | [DNS 故障切换](docs/dns-failover.md) → [三节点容错](docs/fault-tolerance.md) |
 | 查询三节点日志 | [Fluent Bit 日志采集](docs/logging-fluent-bit.md) |
 | 监控节点和生成日报 | [Prometheus-only 运维分析](docs/ops-reporting/index.md) |
@@ -190,6 +191,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 - [三节点故障容错](docs/fault-tolerance.md) — 控制面、普通数据面和 AI 数据面的故障边界。
 - [DNS 故障切换](docs/dns-failover.md) — 探测、Cloudflare DNS 切换、备用 Xray 和自动回切。
 - [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) — 客户端、入口、路由、AI 节点和出口的分层排查。
+- [Clash REALITY 健康检查超时排障](docs/troubleshooting/clash-reality-health-check-timeout.md) — TCP 可达但完整 REALITY 握手失败时的分层诊断、修复和验收记录。
 
 ### AI 路由与备份
 
