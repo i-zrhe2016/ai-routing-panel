@@ -1,0 +1,15 @@
+[Unit]
+Description=Clash Verge Rev subscription HTTP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/verge_sub
+ExecStart=/usr/bin/python3 /root/verge_sub/server.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -144,6 +144,7 @@ docker compose up -d --build xray-routing-panel-db-backup
 | 查询三节点日志 | [Fluent Bit 日志采集](docs/logging-fluent-bit.md) |
 | 监控节点和生成日报 | [Prometheus-only 运维分析](docs/ops-reporting/index.md) |
 | 迁移或灾难恢复 | [面板迁移](docs/panel-migration.md) → [灾备归档](docs/disaster-backup.md) → [节点快速恢复](docs/node-recovery.md) |
+| AWS 普通数据面迁移 | [AWS 普通数据面迁移与回退](docs/aws-normal-data-plane-migration.md) |
 
 ## 开发与验证
 
@@ -182,6 +183,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 - [SSH 密钥登录与轮换](docs/ssh-key-access.md) — fleet 密钥、容器挂载、验证与回滚。
 - [K3s 部署](docs/kubernetes.md) — Kubernetes 分阶段部署结构和边界。
 - [面板迁移](docs/panel-migration.md) — 控制面数据、配置和服务迁移流程。
+- [AWS 普通数据面迁移与回退](docs/aws-normal-data-plane-migration.md) — 普通数据面灰度迁移、AWS 安全组门禁和回退步骤。
 
 ### 运行、接口与故障处理
 

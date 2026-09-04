@@ -1,0 +1,28 @@
+name: xray-normal-data-plane
+
+services:
+  xray-reality:
+    image: ghcr.io/xtls/xray-core:26.5.3
+    container_name: xray-reality-local
+    restart: unless-stopped
+    network_mode: host
+    user: "0:0"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    command: ["run", "-c", "/etc/xray/config.json"]
+    volumes:
+      - ./app/xray/runtime/config.json:/etc/xray/config.json:ro
+      - ./app/xray/logs:/var/log/xray
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/xray", "run", "-test", "-config", "/etc/xray/config.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

@@ -13,7 +13,7 @@
 7. [AI 路由](ai-routing.md) / [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)：理解 AI 流量链路并执行分层排障。
 8. [DNS 故障切换](dns-failover.md) → [三节点故障容错](fault-tolerance.md)：配置切换机制、备用 Xray 和验收边界。
 9. [Prometheus-only 运维分析](ops-reporting/index.md)：部署观测组件、生成日报、灰度发布和回滚。
-10. [面板迁移](panel-migration.md) / [灾备归档](disaster-backup.md) / [远端节点配置采集](remote-node-backup.md) / [节点快速恢复](node-recovery.md)：迁移、备份和节点替换。
+10. [面板迁移](panel-migration.md) / [AWS 普通数据面迁移与回退](aws-normal-data-plane-migration.md) / [灾备归档](disaster-backup.md) / [远端节点配置采集](remote-node-backup.md) / [节点快速恢复](node-recovery.md)：迁移、备份和节点替换。
 
 ## 开始使用
 
@@ -30,6 +30,7 @@
 - [SSH 密钥登录与轮换](ssh-key-access.md) — fleet 密钥、容器只读挂载、验证和回滚。
 - [K3s 部署](kubernetes.md) — Kubernetes 分阶段部署结构和边界。
 - [面板迁移](panel-migration.md) — 控制面数据、配置和服务迁移。
+- [AWS 普通数据面迁移与回退](aws-normal-data-plane-migration.md) — 普通数据面 AWS 灰度迁移、切换和回退。
 
 ## 运行、接口与故障处理
 
