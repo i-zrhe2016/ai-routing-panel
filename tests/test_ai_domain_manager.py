@@ -397,6 +397,34 @@ class AiDomainManagerTest(unittest.TestCase):
         ):
             self.assertTrue(ai_domain_manager.matches_forced_ai_route_domain(domain))
 
+    def test_aws_domain_families_are_forced_to_ai_route(self):
+        for domain in (
+            "s3.amazonaws.com",
+            "cognito-identity.us-west-2.amazonaws.com",
+            "s3.cn-north-1.amazonaws.com.cn",
+            "s3.cn-north-1.api.amazonwebservices.com.cn",
+            "checkip.global.api.aws",
+            "my-function.lambda-url.us-east-1.on.aws",
+            "console.aws.amazon.com",
+            "signin.aws.amazon.com",
+            "directory.awsapps.com",
+            "login.awsapps.cn",
+            "cdn.awsstatic.com",
+            "cdn.us-east-1.prod.moon.dubai.aws.dev",
+            "redirect.prod.experiment.routing.cloudfront.aws.a2z.com",
+            "foo.aws",
+        ):
+            self.assertTrue(ai_domain_manager.matches_forced_ai_route_domain(domain))
+
+    def test_aws_shared_domain_families_are_not_overmatched(self):
+        for domain in (
+            "www.amazon.com",
+            "cdn.example.cloudfront.net",
+            "video.example.live-video.net",
+            "service.a2z.com",
+        ):
+            self.assertFalse(ai_domain_manager.matches_forced_ai_route_domain(domain))
+
     def test_default_ai_redirect_uses_ipv4(self):
         payload, reason = ai_domain_manager.render_proxy_template(
             Path("/does/not/exist"),

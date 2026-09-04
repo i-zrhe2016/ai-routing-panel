@@ -41,6 +41,28 @@ FORCED_AI_ROUTE_DOMAIN_SUFFIXES = (
     "gemini.gstatic.com",
     "generativelanguage.googleapis.com",
     "scholar.google.com",
+    # AWS service APIs use *.amazonaws.com, while China and newer dual-stack
+    # endpoints also use *.amazonaws.com.cn, *.api.aws, and *.on.aws.
+    "amazonaws.com",
+    "amazonaws.com.cn",
+    "amazonaws.cn",
+    "amazonwebservices.com.cn",
+    "api.aws",
+    "on.aws",
+    # AWS console, sign-in, static assets, and dedicated AWS domains. Keep the
+    # match scoped to AWS-owned families; amazon.com and cloudfront.net are
+    # shared with unrelated consumer sites and are intentionally excluded.
+    "aws",
+    "aws.amazon.com",
+    "awsapps.com",
+    "awsapps.cn",
+    "awscloud.com",
+    "aws.dev",
+    "aws.com",
+    "awsplayer.com",
+    "awsstatic.com",
+    "aws.a2z.com",
+    "aws.a2z.org.cn",
     # Keep ChatGPT's web/API traffic and its static/upload hosts on the same
     # AI egress. Routing only chatgpt.com misses OpenAI API and asset traffic.
     "chatgpt.com",
