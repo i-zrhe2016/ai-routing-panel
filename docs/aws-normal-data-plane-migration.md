@@ -23,6 +23,7 @@
 - Cloudflare `ai.zrhe2016.cc` 的 A 记录已切换到 `52.12.220.85`，TTL 保持 `60`，当前目标为 `primary`；
 - 控制面已改为通过严格 SSH 主机校验管理 `100.92.231.104`，普通节点备份采集已验证成功；
 - 原节点历史归档已复制到 AWS `/root/xray-routing-panel/migration-history/source-normal-data-plane-20260904/`，包含 Xray/系统/Docker 日志、运行目录、systemd/网络/Docker/Tailscale 状态和 Node Exporter/cAdvisor 快照；
+- AWS 主机 nftables 同步脚本已显式保留订阅 HTTPS `443`，防火墙定时器持续运行；
 - 原数据面 `64.186.224.96` 未停止，仍保留为人工回退源；DNS 自动故障备份仍为控制面 `143.198.234.31`；
 - 切换后的 AWS 端口、REALITY 握手、HTTPS 订阅和 DNS 探测均已验证通过。
 
