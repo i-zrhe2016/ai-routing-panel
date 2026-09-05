@@ -2,7 +2,7 @@
 
 ## 总览
 
-控制面负责编排普通数据面，并通过 Tailscale SSH 纳管远端节点；当前 AI 备用运行在控制面本机。AI 路由维护主、备两个候选，支持自动探测和控制台人工固定选择。用户代理流量的正常路径不依赖控制面在线：
+控制面负责编排普通数据面，并通过内网 SSH 直连纳管远端节点；当前 AI 备用运行在控制面本机。AI 路由维护主、备两个候选，支持自动探测和控制台人工固定选择。用户代理流量的正常路径不依赖控制面在线：
 
 ![生产架构图](diagrams/system-architecture.svg)
 
@@ -14,7 +14,7 @@
 - 控制面：`xray-routing-panel`
 - 普通数据面：本地容器、本地二进制，或远端 SSH 目标上的 Xray
 - AI 节点：控制面本机 Docker `xray-ai-node`；如有独立远端 AI 节点也支持 SSH 纳管
-- AI 路由子系统：控制面容器中的 `xray-ai-domain-manager`，通过 Tailscale SSH 或共享工作目录管理普通数据面
+- AI 路由子系统：控制面容器中的 `xray-ai-domain-manager`，通过内网 SSH 或共享工作目录管理普通数据面
 - 备份子系统：`xray-routing-panel-db-backup`
 - 备份归档上传组件：`R2 灾备上传`
 

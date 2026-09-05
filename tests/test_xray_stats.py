@@ -49,6 +49,34 @@ def test_xray_debug_vars_parser_never_persists_raw_user_or_inbound(tmp_path):
     assert "vless-reality-inbound" not in persisted
 
 
+def test_xray_statsquery_payload_is_normalized_for_the_same_redacted_parser():
+    payload = {
+        "stat": [
+            {"name": "user>>>alice@example.com>>>traffic>>>uplink", "value": 100},
+            {"name": "user>>>alice@example.com>>>traffic>>>downlink"},
+            {"name": "inbound>>>vless-reality-inbound>>>traffic>>>uplink", "value": 50},
+            {"name": "outbound>>>direct>>>traffic>>>uplink", "value": 999},
+        ]
+    }
+    redactor = XrayStatsRedactor(b"test-salt")
+
+    samples = parse_xray_debug_vars(
+        payload,
+        source_id="normal-xray",
+        node_role="normal_data_plane",
+        observed_at=datetime(2030, 1, 2, tzinfo=timezone.utc),
+        redactor=redactor,
+    )
+    rows = [sample.as_dict() for sample in samples]
+
+    assert len(rows) == 3
+    assert {row["entity_type"] for row in rows} == {"user", "inbound"}
+    assert {row["value"] for row in rows} == {0, 50, 100}
+    serialized = json.dumps(rows, sort_keys=True)
+    assert "alice@example.com" not in serialized
+    assert "vless-reality-inbound" not in serialized
+
+
 def test_xray_redaction_salt_file_is_created_private(tmp_path):
     salt_file = tmp_path / "xray-stats-salt"
 

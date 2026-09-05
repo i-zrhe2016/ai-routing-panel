@@ -117,13 +117,15 @@ services:
     environment:
       OPS_DB_PATH: /data/xray-ops/ops.db
       OPS_XRAY_STATS_ENABLED: "${OPS_XRAY_STATS_ENABLED:-0}"
+      OPS_XRAY_STATS_NORMAL_ENABLED: "${OPS_XRAY_STATS_NORMAL_ENABLED:-0}"
+      OPS_XRAY_STATS_NORMAL_CONTAINER: "${OPS_XRAY_STATS_NORMAL_CONTAINER:-xray-reality-local}"
       OPS_XRAY_STATS_SAMPLE_INTERVAL_SECONDS: "${OPS_XRAY_STATS_SAMPLE_INTERVAL_SECONDS:-300}"
       OPS_XRAY_STATS_TIMEOUT_SECONDS: "${OPS_XRAY_STATS_TIMEOUT_SECONDS:-15}"
       OPS_XRAY_STATS_REDACTION_SALT_FILE: /data/xray-ops/xray-stats-redaction-salt
-      OPS_XRAY_STATS_SSH_KEY_FILE: /run/secrets/xray_stats_ssh_key
       OPS_XRAY_STATS_AI_ENABLED: "${OPS_XRAY_STATS_AI_ENABLED:-0}"
       OPS_XRAY_STATS_AI_SOURCE_ID: "${OPS_XRAY_STATS_AI_SOURCE_ID:-ai-xray}"
       OPS_XRAY_STATS_AI_SSH_TARGET: "${OPS_XRAY_STATS_AI_SSH_TARGET:-}"
+      OPS_XRAY_STATS_NORMAL_KNOWN_HOSTS: /run/secrets/xray_stats_normal_known_hosts
       OPS_XRAY_STATS_AI_KNOWN_HOSTS: /run/secrets/xray_stats_ai_known_hosts
       OPS_XRAY_STATS_AI_SSH_OPTIONS: "${OPS_XRAY_STATS_AI_SSH_OPTIONS:-}"
       OPS_XRAY_STATS_AI_CONTAINER: "${OPS_XRAY_STATS_AI_CONTAINER:-xray}"
@@ -134,8 +136,8 @@ services:
         source: "${OPS_DATA_DIR:-./data/xray-ops}"
         target: /data/xray-ops
       - type: bind
-        source: "${OPS_XRAY_STATS_SSH_KEY_HOST_PATH:-/dev/null}"
-        target: /run/secrets/xray_stats_ssh_key
+        source: "${OPS_XRAY_STATS_NORMAL_KNOWN_HOSTS_HOST_PATH:-/dev/null}"
+        target: /run/secrets/xray_stats_normal_known_hosts
         read_only: true
       - type: bind
         source: "${OPS_XRAY_STATS_AI_KNOWN_HOSTS_HOST_PATH:-/dev/null}"

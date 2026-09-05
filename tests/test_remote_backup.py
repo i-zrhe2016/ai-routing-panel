@@ -29,7 +29,7 @@ class RemoteBackupTest(unittest.TestCase):
     def setUpClass(cls):
         cls.module = load_module()
 
-    def test_read_remote_uses_strict_host_checking_and_private_key(self):
+    def test_read_remote_uses_direct_password_ssh_and_strict_host_checking(self):
         node = self.module.RemoteNode(
             role="normal-data-plane",
             target="root@data-plane",
@@ -39,16 +39,19 @@ class RemoteBackupTest(unittest.TestCase):
         response = {"version": 1, "role": node.role, "files": []}
         completed = SimpleNamespace(returncode=0, stdout=json.dumps(response), stderr="")
         with patch.object(self.module.subprocess, "run", return_value=completed) as run:
-            result = self.module.read_remote(node, Path("/tmp/identity"), 12, 2048)
+            result = self.module.read_remote(node, 12, 2048)
 
         self.assertEqual(result, response)
         command = run.call_args.args[0]
         self.assertIn("StrictHostKeyChecking=yes", command)
-        self.assertIn("PreferredAuthentications=publickey", command)
-        self.assertIn("PasswordAuthentication=no", command)
-        self.assertIn("KbdInteractiveAuthentication=no", command)
+        self.assertIn("BatchMode=no", command)
+        self.assertIn("PubkeyAuthentication=no", command)
+        self.assertIn("PreferredAuthentications=password,keyboard-interactive", command)
+        self.assertIn("PasswordAuthentication=yes", command)
+        self.assertIn("KbdInteractiveAuthentication=yes", command)
+        self.assertIn("ChallengeResponseAuthentication=yes", command)
         self.assertIn("UserKnownHostsFile=/tmp/known_hosts", command)
-        self.assertIn("/tmp/identity", command)
+        self.assertNotIn("-i", command)
         self.assertIn("XRAY_BACKUP_REMOTE_MAX_FILE_BYTES=2048", command[-1])
 
     def test_ssh_options_cannot_override_identity_or_known_hosts(self):
@@ -72,7 +75,7 @@ class RemoteBackupTest(unittest.TestCase):
         )
         with patch.object(self.module.subprocess, "run", return_value=completed):
             with self.assertRaisesRegex(RuntimeError, "invalid SSH collection response"):
-                self.module.read_remote(node, Path("/tmp/identity"), 12, 2048)
+                self.module.read_remote(node, 12, 2048)
 
     def test_write_collection_verifies_checksum_and_preserves_node_path(self):
         data = b'{"inbounds": []}\n'
@@ -114,7 +117,7 @@ class RemoteBackupTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaisesRegex(RuntimeError, "missing SSH target"):
-                self.module.collect_nodes(Path(tmpdir), (node,), None, required=True)
+                self.module.collect_nodes(Path(tmpdir), (node,), required=True)
 
     def test_strict_mode_skips_unconfigured_remote_ai_target(self):
         node = self.module.RemoteNode(
@@ -124,7 +127,7 @@ class RemoteBackupTest(unittest.TestCase):
             known_hosts="/tmp/known_hosts_ai",
         )
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = self.module.collect_nodes(Path(tmpdir), (node,), None, required=True)
+            result = self.module.collect_nodes(Path(tmpdir), (node,), required=True)
 
         self.assertEqual(result[0]["status"], "skipped_no_target")
         self.assertFalse(result[0]["recoveryReady"])
@@ -183,7 +186,7 @@ class RemoteBackupTest(unittest.TestCase):
         self.assertEqual(ai.ssh_port, "2222")
         self.assertIn("/opt/xray/.env", ai.paths)
 
-    def test_build_nodes_defaults_to_tailscale_normal_target_and_no_remote_ai_target(self):
+    def test_build_nodes_defaults_to_private_network_normal_target_and_no_remote_ai_target(self):
         original = os.environ.copy()
         try:
             for name in (
@@ -199,7 +202,7 @@ class RemoteBackupTest(unittest.TestCase):
             os.environ.clear()
             os.environ.update(original)
 
-        self.assertEqual(normal.target, "root@100.65.108.93")
+        self.assertEqual(normal.target, "root@100.116.187.106")
         self.assertEqual(normal.ssh_port, "22")
         self.assertEqual(ai.target, "")
         self.assertEqual(ai.ssh_port, "22")

@@ -20,7 +20,7 @@
   - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`）以及探针/AI 仪表盘
   - 前端发布资源位于 `app/static/admin/*`、`app/static/portal/*` 与 `app/static/landing/*`；Admin 源码与 Vite 配置位于 `frontend/`，构建产物写回 `app/static/admin/*`
   - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
-  - 通过 Tailscale SSH 纳管普通数据面；AI 节点当前是控制面本机 Docker `xray-ai-node`，也支持显式切换为远端 SSH 模式
+  - 通过内网 SSH 直连纳管普通数据面；AI 节点当前是控制面本机 Docker `xray-ai-node`，也支持显式切换为远端 SSH 模式
   - 维护 `dns_failover_state` / `dns_failover_history`
 - 普通数据面（`xray-reality-local` 或远端数据面）
   - 实际承载 `VLESS + REALITY` 流量
@@ -244,7 +244,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 ## 灾备归档与 R2 上传
 
-默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过 Tailscale 严格只读 SSH 采集普通数据面 `redacted-ip-003:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
+默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过内网直连 SSH 以只读方式采集普通数据面 `root@100.116.187.106:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
 
 Compose 备份服务默认会在备份完成后自动加密并上传到 Cloudflare R2；首次部署前请在根 `.env` 中填入：
 

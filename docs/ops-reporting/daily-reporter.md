@@ -56,9 +56,9 @@ AI 域名分析使用 `ai_domain_analysis` 字段写入日报 JSON，并在 Mark
 | `OPS_XRAY_STATS_ENABLED` | `0` | 是否启用归因采样器。 |
 | `OPS_XRAY_STATS_SAMPLE_INTERVAL_SECONDS` | `300` | 脱敏 counter 快照采样间隔。 |
 | `OPS_XRAY_STATS_REDACTION_SALT_FILE` | `/data/xray-ops/xray-stats-redaction-salt` | 本地 HMAC 盐文件；不进入 GitHub 归档。 |
-| `OPS_XRAY_STATS_SSH_KEY_HOST_PATH` | `/dev/null` | 宿主机 SSH 私钥挂载源，仅采样器使用。 |
 | `OPS_XRAY_STATS_AI_ENABLED` | `0` | 是否启用 AI 数据面 Xray stats 源。 |
 | `OPS_XRAY_STATS_AI_SSH_TARGET` | 空 | AI 节点 SSH 管理端点。 |
+| `OPS_XRAY_STATS_NORMAL_KNOWN_HOSTS_HOST_PATH` | `/dev/null` | 普通数据面 SSH 的宿主机 known_hosts 挂载源；启用普通 SSH stats 时必须提供已核验文件。 |
 | `OPS_XRAY_STATS_AI_KNOWN_HOSTS_HOST_PATH` | `/dev/null` | 宿主机 known_hosts 挂载源。 |
 | `OPS_XRAY_STATS_AI_CONTAINER` | `xray` | 远端 Xray 容器名。 |
 | `OPS_XRAY_STATS_AI_METRICS_PORT` | `31097` | 容器内 `/debug/vars` 端口。 |

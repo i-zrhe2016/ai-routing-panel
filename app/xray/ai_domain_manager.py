@@ -1834,7 +1834,6 @@ def build_data_plane_controller(args):
             ssh_target=args.data_plane_ssh_target,
             ssh_bin=args.data_plane_ssh_bin,
             ssh_options=tuple(args.data_plane_ssh_options),
-            ssh_key_file=str(getattr(args, "data_plane_ssh_key_file", "") or "").strip(),
             ssh_known_hosts_file=str(getattr(args, "data_plane_ssh_known_hosts_file", "") or "").strip(),
             remote_command_timeout=float(getattr(args, "data_plane_remote_command_timeout", 8.0) or 8.0),
             config_path=args.data_plane_config_path,
@@ -2118,9 +2117,6 @@ def build_args():
     args.data_plane_ssh_options = tuple(
         shlex.split(os.environ.get("DATAPLANE_SSH_OPTIONS", "").strip())
     ) if os.environ.get("DATAPLANE_SSH_OPTIONS", "").strip() else ()
-    args.data_plane_ssh_key_file = os.environ.get(
-        "DATAPLANE_SSH_KEY_FILE", "/run/secrets/fleet_ssh_key"
-    ).strip()
     args.data_plane_ssh_known_hosts_file = os.environ.get(
         "DATAPLANE_SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts"
     ).strip()

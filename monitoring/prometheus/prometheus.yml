@@ -36,8 +36,8 @@ scrape_configs:
 
   - job_name: data-plane-node
     static_configs:
-      # The normal data-plane exporter is reachable from the control plane over Tailscale.
-      - targets: ["100.65.108.93:19100"]
+      # The normal data-plane exporter is reachable from the control plane over the private network.
+      - targets: ["100.116.187.106:19100"]
         labels:
           host: normal-data-plane
           node_id: normal-01
@@ -56,7 +56,7 @@ scrape_configs:
   - job_name: data-plane-cadvisor
     static_configs:
       # Keep cAdvisor on the same private management path as node_exporter.
-      - targets: ["100.65.108.93:18081"]
+      - targets: ["100.116.187.106:18081"]
         labels:
           host: normal-data-plane
           node_id: normal-01

@@ -24,9 +24,8 @@ services:
       XRAY_ACCESS_LOG_PATH: "/app/xray/logs/access.log"
       XRAY_CLIENT_CONFIG_PATH: "/app/xray/runtime/client-test.json"
       AI_ROUTING_ENABLED: "${AI_ROUTING_ENABLED:-1}"
-      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@100.65.108.93}"
+      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@100.116.187.106}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
-      DATAPLANE_SSH_KEY_FILE: "${DATAPLANE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
       DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DATAPLANE_REMOTE_COMMAND_TIMEOUT: "${DATAPLANE_REMOTE_COMMAND_TIMEOUT:-8}"
       DATAPLANE_API_SERVER: "${DATAPLANE_API_SERVER:-127.0.0.1:10085}"
@@ -44,7 +43,6 @@ services:
       AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET-}"
       AI_NODE_SSH_BIN: "${AI_NODE_SSH_BIN:-ssh}"
       AI_NODE_SSH_OPTIONS: "${AI_NODE_SSH_OPTIONS:-}"
-      AI_NODE_SSH_KEY_FILE: "${AI_NODE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
       AI_NODE_SSH_KNOWN_HOSTS: "${AI_NODE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
       AI_NODE_CONTAINER_NAME: "${AI_NODE_CONTAINER_NAME:-}"
       AI_NODE_RESTART_COMMAND: "${AI_NODE_RESTART_COMMAND:-}"
@@ -96,7 +94,6 @@ services:
     volumes:
       - ./data:/data
       - ./app/xray:/app/xray
-      - /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
       - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -134,16 +131,15 @@ services:
       DB_BACKUP_RECOVERY_STATUS_PATH: "${DB_BACKUP_RECOVERY_STATUS_PATH:-/backups/node-recovery-status.json}"
       DB_BACKUP_OPS_DB_PATH: "${DB_BACKUP_OPS_DB_PATH:-/ops-data/ops.db}"
       DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/k8s,/project/app/xray/.env,/project/app/xray/runtime,/project/app/xray/reports,/project/scripts,/data/uploads}"
-      # Read the actual normal/AI node files over the Tailscale SSH network
+      # Read the actual normal/AI node files over the private SSH network
       # before bundling. Both management endpoints use the standard SSH port.
       DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-1}"
       DB_BACKUP_SSH_COLLECTION_REQUIRED: "${DB_BACKUP_SSH_COLLECTION_REQUIRED:-0}"
-      DB_BACKUP_SSH_KEY_PATH: "${DB_BACKUP_SSH_KEY_PATH:-/run/secrets/fleet_ssh_key}"
       DB_BACKUP_SSH_KNOWN_HOSTS: "${DB_BACKUP_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DB_BACKUP_SSH_OPTIONS: "${DB_BACKUP_SSH_OPTIONS:-}"
       DB_BACKUP_SSH_TIMEOUT_SECONDS: "${DB_BACKUP_SSH_TIMEOUT_SECONDS:-20}"
       DB_BACKUP_SSH_MAX_FILE_BYTES: "${DB_BACKUP_SSH_MAX_FILE_BYTES:-5242880}"
-      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-root@100.65.108.93}"
+      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-root@100.116.187.106}"
       DB_BACKUP_DATAPLANE_SSH_PORT: "${DB_BACKUP_DATAPLANE_SSH_PORT:-22}"
       DB_BACKUP_DATAPLANE_KNOWN_HOSTS: "${DB_BACKUP_DATAPLANE_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DB_BACKUP_DATAPLANE_SSH_OPTIONS: "${DB_BACKUP_DATAPLANE_SSH_OPTIONS:-}"
@@ -167,7 +163,6 @@ services:
       - ./scripts:/app/scripts:ro
       - ./:/project:ro
       - /srv/xray-ops:/ops-data:ro
-      - /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
       - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - ./logs:/var/log
@@ -245,9 +240,8 @@ services:
       DATAPLANE_RESTART_COMMAND: "${DATAPLANE_RESTART_COMMAND:-}"
       DATAPLANE_CONFIG_PATH: "${DATAPLANE_CONFIG_PATH:-}"
       DATAPLANE_DYNAMIC_ROUTING_PATH: "${DATAPLANE_DYNAMIC_ROUTING_PATH:-}"
-      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@100.65.108.93}"
+      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@100.116.187.106}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
-      DATAPLANE_SSH_KEY_FILE: "${DATAPLANE_SSH_KEY_FILE:-/run/secrets/fleet_ssh_key}"
       DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DATAPLANE_REMOTE_COMMAND_TIMEOUT: "${DATAPLANE_REMOTE_COMMAND_TIMEOUT:-8}"
       DATAPLANE_ACCESS_LOG_PATH: "${DATAPLANE_ACCESS_LOG_PATH:-}"
@@ -257,8 +251,8 @@ services:
       - ./:/workspace
       - ./data:/panel-data
       - /var/run/docker.sock:/var/run/docker.sock
-      - /root/.ssh:/root/.ssh:ro
-      - /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
+      - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+      - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - /root/.codex:/host-codex-home:ro
   xray-ai-node:
     profiles: ["ai-node"]

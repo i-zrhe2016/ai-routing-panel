@@ -412,7 +412,6 @@ class DataPlaneConfig:
     ssh_target: str = ""
     ssh_bin: str = "ssh"
     ssh_options: tuple[str, ...] = ()
-    ssh_key_file: str = ""
     ssh_known_hosts_file: str = ""
     remote_command_timeout: float = 8.0
     config_path: str = ""
@@ -534,17 +533,18 @@ class DataPlaneController:
 
     def _normalized_ssh_options(self):
         options = list(self.config.ssh_options or ())
-        key_file = str(self.config.ssh_key_file or "").strip()
         known_hosts_file = str(self.config.ssh_known_hosts_file or "").strip()
 
-        # These options are appended after user-provided options so a stale
-        # SSH config cannot re-enable password or keyboard-interactive auth.
+        # These options are appended after user-provided options so an old
+        # environment value cannot re-enable key authentication or override
+        # the direct internal-network connection policy.
         forced_keys = {
             "batchmode",
             "challengeresponseauthentication",
             "identitiesonly",
             "kbdinteractiveauthentication",
             "passwordauthentication",
+            "pubkeyauthentication",
             "preferredauthentications",
             "stricthostkeychecking",
             "userknownhostsfile",
@@ -578,22 +578,20 @@ class DataPlaneController:
             normalized.append(token)
             index += 1
 
-        if key_file:
-            normalized.extend(("-i", key_file))
         normalized.extend(
             (
                 "-o",
-                "BatchMode=yes",
+                "BatchMode=no",
                 "-o",
-                "PreferredAuthentications=publickey",
+                "PubkeyAuthentication=no",
                 "-o",
-                "PasswordAuthentication=no",
+                "PreferredAuthentications=password,keyboard-interactive",
                 "-o",
-                "KbdInteractiveAuthentication=no",
+                "PasswordAuthentication=yes",
                 "-o",
-                "ChallengeResponseAuthentication=no",
+                "KbdInteractiveAuthentication=yes",
                 "-o",
-                "IdentitiesOnly=yes",
+                "ChallengeResponseAuthentication=yes",
                 "-o",
                 "StrictHostKeyChecking=yes",
             )

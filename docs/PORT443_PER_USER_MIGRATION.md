@@ -5,7 +5,7 @@
 ## 拓扑(务必记住)
 - 控制面/面板:`redacted-ip-008`(DigitalOcean),容器 `xray-routing-panel`
 - 生产数据面:`redacted-ip-011`(DMIT 独立公网 IP),容器 `xray-reality-local`
-- 面板通过 Tailscale **SSH**(`root@redacted-ip-003:22`,key `/run/secrets/fleet_ssh_key`)
+- 面板通过内网 **SSH**(`root@100.116.187.106:22`)，不使用私钥
   同步本地渲染的 `runtime/config.json` 到远端同路径并 `docker restart` 远端容器。
 - 控制面上也有一个同名 `xray-reality-local` 本地容器,**那不是生产**,别搞混。
 

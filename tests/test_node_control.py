@@ -134,14 +134,13 @@ class NodeControlTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "命令执行超时"):
                 controller._run_remote(["true"], "数据面命令失败")
 
-    def test_ssh_key_file_replaces_identity_options_and_forces_identities_only(self):
+    def test_direct_ssh_ignores_identity_options_and_allows_password_auth(self):
         controller = DataPlaneController(
             DataPlaneConfig(
                 role="data_plane",
                 label="数据面",
                 ssh_target="root@example.com",
                 ssh_options=("-i", "/wrong/key", "-o", "IdentitiesOnly=no", "-o", "ConnectTimeout=5"),
-                ssh_key_file="/run/secrets/fleet_ssh_key",
                 ssh_known_hosts_file="/root/.ssh/known_hosts",
             )
         )
@@ -152,12 +151,13 @@ class NodeControlTest(unittest.TestCase):
 
         command = mocked_run.call_args.args[0]
         self.assertNotIn("/wrong/key", command)
-        self.assertIn("/run/secrets/fleet_ssh_key", command)
-        self.assertIn("IdentitiesOnly=yes", command)
-        self.assertIn("BatchMode=yes", command)
-        self.assertIn("PreferredAuthentications=publickey", command)
-        self.assertIn("PasswordAuthentication=no", command)
-        self.assertIn("KbdInteractiveAuthentication=no", command)
+        self.assertNotIn("-i", command)
+        self.assertIn("BatchMode=no", command)
+        self.assertIn("PubkeyAuthentication=no", command)
+        self.assertIn("PreferredAuthentications=password,keyboard-interactive", command)
+        self.assertIn("PasswordAuthentication=yes", command)
+        self.assertIn("KbdInteractiveAuthentication=yes", command)
+        self.assertIn("ChallengeResponseAuthentication=yes", command)
         self.assertIn("StrictHostKeyChecking=yes", command)
         self.assertIn("UserKnownHostsFile=/root/.ssh/known_hosts", command)
         self.assertIn("ConnectTimeout=5", command)

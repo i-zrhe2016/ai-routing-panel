@@ -14,8 +14,8 @@
 - 远端进程不写文件、不修改权限、不执行 `systemctl`/`docker restart`，也不会上传或替换配置。
 - 内容以 Base64 返回，控制面重新计算 SHA-256 后才落入临时 staging 目录。
 - `config.json` 和 `.env` 是节点恢复必需文件；运行时辅助产物是可选文件，缺失会保留在逐文件状态中。
-- staging 文件和 `remote-node-collection.json` 使用 `0600`；临时 SSH 私钥副本同样为 `0600`，任务结束后清理。
-- 私钥、`Docker Secret` 和密码不会写入归档。配置文件在本地打包前是明文，备份目录必须限制为备份服务可读。
+- staging 文件和 `remote-node-collection.json` 使用 `0600`。
+- SSH 私钥不会挂载或写入归档；密码也不会写入环境变量、日志或归档。配置文件在本地打包前是明文，备份目录必须限制为备份服务可读。
 
 ## 三个节点的配置来源
 
@@ -36,23 +36,23 @@ node-recovery-manifest.json
 
 | 节点 | SSH 目标 | 主配置路径 | 配置环境文件 |
 | --- | --- | --- | --- |
-| 普通数据面 | `root@redacted-ip-003:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
+| 普通数据面 | `root@100.116.187.106:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
 | AI 备用 | 本机 Docker `xray-ai-node` | `config/` 下的 `app/xray/runtime/config-ai-node.json` | `config/` 下的 `app/xray/.env` |
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
 
 控制面自己的配置由 `DB_BACKUP_EXTRA_PATHS` 提供。Compose 默认把 `/app/xray/.env` 和 `/app/xray/runtime` 以只读方式挂载到备份服务，因此普通数据面快照来自 SSH，本机 AI 备用快照来自控制面本地目录。
 
-## 密钥与主机校验
+## 认证与主机校验
 
-- 默认密钥：`/run/secrets/fleet_ssh_key`；Compose 从 `/root/.ssh/xray_fleet_ed25519_20260805` 只读挂载。
+- 普通数据面目标：`root@100.116.187.106:22`；控制面直接通过内网连接。
+- SSH 命令不包含 `-i`/`IdentityFile`，也不挂载任何私钥；公钥认证关闭，允许密码和键盘交互认证。
 - 普通数据面 known_hosts：`/root/.ssh/known_hosts`。
 - AI 备用不需要 SSH known_hosts；只有显式启用远端 AI 节点时才配置独立 known_hosts。
-- SSH 强制 `BatchMode=yes`、`PreferredAuthentications=publickey`、`PasswordAuthentication=no`、`KbdInteractiveAuthentication=no`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes`，并设置连接和存活超时。
+- SSH 仍强制 `StrictHostKeyChecking=yes`，并设置连接和存活超时。
 - `DB_BACKUP_SSH_OPTIONS` 以及节点级 options 只允许无边界风险的网络/日志选项（`-4`、`-6`、`-q`/`-v` 和连接超时/keepalive）；身份、known_hosts、代理和远端命令选项会被拒绝。
-- `/root/.ssh` 中的密钥文件如果权限过宽，采集器会复制到任务临时目录并改为 `0600`，避免 OpenSSH 拒绝使用；不会修改源密钥权限。
 
-不要把 root 密码、私钥内容或 R2 Secret Access Key 放在环境变量、日志、Markdown 或归档中。AI 节点当前能够使用统一 fleet 公钥；密码只作为人工应急登录手段，不是自动备份路径。
+不要把 root 密码放在环境变量、日志、Markdown 或归档中。若后台任务需要密码认证，应由部署环境提供受控的 SSH 认证机制；采集器本身不保存密码。
 
 ## 开关与失败策略
 
@@ -60,7 +60,6 @@ node-recovery-manifest.json
 | --- | --- | --- |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | `1` | 是否采集普通数据面；关闭时仍生成控制面本地灾备归档 |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `0`：已配置远端节点失联只写入 manifest；`1`：所有已配置远端节点的必需恢复文件必须成功采集 |
-| `DB_BACKUP_SSH_KEY_PATH` | `/run/secrets/fleet_ssh_key` | 只读 SSH 私钥路径 |
 | `DB_BACKUP_SSH_TIMEOUT_SECONDS` | `20` | 单节点连接/远端读取超时上限 |
 | `DB_BACKUP_SSH_MAX_FILE_BYTES` | `5242880` | 单个远端文件大小上限，默认 5 MiB |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号或换行分隔；配置和 `.env` 是恢复必需文件 |
@@ -89,8 +88,7 @@ node-recovery-manifest.json
 在控制面上执行采集器（不会触碰远端状态）：
 
 ```bash
-DB_BACKUP_SSH_KEY_PATH=/root/.ssh/xray_fleet_ed25519_20260805 \
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@redacted-ip-003 \
+DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.116.187.106 \
 DB_BACKUP_DATAPLANE_SSH_PORT=22 \
 DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts \
 DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json \
@@ -101,7 +99,7 @@ python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-stagi
 
 ## 排障顺序
 
-1. `Permission denied (publickey)`：确认挂载的 key 是 fleet 公钥对应私钥，且 known_hosts 中有目标主机；不要关闭严格主机校验。
+1. `Permission denied`：确认控制面可以通过内网访问 `root@100.116.187.106:22`，并确认目标允许密码/键盘交互认证；不要关闭严格主机校验。
 2. `Host key verification failed`：更新受控的对应 known_hosts 文件，先人工核对指纹，再重新执行。
 3. `missing`：通过只读 `docker inspect`、`systemctl cat` 或部署清单确认宿主机真实路径，再覆盖节点的 `*_REMOTE_PATHS`。
 4. `partial`：查看文件级 status；主配置缺失时不要把 `.env` 采集成功误判为完整配置。

@@ -5,7 +5,7 @@ left to right direction
 
 rectangle "Control plane\nbackup service" as control #AED6F1
 component "collect_remote_backup.py\nSSH read-only collector" as collector #D7BDE2
-node "Normal data plane\nTailscale redacted-ip-003:22\nconfigured host path" as normal #A9DFBF
+node "Normal data plane\nprivate 100.116.187.106:22\nconfigured host path" as normal #A9DFBF
 node "Local AI standby\nDocker xray-ai-node\nconfig-ai-node.json" as ai #A9DFBF
 component "build_backup_bundle.py\nlocal tar.gz + SHA-256 manifest" as bundle #FAD7A0
 component "upload_backup_r2.py\nAES-256-GCM + R2 upload" as uploader #FAD7A0
@@ -22,7 +22,8 @@ uploader --> r2 : encrypted archive\nobject key + SHA-256
 
 note right of collector
   StrictHostKeyChecking=yes
-  IdentitiesOnly=yes
+  PubkeyAuthentication=no
+  PreferredAuthentications=password,keyboard-interactive
   UserKnownHostsFile per node
   No remote writes/restarts
 end note

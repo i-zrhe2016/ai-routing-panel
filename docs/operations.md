@@ -152,7 +152,7 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 - `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`，并生成一个包含配置文件的灾备归档
 - 本地 `.db` 和 `tar.gz` 备份文件均落在 `./backups`
 - 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env`、运行时/报告、`data/uploads` 和部署脚本
-- Compose 还会在打包前通过 Tailscale 上的严格只读 SSH 采集普通数据面（`redacted-ip-003:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
+- Compose 还会在打包前通过内网直连 SSH 以只读方式采集普通数据面（`root@100.116.187.106:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
 - 每个归档都包含 `node-recovery-manifest.json`，任务还会生成 `node-recovery-status.json`，明确标记 `recoveryReady`
 - 远端采集默认是非必需的：普通数据面失联不会丢弃控制面归档；要把普通数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
 - 当 `DB_BACKUP_R2_ENABLED=1` 时，归档成功后会继续调用 `R2 灾备上传`
@@ -174,7 +174,7 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 
 节点替换的演练和应急命令见[节点备份完整性与快速恢复](node-recovery.md)。应急时先执行 `python3 scripts/node_recovery.py validate --bundle <bundle> --require-ready`，再执行 `prepare`，不要直接解压覆盖运行目录。
 
-SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
+SSH 采集的认证、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
 
 ## TCP 探针
 
@@ -290,7 +290,7 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 
 ### `ssh`（远端 SSH 纳管）
 
-- 使用密码文件包装器时，密码只从只读文件读取，不写入环境变量或命令行
+- 使用远端 SSH 时直接走内网连接和密码/键盘交互认证；应用不保存密码或私钥
 - `AI_NODE_SSH_OPTIONS` 必须启用严格主机校验并使用专用 `known_hosts`
 - `AI_NODE_API_SERVER` 用于远端 Socket 状态检查；当前生产检查 `redacted-ip-007:27166`
 - `AI_NODE_CONFIG_PATH` 非空时才支持上传；生产当前显式留空，因此配置上传关闭
@@ -339,8 +339,8 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 
 检查：
 
-- `AI_NODE_SSH_TARGET`、Tailscale SSH 端口 `22` 和专用 `known_hosts` 是否正确
-- 密码文件是否以只读方式挂载，包装器是否能读取它
+- `AI_NODE_SSH_TARGET`、内网 SSH 端口 `22` 和专用 `known_hosts` 是否正确
+- 目标 SSH 服务是否允许密码/键盘交互认证，且人工连接可以完成登录
 - `AI_NODE_API_SERVER` 指向的本机或远端 Socket 是否监听
 - `AI_NODE_PROBE_HOST` 是否指向当前 AI 节点入口
 - `AI_UPSTREAM_HOST:AI_UPSTREAM_PORT` 是否是当前 AI 业务端点

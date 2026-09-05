@@ -8,7 +8,6 @@ from components.xray_ops.collector import (
     DEFAULT_AI_TARGET,
     DEFAULT_NORMAL_KNOWN_HOSTS,
     DEFAULT_NORMAL_TARGET,
-    DEFAULT_SSH_KEY_PATH,
     CollectorService,
     LogStreamConfig,
     NodeConfig,
@@ -17,19 +16,19 @@ from components.xray_ops.remote import RemoteCommandError
 from components.xray_ops.storage import OpsStore
 
 
-def test_from_env_defaults_to_tailscale_key_only_ssh():
+def test_from_env_defaults_to_direct_password_ssh():
     config = CollectorConfig.from_env()
 
     normal, ai = config.nodes
     for node in (normal, ai):
-        assert "BatchMode=yes" in node.ssh_options
-        assert "PreferredAuthentications=publickey" in node.ssh_options
-        assert "PasswordAuthentication=no" in node.ssh_options
-        assert "KbdInteractiveAuthentication=no" in node.ssh_options
-        assert "IdentitiesOnly=yes" in node.ssh_options
+        assert "BatchMode=no" in node.ssh_options
+        assert "PubkeyAuthentication=no" in node.ssh_options
+        assert "PreferredAuthentications=password,keyboard-interactive" in node.ssh_options
+        assert "PasswordAuthentication=yes" in node.ssh_options
+        assert "KbdInteractiveAuthentication=yes" in node.ssh_options
+        assert "ChallengeResponseAuthentication=yes" in node.ssh_options
         assert "StrictHostKeyChecking=yes" in node.ssh_options
-        assert "-i" in node.ssh_options
-        assert DEFAULT_SSH_KEY_PATH in node.ssh_options
+        assert "-i" not in node.ssh_options
 
     assert normal.target == DEFAULT_NORMAL_TARGET
     assert ai.target == DEFAULT_AI_TARGET

@@ -9,7 +9,7 @@
 3. [配置说明](configuration.md)：配置根 `.env`、Xray 参数、节点和可选组件。
 4. [开发与启动](development.md)：本地开发、Docker 启动、测试和调试。
 5. [运维与排障](operations.md) / [Clash REALITY 健康检查超时排障](troubleshooting/clash-reality-health-check-timeout.md) / [API 与页面路径](api.md) / [Fluent Bit 日志采集](logging-fluent-bit.md)：运行检查、监控、日志、接口和常见运维动作。
-6. [AI 节点部署](ai-node-deployment.md) → [AI 节点独立凭据](ai-node-credentials.md) → [SSH 密钥登录与轮换](ssh-key-access.md)：部署本机 AI 备用或纳管独立远端 AI 数据面。
+6. [AI 节点部署](ai-node-deployment.md) → [AI 节点独立凭据](ai-node-credentials.md) → [内网 SSH 纳管](ssh-key-access.md)：部署本机 AI 备用或纳管独立远端 AI 数据面。
 7. [AI 路由](ai-routing.md) / [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)：理解 AI 流量链路并执行分层排障。
 8. [DNS 故障切换](dns-failover.md) → [三节点故障容错](fault-tolerance.md)：配置切换机制、备用 Xray 和验收边界。
 9. [Prometheus-only 运维分析](ops-reporting/index.md)：部署观测组件、生成日报、灰度发布和回滚。
@@ -27,7 +27,7 @@
 - [AI 节点部署与 SSH 纳管](ai-node-deployment.md) — 本机 AI 备用、独立 AI 数据面部署、状态检查和同步保护。
 - [AI 节点独立凭据](ai-node-credentials.md) — AI inbound/outbound 凭据契约和轮换边界。
 - [Cloudflare Access 邮箱登录](cloudflare-access-email-login.md) — 控制面 Email OTP 登录、Access 策略和源站边界。
-- [SSH 密钥登录与轮换](ssh-key-access.md) — fleet 密钥、容器只读挂载、验证和回滚。
+- [内网 SSH 纳管](ssh-key-access.md) — 控制面直连普通数据面的认证、主机指纹校验与验证。
 - [K3s 部署](kubernetes.md) — Kubernetes 分阶段部署结构和边界。
 - [面板迁移](panel-migration.md) — 控制面数据、配置和服务迁移。
 - [AWS 普通数据面迁移与回退](aws-normal-data-plane-migration.md) — 普通数据面 AWS 灰度迁移、切换和回退。

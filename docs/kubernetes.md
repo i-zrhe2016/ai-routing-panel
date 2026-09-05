@@ -89,41 +89,33 @@ kubectl apply -k k8s
 
 三个阶段的 `cronjob-backup.yaml` 都执行 `scripts/run_db_backup_cycle.py`，而不是只执行数据库快照脚本。任务会在共享 PVC 的 `backups/` 下生成 `.db` 和 `*-disaster-*.tar.gz`；默认把共享卷的 `/app/xray/runtime`、Secret 提供的 `/app/xray/.env` 和 `/data/uploads` 纳入归档。
 
-Kubernetes 清单默认不启用远端 SSH 采集（`DB_BACKUP_SSH_COLLECTION_ENABLED` 未设置时脚本默认 `0`），因为仓库不能携带生产私钥和 known_hosts。若需要把普通数据面的实际配置也纳入灾备，按以下最小边界扩展备份 CronJob；本机 AI 配置由控制面运行时目录归档：
+Kubernetes 清单默认不启用远端 SSH 采集（`DB_BACKUP_SSH_COLLECTION_ENABLED` 未设置时脚本默认 `0`）。若需要把普通数据面的实际配置也纳入灾备，按以下最小边界扩展备份 CronJob；本机 AI 配置由控制面运行时目录归档：
 
-1. 创建只包含 fleet 私钥的 Secret，并创建只包含已核验主机指纹的 Secret；两个 Secret 都只挂载到备份容器、使用 `readOnly: true`。
-2. 在备份容器加入 `/run/secrets/fleet_ssh_key`、`/root/.ssh/known_hosts` 和 `/root/.ssh/known_hosts_ai` 三个挂载。
-3. 通过 Secret 或受控的环境注入设置 `DB_BACKUP_SSH_COLLECTION_ENABLED=1`、普通数据面的 SSH target/port/path；Tailscale SSH 管理端口为 22。
+1. 创建只包含已核验主机指纹的 Secret，只挂载到备份容器并使用 `readOnly: true`；不要挂载登录私钥。
+2. 在备份容器加入 `/root/.ssh/known_hosts` 和 `/root/.ssh/known_hosts_ai` 挂载。
+3. 通过 Secret 或受控的环境注入设置 `DB_BACKUP_SSH_COLLECTION_ENABLED=1`、普通数据面的内网 SSH target/port/path；SSH 管理端口为 22。
 4. 先保持 `DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 观察 `nodes/remote-node-collection.json`，确认普通数据面 `configCollected=true` 后，再按发布门禁需要改为 `1`。
 
-示例（内容值仅为占位符，不要提交真实 key）：
+示例（内容值仅为占位符，不要提交真实主机指纹）：
 
 ```yaml
 volumes:
-  - name: fleet-ssh-key
+  - name: node-known-hosts
     secret:
-      X xray-fleet-ssh
-      defaultMode: 0600
-  - name: fleet-known-hosts
-    secret:
-      X xray-fleet-known-hosts
+      secretName: xray-node-known-hosts
       defaultMode: 0600
 volumeMounts:
-  - name: fleet-ssh-key
-    mountPath: /run/secrets/fleet_ssh_key
-    subPath: fleet_ssh_key
-    readOnly: true
-  - name: fleet-known-hosts
+  - name: node-known-hosts
     mountPath: /root/.ssh/known_hosts
     subPath: known_hosts
     readOnly: true
-  - name: fleet-known-hosts
+  - name: node-known-hosts
     mountPath: /root/.ssh/known_hosts_ai
     subPath: known_hosts_ai
     readOnly: true
 ```
 
-Kubernetes 变体若显式启用远端 SSH 采集，普通数据面使用 Tailscale `redacted-ip-003:22`；当前本机 AI 备用不需要 SSH。不要把 AI 业务端口 `27166` 当作 SSH 管理端口。完整采集器安全边界见[远端节点配置采集](remote-node-backup.md)。
+Kubernetes 变体若显式启用远端 SSH 采集，普通数据面使用内网 `100.116.187.106:22`；当前本机 AI 备用不需要 SSH。不要把 AI 业务端口 `27166` 当作 SSH 管理端口。完整采集器安全边界见[远端节点配置采集](remote-node-backup.md)。
 
 如需把 `xray.env`、R2 密钥或其他项目文件加入归档，应通过 Secret/只读挂载提供文件，再在对应 ConfigMap 设置 `DB_BACKUP_EXTRA_PATHS`。R2 上传需显式设置 `DB_BACKUP_R2_ENABLED=1`、归档密码和 R2 认证信息；R2 对象的生命周期和保留策略在 Cloudflare 侧配置，不参与快速恢复。
 

@@ -20,9 +20,8 @@
 | `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台「监控」标签使用该同源地址 |
 | `GRAFANA_OBSERVABILITY_UID` | 「监控」标签内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
-| `DATAPLANE_SSH_TARGET` | 远端数据面 Tailscale SSH 目标；默认 `root@redacted-ip-003` |
-| `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；远端生产环境建议包含 `-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1` |
-| `DATAPLANE_SSH_KEY_FILE` | 远端数据面 SSH 私钥路径；Compose 默认使用只读挂载的 `/run/secrets/fleet_ssh_key`，会自动强制 `IdentitiesOnly=yes` |
+| `DATAPLANE_SSH_TARGET` | 远端数据面内网 SSH 目标；默认 `root@100.116.187.106`（Compose） |
+| `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；认证固定为密码/键盘交互，禁止注入私钥 |
 | `DATAPLANE_SSH_KNOWN_HOSTS` | 数据面主机密钥文件；默认 `/root/.ssh/known_hosts`，严格校验且不接受未知主机 |
 | `DATAPLANE_REMOTE_COMMAND_TIMEOUT` | 单次远程 SSH/Docker 命令的控制面超时，默认 `8` 秒；避免数据面失联拖住控制面任务 |
 | `DATAPLANE_API_SERVER` | 数据面 Xray API 地址，默认 `redacted-ip-007:10085` |
@@ -57,9 +56,8 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | 变量 | 说明 |
 | --- | --- |
 | `AI_NODE_SSH_TARGET` | 可选远端 AI 节点 SSH 目标；当前本机备用为空 |
-| `AI_NODE_SSH_BIN` | SSH 可执行文件或密钥包装器，例如 `/app/scripts/ai-node-ssh` |
-| `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；必须启用严格主机校验和仅公钥认证 |
-| `AI_NODE_SSH_KEY_FILE` | 密钥包装器读取的容器内只读私钥路径；不得把私钥写入环境变量或镜像 |
+| `AI_NODE_SSH_BIN` | SSH 可执行文件；默认 `ssh` |
+| `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；远端纳管使用内网直连和密码/键盘交互认证 |
 | `AI_NODE_SSH_KNOWN_HOSTS` | AI 节点主机密钥文件；默认 `/root/.ssh/known_hosts_ai` |
 | `AI_NODE_CONTAINER_NAME` | 本机 AI 备用 Xray 容器名；当前为 `xray-ai-node` |
 | `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
@@ -111,7 +109,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 - 当前只支持通过 `CF_DNS_RECORD_ID` 更新单条记录
 - 自动切换只看 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
 - DNS 故障切换运行在独立 worker 中，不依赖数据面日志、Xray API、流量统计或配置同步
-- 数据面远程命令受 `DATAPLANE_REMOTE_COMMAND_TIMEOUT` 限制；SSH 连接参数仍建议通过 `DATAPLANE_SSH_OPTIONS` 配置连接超时和 keepalive
+- 数据面远程命令受 `DATAPLANE_REMOTE_COMMAND_TIMEOUT` 限制；SSH 连接参数仍建议通过 `DATAPLANE_SSH_OPTIONS` 配置连接超时和 keepalive。控制面直接连接 `100.116.187.106:22`，不使用私钥。
 - AI 候选故障不触发 DNS 切换：`auto` 模式优先切换到另一候选，全部候选不可达时由 `ai_domain_manager` 回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
 - 若启用高峰窗口，窗口内会把备用/专用节点视为首选目标；窗口外恢复主节点优先
 - 如果是本地数据面且 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP；远端数据面必须显式填写，避免数据面失联时 DNS worker 依赖数据面 SSH
@@ -182,7 +180,7 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - 当前生产候选为主 `nat.qq.pw:27166`、备 `redacted-ip-004:27166`；备用节点使用独立 REALITY 凭据
 - 主 AI 上游同样可能使用独立凭据；动态 VLESS outbound 必须与 AI inbound 完整匹配，不能从普通数据面 `XRAY_*` 盲目派生
 - 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
-- `AI_NODE_SSH_TARGET` 只启用 SSH 纳管；它不证明凭据匹配，也不应自动派生独立 AI 节点的 relay URL
+- `AI_NODE_SSH_TARGET` 只启用 SSH 纳管；它不证明节点凭据匹配，也不应自动派生独立 AI 节点的 relay URL
 
 控制台人工切换使用 `POST /api/ai-routing/switch`：`primary` 和 `backup` 固定对应候选，`auto` 恢复自动探测，`forced_fallback` 让 AI 流量回到数据面直出。固定候选不可达时不会自动改选另一候选，而是报告 `manual_target_unreachable`。
 

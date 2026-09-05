@@ -57,9 +57,6 @@ DATAPLANE_SSH_OPTIONS = parse_shell_words_env(
     os.environ.get("DATAPLANE_SSH_OPTIONS", ""),
     "DATAPLANE_SSH_OPTIONS",
 )
-DATAPLANE_SSH_KEY_FILE = os.environ.get(
-    "DATAPLANE_SSH_KEY_FILE", "/run/secrets/fleet_ssh_key"
-).strip()
 DATAPLANE_SSH_KNOWN_HOSTS = os.environ.get(
     "DATAPLANE_SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts"
 ).strip()
@@ -89,9 +86,6 @@ AI_NODE_SSH_OPTIONS = parse_shell_words_env(
     os.environ.get("AI_NODE_SSH_OPTIONS", ""),
     "AI_NODE_SSH_OPTIONS",
 )
-AI_NODE_SSH_KEY_FILE = os.environ.get(
-    "AI_NODE_SSH_KEY_FILE", "/run/secrets/fleet_ssh_key"
-).strip()
 AI_NODE_SSH_KNOWN_HOSTS = os.environ.get(
     "AI_NODE_SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts_ai"
 ).strip()

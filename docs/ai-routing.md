@@ -2,7 +2,7 @@
 
 ## 主链路
 
-AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过 Tailscale SSH 或共享工作目录管理普通数据面，默认流程如下：
+AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过内网 SSH 或共享工作目录管理普通数据面，默认流程如下：
 
 ![AI 域名路由与回退流程](diagrams/ai-routing-flow.svg)
 
@@ -78,7 +78,7 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 人工固定目标即使当前不可达也允许提交，但确认框会显示不可达状态；系统不会静默改选另一候选。所有人工切换完成后，页面会依据接口返回的最新 dashboard 状态更新当前路径和策略。
 
-远端数据面模式必须配置 `DATAPLANE_SSH_KEY_FILE`。Compose 默认将运维密钥挂载到 `/run/secrets/fleet_ssh_key`，并强制使用 `IdentitiesOnly=yes`，避免 SSH 因尝试过多身份而无法同步配置。
+远端数据面模式通过控制面直接连接内网 SSH 目标 `root@100.116.187.106:22`，不使用或挂载私钥；认证由目标 SSH 服务提供密码/键盘交互方式。主机指纹仍通过受控 `known_hosts` 严格校验。
 
 如果自动模式下所有 AI 上游都不可达，或人工固定的目标不可达：
 

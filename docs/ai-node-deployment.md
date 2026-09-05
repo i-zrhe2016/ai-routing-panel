@@ -120,30 +120,31 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 
 ## SSH 认证边界
 
-本机 AI 备用不需要 SSH。专用 Ed25519 私钥只用于普通数据面和其他仍显式配置的远端节点：
+本机 AI 备用不需要 SSH。显式配置远端节点时，控制面直接通过内网 SSH 连接目标主机，
+不挂载或传递私钥：
 
 ```text
-宿主机 0600 私钥
-  └─ 只读挂载 → /run/secrets/fleet_ssh_key
-                    │
-                    └─ SSH 纳管普通数据面
+控制面 `100.92.231.104`
+  └─ SSH 直连 → 普通数据面 `100.116.187.106:22`
 ```
 
 远端 SSH 纳管时强制：
 
 ```text
-PreferredAuthentications=publickey
-PasswordAuthentication=no
-KbdInteractiveAuthentication=no
+PubkeyAuthentication=no
+PreferredAuthentications=password,keyboard-interactive
+PasswordAuthentication=yes
+KbdInteractiveAuthentication=yes
 StrictHostKeyChecking=yes
 UserKnownHostsFile=/root/.ssh/known_hosts
 ```
 
-不要使用密码认证或 `StrictHostKeyChecking=no`。密钥轮换和恢复流程见 [SSH 密钥登录与轮换](ssh-key-access.md)。
+`known_hosts` 只用于校验主机指纹，不是登录私钥。密码认证由 SSH 会话处理，应用不保存密码。
+完整配置见 [内网 SSH 纳管](ssh-key-access.md)。
 
 ## 根 `.env` 配置
 
-示例不包含密码：
+示例只配置 SSH 目标，不保存密码：
 
 ```env
 AI_NODE_SSH_TARGET=

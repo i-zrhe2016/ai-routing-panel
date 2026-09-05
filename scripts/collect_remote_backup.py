@@ -16,7 +16,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -107,7 +106,6 @@ print(json.dumps({"version": 1, "role": role, "files": files}, ensure_ascii=True
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
-DEFAULT_KEY_PATH = "/run/secrets/fleet_ssh_key"
 DEFAULT_KNOWN_HOSTS = "/root/.ssh/known_hosts"
 DEFAULT_AI_KNOWN_HOSTS = "/root/.ssh/known_hosts_ai"
 DEFAULT_DATAPLANE_CONFIG_PATH = "/root/xray-routing-panel/app/xray/runtime/config.json"
@@ -116,7 +114,7 @@ DEFAULT_DATAPLANE_DEPLOY_ROOT = "/root/xray-routing-panel"
 DEFAULT_AI_CONFIG_PATH = "/etc/xray/config.json"
 DEFAULT_AI_ENV_PATH = "/etc/xray/.env"
 DEFAULT_AI_DEPLOY_ROOT = "/root/xray-routing-panel"
-DEFAULT_NORMAL_TARGET = "root@100.65.108.93"
+DEFAULT_NORMAL_TARGET = "root@100.116.187.106"
 DEFAULT_AI_TARGET = ""
 DEFAULT_AI_SSH_PORT = "22"
 DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -170,9 +168,9 @@ def split_options(value: str) -> tuple[str, ...]:
 
 
 def validate_options(options: tuple[str, ...]) -> None:
-    # The collector owns identity, host-key and command-execution boundaries.
-    # Do not let an environment value append a last-option-wins override such
-    # as IdentityFile, UserKnownHostsFile, ProxyCommand or RemoteCommand.
+    # The collector owns authentication, host-key and command-execution
+    # boundaries. Direct management intentionally does not accept an identity
+    # file or a public-key-auth override.
     allowed_flags = {"-4", "-6", "-q", "-v", "-vv", "-vvv"}
     allowed_keys = {
         "compression",
@@ -186,6 +184,7 @@ def validate_options(options: tuple[str, ...]) -> None:
         "controlmaster",
         "controlpath",
         "identityfile",
+        "pubkeyauthentication",
         "localcommand",
         "proxycommand",
         "proxyjump",
@@ -365,30 +364,22 @@ def build_nodes() -> tuple[RemoteNode, ...]:
     )
 
 
-def resolve_key_path() -> Path:
-    configured = str(os.environ.get("DB_BACKUP_SSH_KEY_PATH", DEFAULT_KEY_PATH)).strip()
-    candidates = [Path(configured), Path("/root/ssh-keys/xray_fleet_ed25519_20260805")]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise FileNotFoundError(f"SSH identity file not found: {configured}")
-
-
-def read_remote(node: RemoteNode, key_path: Path, timeout: int, max_bytes: int) -> dict:
+def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
+    validate_options(node.options)
     options = (
         *node.options,
         "-o",
-        "BatchMode=yes",
+        "BatchMode=no",
         "-o",
-        "PreferredAuthentications=publickey",
+        "PubkeyAuthentication=no",
         "-o",
-        "PasswordAuthentication=no",
+        "PreferredAuthentications=password,keyboard-interactive",
         "-o",
-        "KbdInteractiveAuthentication=no",
+        "PasswordAuthentication=yes",
         "-o",
-        "ChallengeResponseAuthentication=no",
+        "KbdInteractiveAuthentication=yes",
         "-o",
-        "IdentitiesOnly=yes",
+        "ChallengeResponseAuthentication=yes",
         "-o",
         "StrictHostKeyChecking=yes",
         "-o",
@@ -399,8 +390,6 @@ def read_remote(node: RemoteNode, key_path: Path, timeout: int, max_bytes: int) 
         "ServerAliveInterval=5",
         "-o",
         "ServerAliveCountMax=1",
-        "-i",
-        str(key_path),
         "-p",
         node.ssh_port,
     )
@@ -522,9 +511,7 @@ def write_collection(output_dir: Path, node: RemoteNode, payload: dict) -> dict:
 def collect_nodes(
     output_dir: Path,
     nodes: tuple[RemoteNode, ...],
-    key_path: Path | None,
     required: bool,
-    key_error: str = "",
 ) -> list[dict]:
     results = []
     timeout = parse_non_negative_int(os.environ.get("DB_BACKUP_SSH_TIMEOUT_SECONDS", "20"), 20)
@@ -553,24 +540,8 @@ def collect_nodes(
                 }
             )
             continue
-        if key_path is None:
-            results.append(
-                {
-                    "role": node.role,
-                    "target": node.target,
-                    "sshPort": node.ssh_port,
-                    "knownHosts": node.known_hosts,
-                    "requestedPaths": list(node.paths),
-                    "status": "skipped_no_key",
-                    "error": key_error,
-                    "requiredPaths": list(node.required_paths or node.paths[:1]),
-                    "restoreRoot": node.restore_root,
-                    "recoveryReady": False,
-                }
-            )
-            continue
         try:
-            payload = read_remote(node, key_path, timeout, max_bytes)
+            payload = read_remote(node, timeout, max_bytes)
             node_result = write_collection(output_dir, node, payload)
             results.append(node_result)
             if required and not node_result.get("recoveryReady", False):
@@ -611,33 +582,15 @@ def collect_remote_configs(output_dir: Path, required: bool = False) -> dict:
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "nodes": [],
     }
-    key_temp = None
-    try:
-        source_key_path = resolve_key_path()
-        key_temp = tempfile.TemporaryDirectory(prefix="xray-backup-ssh-key-")
-        key_path = Path(key_temp.name) / "identity"
-        shutil.copyfile(source_key_path, key_path)
-        os.chmod(key_path, 0o600)
-    except FileNotFoundError as exc:
-        if required:
-            raise
-        key_path = None
-        key_error = str(exc)
-    try:
-        manifest["nodes"] = collect_nodes(
-            output_dir,
-            nodes,
-            key_path,
-            required,
-            key_error if key_path is None else "",
-        )
-        manifest_path = output_dir / "remote-node-collection.json"
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.chmod(manifest_path, 0o600)
-        return {"output_dir": output_dir, "manifest_path": manifest_path, "manifest": manifest}
-    finally:
-        if key_temp is not None:
-            key_temp.cleanup()
+    manifest["nodes"] = collect_nodes(
+        output_dir,
+        nodes,
+        required,
+    )
+    manifest_path = output_dir / "remote-node-collection.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.chmod(manifest_path, 0o600)
+    return {"output_dir": output_dir, "manifest_path": manifest_path, "manifest": manifest}
 
 
 def parse_args() -> argparse.Namespace:

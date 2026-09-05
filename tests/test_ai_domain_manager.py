@@ -233,7 +233,6 @@ class AiDomainManagerTest(unittest.TestCase):
             data_plane_restart_command="",
             data_plane_ssh_bin="ssh",
             data_plane_ssh_options=(),
-            data_plane_ssh_key_file="/run/secrets/fleet_ssh_key",
             data_plane_ssh_known_hosts_file="/root/.ssh/known_hosts",
             data_plane_remote_command_timeout=30.0,
             data_plane_dynamic_routing_path="/root/xray/runtime/dynamic-routing.json",

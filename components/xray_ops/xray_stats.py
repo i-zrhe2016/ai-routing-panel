@@ -29,6 +29,8 @@ DEFAULT_DB_PATH = "/data/xray-ops/ops.db"
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 300
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 15
 DEFAULT_AI_METRICS_PORT = 31097
+DEFAULT_NORMAL_KNOWN_HOSTS = "/root/.ssh/known_hosts"
+DEFAULT_AI_KNOWN_HOSTS = "/root/.ssh/known_hosts_ai"
 SERVICE_NAME = "xray_attribution_sampler"
 ENTITY_PREFIXES = {"user": "usr", "inbound": "inb"}
 DIRECTIONS = ("uplink", "downlink")
@@ -99,12 +101,12 @@ class XrayStatsSourceConfig:
     enabled: bool
     debug_vars_url: str
     ssh_target: str = ""
-    ssh_key_file: str = ""
     ssh_known_hosts: str = ""
     ssh_options: tuple[str, ...] = ()
     ssh_bin: str = "ssh"
     container_name: str = ""
     docker_bin: str = "docker"
+    xray_bin: str = "/usr/local/bin/xray"
     metrics_port: int = DEFAULT_AI_METRICS_PORT
     timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS
 
@@ -122,7 +124,6 @@ class XrayStatsSamplerConfig:
         enabled = _env_bool("OPS_XRAY_STATS_ENABLED", False)
         timeout = _env_int("OPS_XRAY_STATS_TIMEOUT_SECONDS", DEFAULT_COMMAND_TIMEOUT_SECONDS)
         ssh_bin = str(os.environ.get("OPS_XRAY_STATS_SSH_BIN", "ssh")).strip() or "ssh"
-        ssh_key_file = str(os.environ.get("OPS_XRAY_STATS_SSH_KEY_FILE", "")).strip()
         global_ssh_options = _split_options(os.environ.get("OPS_XRAY_STATS_SSH_OPTIONS", ""))
         sources = (
             _source_from_env(
@@ -131,11 +132,12 @@ class XrayStatsSamplerConfig:
                 default_role=NORMAL_DATA_PLANE,
                 default_enabled=False,
                 global_enabled=enabled,
-                global_ssh_key_file=ssh_key_file,
                 global_ssh_options=global_ssh_options,
                 ssh_bin=ssh_bin,
                 timeout_seconds=timeout,
                 default_metrics_port=10085,
+                default_target="root@100.116.187.106",
+                default_known_hosts=DEFAULT_NORMAL_KNOWN_HOSTS,
             ),
             _source_from_env(
                 prefix="OPS_XRAY_STATS_AI",
@@ -143,11 +145,12 @@ class XrayStatsSamplerConfig:
                 default_role=AI_DATA_PLANE,
                 default_enabled=False,
                 global_enabled=enabled,
-                global_ssh_key_file=ssh_key_file,
                 global_ssh_options=global_ssh_options,
                 ssh_bin=ssh_bin,
                 timeout_seconds=timeout,
                 default_metrics_port=DEFAULT_AI_METRICS_PORT,
+                default_target="",
+                default_known_hosts=DEFAULT_AI_KNOWN_HOSTS,
             ),
         )
         return cls(
@@ -169,25 +172,30 @@ def _source_from_env(
     default_role: str,
     default_enabled: bool,
     global_enabled: bool,
-    global_ssh_key_file: str,
     global_ssh_options: tuple[str, ...],
     ssh_bin: str,
     timeout_seconds: int,
     default_metrics_port: int,
+    default_target: str,
+    default_known_hosts: str,
 ) -> XrayStatsSourceConfig:
     source_enabled = _env_bool(f"{prefix}_ENABLED", default_enabled)
+    target_env = "DATAPLANE_SSH_TARGET" if default_role == NORMAL_DATA_PLANE else "AI_NODE_SSH_TARGET"
+    fallback_target = str(os.environ.get(target_env, default_target)).strip()
     return XrayStatsSourceConfig(
         source_id=str(os.environ.get(f"{prefix}_SOURCE_ID", default_source_id)).strip() or default_source_id,
         node_role=str(os.environ.get(f"{prefix}_NODE_ROLE", default_role)).strip() or default_role,
         enabled=global_enabled and source_enabled,
         debug_vars_url=str(os.environ.get(f"{prefix}_DEBUG_VARS_URL", "")).strip(),
-        ssh_target=str(os.environ.get(f"{prefix}_SSH_TARGET", "")).strip(),
-        ssh_key_file=str(os.environ.get(f"{prefix}_SSH_KEY_FILE", global_ssh_key_file)).strip(),
-        ssh_known_hosts=str(os.environ.get(f"{prefix}_KNOWN_HOSTS", "")).strip(),
+        ssh_target=str(os.environ.get(f"{prefix}_SSH_TARGET", fallback_target)).strip(),
+        ssh_known_hosts=str(os.environ.get(f"{prefix}_KNOWN_HOSTS", default_known_hosts)).strip()
+        or default_known_hosts,
         ssh_options=(*global_ssh_options, *_split_options(os.environ.get(f"{prefix}_SSH_OPTIONS", ""))),
         ssh_bin=ssh_bin,
         container_name=str(os.environ.get(f"{prefix}_CONTAINER", "")).strip(),
         docker_bin=str(os.environ.get(f"{prefix}_DOCKER_BIN", "docker")).strip() or "docker",
+        xray_bin=str(os.environ.get(f"{prefix}_XRAY_BIN", "/usr/local/bin/xray")).strip()
+        or "/usr/local/bin/xray",
         metrics_port=_env_int(f"{prefix}_METRICS_PORT", default_metrics_port),
         timeout_seconds=timeout_seconds,
     )
@@ -237,6 +245,37 @@ def _load_or_create_salt(path: str) -> bytes:
     return value.encode("utf-8")
 
 
+def _normalized_stats(payload: dict[str, Any]) -> dict[str, Any]:
+    stats = payload.get("stats")
+    if isinstance(stats, dict):
+        return stats
+
+    # Xray's native `api statsquery` returns a flat `stat` list over gRPC,
+    # while the optional HTTP debug endpoint returns nested `stats`. Normalize
+    # both forms before applying the same privacy-preserving parser.
+    entries = payload.get("stat")
+    if not isinstance(entries, list):
+        return {}
+    normalized: dict[str, dict[str, dict[str, int]]] = {"user": {}, "inbound": {}}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        parts = str(entry.get("name", "")).split(">>>")
+        if len(parts) != 4 or parts[0] not in normalized or parts[2] != "traffic":
+            continue
+        direction = parts[3]
+        if direction not in DIRECTIONS or not parts[1]:
+            continue
+        try:
+            value = int(entry.get("value", 0))
+        except (TypeError, ValueError):
+            continue
+        if value < 0:
+            continue
+        normalized[parts[0]].setdefault(parts[1], {})[direction] = value
+    return normalized
+
+
 def parse_xray_debug_vars(
     payload: dict[str, Any],
     *,
@@ -245,9 +284,7 @@ def parse_xray_debug_vars(
     observed_at: datetime,
     redactor: XrayStatsRedactor,
 ) -> list[XrayTrafficSample]:
-    stats = payload.get("stats")
-    if not isinstance(stats, dict):
-        return []
+    stats = _normalized_stats(payload)
     observed = format_timestamp(observed_at)
     collected = format_timestamp(utc_now())
     samples: list[XrayTrafficSample] = []
@@ -316,25 +353,95 @@ def _http_json(url: str, timeout_seconds: int) -> dict[str, Any]:
 def _ssh_command(source: XrayStatsSourceConfig, remote_command: str) -> list[str]:
     if not source.ssh_target:
         raise XrayStatsError("SSH target is not configured")
+
+    # Strip authentication and host-key overrides before appending the direct
+    # SSH policy. This keeps old environment values from reintroducing a
+    # private key or changing which hosts are trusted.
+    forced_keys = {
+        "batchmode",
+        "challengeresponseauthentication",
+        "identityfile",
+        "identitiesonly",
+        "kbdinteractiveauthentication",
+        "passwordauthentication",
+        "pubkeyauthentication",
+        "preferredauthentications",
+        "stricthostkeychecking",
+        "userknownhostsfile",
+    }
+    options = []
+    custom_options = list(source.ssh_options or ())
+    index = 0
+    while index < len(custom_options):
+        token = str(custom_options[index])
+        if token == "-i":
+            index += 2
+            continue
+        if token.startswith("-i") and len(token) > 2:
+            index += 1
+            continue
+        if token == "-o" and index + 1 < len(custom_options):
+            option = str(custom_options[index + 1])
+            option_key = option.split("=", 1)[0].strip().lower()
+            if option_key in forced_keys:
+                index += 2
+                continue
+            options.extend((token, option))
+            index += 2
+            continue
+        option_key = token.split("=", 1)[0].strip().lower()
+        if option_key in forced_keys:
+            index += 1
+            continue
+        options.append(token)
+        index += 1
+
     command = [
         source.ssh_bin,
+        *options,
         "-o",
-        "BatchMode=yes",
+        "BatchMode=no",
+        "-o",
+        "PubkeyAuthentication=no",
+        "-o",
+        "PreferredAuthentications=password,keyboard-interactive",
+        "-o",
+        "PasswordAuthentication=yes",
+        "-o",
+        "KbdInteractiveAuthentication=yes",
+        "-o",
+        "ChallengeResponseAuthentication=yes",
         "-o",
         f"ConnectTimeout={source.timeout_seconds}",
         "-o",
         "StrictHostKeyChecking=yes",
     ]
-    if source.ssh_key_file:
-        command.extend(["-i", source.ssh_key_file])
     if source.ssh_known_hosts:
         command.extend(["-o", f"UserKnownHostsFile={source.ssh_known_hosts}"])
-    command.extend(source.ssh_options)
     command.extend([source.ssh_target, remote_command])
     return command
 
 
 def _remote_debug_vars_command(source: XrayStatsSourceConfig) -> str:
+    if source.node_role == NORMAL_DATA_PLANE:
+        if not source.container_name:
+            raise XrayStatsError("normal Xray container name is required for statsquery")
+        script = (
+            "set -eu; container=$1; server=$2; docker_bin=$3; xray_bin=$4; "
+            'exec "$docker_bin" exec "$container" "$xray_bin" api statsquery "--server=$server"'
+        )
+        return " ".join(
+            [
+                "sh",
+                "-c",
+                shlex.quote(script),
+                "sh",
+                shlex.quote(source.container_name),
+                shlex.quote(f"127.0.0.1:{source.metrics_port}"),
+                shlex.quote(source.docker_bin),
+                shlex.quote(source.xray_bin),
+            ]
+        )
     if source.container_name:
         script = (
             "set -eu; "

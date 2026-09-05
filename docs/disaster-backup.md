@@ -64,9 +64,9 @@ backup-manifest.json
 node-recovery-manifest.json
 ```
 
-普通数据面通过 Tailscale `redacted-ip-003:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `redacted-ip-004`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
+普通数据面通过控制面内网 SSH `root@100.116.187.106:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `redacted-ip-004`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
 
-Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥和 known_hosts。若要启用，必须创建 Secret 并以只读卷挂载 key、两个 known_hosts 文件，再在备份 CronJob 的 ConfigMap/Secret 中显式设置目标和路径；不要把私钥内容提交到仓库。Kubernetes 的具体边界见[K3s 部署](kubernetes.md)。
+Kubernetes 变体默认关闭 SSH 采集。若要启用，需在备份 CronJob 的 ConfigMap/Secret 中显式设置内网目标、认证方式和路径，并按需挂载 known_hosts；不要把密码或私钥内容提交到仓库。Kubernetes 的具体边界见[K3s 部署](kubernetes.md)。
 
 ## 配置
 
@@ -80,7 +80,7 @@ Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥�
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过 SSH 读取普通数据面 |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `1` 时所有已配置远端节点的必需恢复文件必须成功；`0` 时记录失败但继续保留控制面归档 |
-| `DB_BACKUP_SSH_KEY_PATH` | `/run/secrets/fleet_ssh_key` | 只读 SSH 私钥；源文件权限过宽时采集器使用临时 `0600` 副本 |
+| `DB_BACKUP_DATAPLANE_SSH_TARGET` | `root@100.116.187.106` | 普通数据面内网 SSH 目标；采集器不使用私钥 |
 | `DB_BACKUP_SSH_OPTIONS` | 空 | 仅允许 `-4`/`-6`、日志级别和连接超时/keepalive 等安全选项 |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号/换行分隔；配置和 `.env` 是恢复必需文件，其余为可选 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |

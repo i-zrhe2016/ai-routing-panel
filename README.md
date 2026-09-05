@@ -51,7 +51,7 @@ cp .env.example .env
 cp app/xray/.env.example app/xray/.env
 ```
 
-在本地填写真实值，不要提交 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token 或数据库备份。变量说明见[配置说明](docs/configuration.md)。
+在本地填写真实值，不要提交 `.env`、REALITY 私钥、Cloudflare Token 或数据库备份；SSH 纳管使用内网直连，不需要提交 SSH 私钥。变量说明见[配置说明](docs/configuration.md)。
 
 ### 3. 启动服务
 
@@ -99,7 +99,7 @@ docker compose -f monitoring/docker-compose.monitoring.yml up -d prometheus graf
 
 日志采集边界见 [Fluent Bit 日志采集](docs/logging-fluent-bit.md)。
 
-当前生产环境的控制面（Tailscale `100.87.76.6`）同时运行本机 AI 备用，普通数据面为 `100.65.108.93`；控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
+当前生产环境的控制面为内网地址 `100.92.231.104`，同时运行本机 AI 备用；普通数据面为 `100.116.187.106`，由控制面通过内网 SSH 直连纳管。控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
 
 启用配置归档并通过 Cloudflare R2 保存异地灾备版本（不用于快速恢复）：
 
@@ -135,7 +135,7 @@ docker compose up -d --build xray-routing-panel-db-backup
 | --- | --- |
 | 第一次了解项目 | [项目概览](docs/project-overview.md) → [架构说明](docs/architecture.md) → [配置说明](docs/configuration.md) |
 | 本地开发或启动控制面 | [开发与启动](docs/development.md) |
-| 管理远端普通数据面 | [架构说明](docs/architecture.md) → [SSH 密钥登录与轮换](docs/ssh-key-access.md) |
+| 管理远端普通数据面 | [架构说明](docs/architecture.md) → [内网 SSH 纳管](docs/ssh-key-access.md) |
 | 部署独立 AI 数据面 | [AI 节点部署](docs/ai-node-deployment.md) → [AI 节点独立凭据](docs/ai-node-credentials.md) |
 | 查看 AI 主机与容器监控 | [AI 节点部署](docs/ai-node-deployment.md#ai-节点监控采集) → [运维与排障](docs/operations.md#prometheus-监控metrics) |
 | 排查 ChatGPT/OpenAI 路由 | [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) |
@@ -180,7 +180,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 - [AI 节点部署与 SSH 纳管](docs/ai-node-deployment.md) — 独立 AI 数据面的部署和控制面纳管。
 - [AI 节点独立凭据](docs/ai-node-credentials.md) — AI inbound/outbound 凭据边界和轮换要求。
 - [Cloudflare Access 邮箱登录](docs/cloudflare-access-email-login.md) — 控制面 Email OTP 登录、Access 策略和源站边界。
-- [SSH 密钥登录与轮换](docs/ssh-key-access.md) — fleet 密钥、容器挂载、验证与回滚。
+- [内网 SSH 纳管](docs/ssh-key-access.md) — 控制面直连普通数据面的认证、主机指纹校验与验证。
 - [K3s 部署](docs/kubernetes.md) — Kubernetes 分阶段部署结构和边界。
 - [面板迁移](docs/panel-migration.md) — 控制面数据、配置和服务迁移流程。
 - [AWS 普通数据面迁移与回退](docs/aws-normal-data-plane-migration.md) — 普通数据面灰度迁移、AWS 安全组门禁和回退步骤。
@@ -226,7 +226,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 
 ## 安全边界
 
-- 不提交 `.env`、REALITY 私钥、SSH 私钥、Cloudflare Token、数据库快照或灾备归档。
+- 不提交 `.env`、REALITY 私钥、Cloudflare Token、数据库快照或灾备归档；SSH 纳管不需要私钥。
 - 控制面与数据面应使用独立主机、独立目录和最小权限凭据。
 - Xray 配置必须先渲染和校验，再同步并确认健康检查、探针和监控恢复。
 - Node Exporter、cAdvisor、Grafana、Loki、Fluent Bit、Kubernetes API 和管理接口应限制到受信任网络。

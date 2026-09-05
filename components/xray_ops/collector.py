@@ -33,24 +33,23 @@ from .remote import RemoteCommandError, SshExecutor
 from .storage import OpsStore
 
 
-DEFAULT_NORMAL_TARGET = "root@100.65.108.93"
+DEFAULT_NORMAL_TARGET = "root@100.116.187.106"
 DEFAULT_AI_TARGET = ""
-DEFAULT_SSH_KEY_PATH = "/run/secrets/fleet_ssh_key"
 DEFAULT_NORMAL_KNOWN_HOSTS = "/root/.ssh/known_hosts"
 DEFAULT_AI_KNOWN_HOSTS = "/root/.ssh/known_hosts_ai"
 DEFAULT_SSH_OPTIONS = (
     "-o",
-    "BatchMode=yes",
+    "BatchMode=no",
     "-o",
-    "PreferredAuthentications=publickey",
+    "PubkeyAuthentication=no",
     "-o",
-    "PasswordAuthentication=no",
+    "PreferredAuthentications=password,keyboard-interactive",
     "-o",
-    "KbdInteractiveAuthentication=no",
+    "PasswordAuthentication=yes",
     "-o",
-    "ChallengeResponseAuthentication=no",
+    "KbdInteractiveAuthentication=yes",
     "-o",
-    "IdentitiesOnly=yes",
+    "ChallengeResponseAuthentication=yes",
     "-o",
     "StrictHostKeyChecking=yes",
     "-o",
@@ -85,6 +84,7 @@ def _validate_ssh_options(options: tuple[str, ...]) -> None:
         "identitiesonly",
         "kbdinteractiveauthentication",
         "passwordauthentication",
+        "pubkeyauthentication",
         "preferredauthentications",
         "stricthostkeychecking",
         "userknownhostsfile",
@@ -145,8 +145,6 @@ class CollectorConfig:
 
     @classmethod
     def from_env(cls) -> "CollectorConfig":
-        key_path = str(os.environ.get("OPS_SSH_KEY_PATH", DEFAULT_SSH_KEY_PATH)).strip() or DEFAULT_SSH_KEY_PATH
-        key_options = ("-i", key_path)
         global_options = _split_options(os.environ.get("OPS_SSH_OPTIONS", ""))
         normal_custom_options = (
             *global_options,
@@ -161,14 +159,12 @@ class CollectorConfig:
 
         normal_options = (
             *normal_custom_options,
-            *key_options,
             *DEFAULT_SSH_OPTIONS,
             "-o",
             f"UserKnownHostsFile={os.environ.get('OPS_NORMAL_KNOWN_HOSTS', DEFAULT_NORMAL_KNOWN_HOSTS).strip() or DEFAULT_NORMAL_KNOWN_HOSTS}",
         )
         ai_options = (
             *ai_custom_options,
-            *key_options,
             *DEFAULT_SSH_OPTIONS,
             "-o",
             f"UserKnownHostsFile={os.environ.get('OPS_AI_KNOWN_HOSTS', DEFAULT_AI_KNOWN_HOSTS).strip() or DEFAULT_AI_KNOWN_HOSTS}",

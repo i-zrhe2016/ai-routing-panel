@@ -16,7 +16,7 @@
 | 普通数据面 | 远端实际 `config.json`、远端 `.env` | `panel-ports.json`、`dynamic-routing.json`、客户端测试产物、最新 AI 报告 |
 | AI 数据面 | 远端模式：远端 `config.json` + `.env`；本机 Docker 模式：控制面 `config-ai-node.json` + `.env` | — |
 
-普通数据面默认通过严格只读 SSH 采集，AI 节点有远端目标时同样采集；本机 Docker AI 节点直接读取控制面运行时目录。SSH 私钥、known_hosts、Kubernetes Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
+普通数据面默认通过内网直连的严格只读 SSH 采集，AI 节点有远端目标时同样采集；本机 Docker AI 节点直接读取控制面运行时目录。SSH 登录私钥、known_hosts、Kubernetes Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
 
 默认远端路径如下；部署目录不同时必须显式设置 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`：
 
@@ -82,7 +82,7 @@ docker compose -f docker-compose.node.yml ps
 恢复完成后按顺序执行：
 
 1. 用 `docker compose -f docker-compose.node.yml logs` 和 Xray 配置测试确认服务健康。
-2. 将新主机加入 Tailscale，重新安装受控的 fleet 公钥并人工核对后更新 known_hosts。
+2. 将新主机加入内网，确认 SSH 密码/键盘交互认证可用，并人工核对后更新 known_hosts。
 3. 在控制面更新对应的 `DATAPLANE_SSH_TARGET` 或 `AI_NODE_SSH_TARGET`、远端配置路径和探测地址；AI 节点还要确认公网地址/端口与 `AI_UPSTREAM_*` 一致。
 4. 先做配置同步/探针/业务连接验证，再切换 DNS 或恢复流量。
 

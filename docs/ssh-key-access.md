@@ -1,104 +1,50 @@
-# SSH 密钥登录与轮换
+# 内网 SSH 纳管
 
-本文只说明控制面及数据面节点的 SSH 管理认证。业务端口和应用凭据不在本文范围内。
+本文说明控制面通过内网 SSH 管理数据面。当前控制面为
+`100.92.231.104`，普通数据面为 `100.116.187.106`。
 
 ## 当前策略
 
 | 节点 | SSH 目标 | 认证策略 |
 | --- | --- | --- |
-| 控制面 | `root@redacted-ip-004:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
-| AI 备用 | 本机 Docker `xray-ai-node` | 不使用 SSH；配置由控制面运行时目录提供 |
-| 普通数据面 | `root@redacted-ip-003:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
+| 控制面 | `100.92.231.104` | 服务本机运行控制面 |
+| 普通数据面 | `root@100.116.187.106:22` | 内网直连，密码/键盘交互认证 |
+| AI 备用 | 控制面本机 Docker `xray-ai-node` | 不使用 SSH |
 
-当前公钥指纹：
+控制面连接普通数据面时直接执行 SSH，不经过跳板，也不注入私钥：
 
-```text
-SHA256:g8BcGWdEKZK3qLB11z1GnbhDY25SAk0Iq+il+g3siDM
+```bash
+ssh \
+  -o PubkeyAuthentication=no \
+  -o PreferredAuthentications=password,keyboard-interactive \
+  root@100.116.187.106
 ```
 
-私钥位于控制机 `/root/.ssh/xray_fleet_ed25519_20260805`，权限必须为 `0600`。私钥不得进入 Git、镜像、普通环境变量或本文档。
+应用和备份任务同样不读取 `-i`、`IdentityFile` 或任何私钥挂载。旧的
+`DATAPLANE_SSH_KEY_FILE`、`AI_NODE_SSH_KEY_FILE` 和
+`DB_BACKUP_SSH_KEY_PATH` 配置不再使用。
 
-所有节点的 sshd 最终策略为：
+## 应用配置
 
-```text
-PubkeyAuthentication yes
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-ChallengeResponseAuthentication no
-PermitRootLogin prohibit-password
-AuthenticationMethods publickey
+```dotenv
+DATAPLANE_SSH_TARGET=root@100.116.187.106
+DATAPLANE_SSH_OPTIONS=
+DATAPLANE_SSH_KNOWN_HOSTS=/root/.ssh/known_hosts
+DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.116.187.106
+DB_BACKUP_DATAPLANE_SSH_PORT=22
+DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts
 ```
 
-`PermitRootLogin prohibit-password` 在部分 OpenSSH 版本的 `sshd -T` 输出中显示为 `without-password`，两者语义相同。
-
-## 应用容器挂载
-
-控制面应用只读挂载同一把运维私钥：
-
-```yaml
-- /root/.ssh/xray_fleet_ed25519_20260805:/run/secrets/fleet_ssh_key:ro
-```
-
-AI SSH 包装器默认读取 `/run/secrets/fleet_ssh_key`。数据面 SSH 参数也应使用此路径，并强制：
-
-```text
-IdentitiesOnly=yes
-PreferredAuthentications=publickey
-PasswordAuthentication=no
-KbdInteractiveAuthentication=no
-StrictHostKeyChecking=yes
-```
-
-控制面到三个节点的自动 SSH 连接默认使用 Tailscale 地址、fleet 私钥和
-`BatchMode=yes`，不会提示或回退到密码认证。主机密钥分别通过受控的
-`/root/.ssh/known_hosts` 和 `/root/.ssh/known_hosts_ai` 校验。
-
-主机密钥仍通过独立 `known_hosts` 文件校验，禁止使用 `StrictHostKeyChecking=no`。
+应用会固定关闭公钥认证并允许密码/键盘交互认证，同时继续执行
+`StrictHostKeyChecking=yes`。`known_hosts` 只是主机指纹文件，不是登录私钥；
+首次纳管前应从可信会话核对并写入目标主机指纹。
 
 ## 验证
 
-每台主机轮换后执行以下检查：
+在控制面上执行：
 
-1. 使用新私钥和 `IdentitiesOnly=yes` 建立全新连接。
-2. `sshd -t` 必须成功。
-3. `sshd -T` 必须显示仅公钥认证，密码和键盘交互关闭。
-4. `/root/.ssh/authorized_keys` 只能包含一条有效公钥。
-5. 远端公钥指纹必须等于本文记录的指纹。
-6. 旧私钥必须返回 `Permission denied (publickey)`。
+1. `ssh -o PubkeyAuthentication=no root@100.116.187.106 true`，确认内网 SSH 可达。
+2. `ssh -o PubkeyAuthentication=no root@100.116.187.106 hostname`，确认远端账号具备纳管所需权限。
+3. 重启面板和备份服务，确认数据面状态、配置同步和只读备份采集均成功。
 
-## 轮换流程
-
-密钥轮换必须逐台进行，禁止同时修改所有节点：
-
-1. 生成新的专用 Ed25519 密钥，不能覆盖当前可用私钥。
-2. 通过当前密钥保持一个恢复连接。
-3. 备份 `authorized_keys`、`sshd_config` 和 `sshd_config.d`。
-4. 先将新公钥与旧公钥并存，使用新私钥建立独立连接。
-5. 新连接成功后，原子替换 `authorized_keys`，只保留新公钥。
-6. 写入 key-only sshd drop-in，运行 `sshd -t` 后只 reload，不 restart。
-7. 分别验证新密钥成功、旧密钥失败、密码和键盘交互失败。
-8. 验证全部通过后才关闭恢复连接并处理下一台。
-
-## 恢复
-
-每台节点的最近备份路径记录在：
-
-```text
-/root/.ssh-rotation-last-backup
-```
-
-备份目录格式为：
-
-```text
-/root/ssh-rotation-backup-<UTC timestamp>
-```
-
-如果新密钥无法登录，应在仍保持的旧会话或云厂商控制台中：
-
-1. 从备份恢复 `/root/.ssh/authorized_keys`。
-2. 恢复 `/etc/ssh/sshd_config` 和 `/etc/ssh/sshd_config.d`。
-3. 运行 `sshd -t`。
-4. reload `ssh` 或 `sshd` 服务。
-5. 建立新的恢复连接后再关闭原会话。
-
-备份包含旧公钥及 SSH 配置，验收完成前不要删除。私钥丢失且没有存活会话时，只能通过云厂商控制台恢复。
+如果目标只允许密码认证，人工验证时会出现密码提示；后台任务不会把密码写入环境变量、镜像、日志或备份归档。
