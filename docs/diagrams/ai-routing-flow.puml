@@ -19,7 +19,7 @@ participant "Normal Data Plane Xray" as normal
 participant "Dynamic Routing Rules" as rules
 participant "AI Upstream Selector" as selector
 participant "Primary AI\nnat.qq.pw:27166" as primary
-participant "Backup AI\n100.87.76.6:27166" as backup
+participant "Backup AI\nredacted-ip-004:27166" as backup
 participant "AI freedom egress" as egress
 participant "Normal freedom egress" as fallback
 

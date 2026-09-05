@@ -8,7 +8,7 @@
 https://xray.zrhe2016.cc
 ```
 
-公网请求先经过 Cloudflare Access，再由 Nginx 反向代理到控制面本机服务 `127.0.0.1:18080`。控制面原始端口不作为公网管理入口。
+公网请求先经过 Cloudflare Access，再由 Nginx 反向代理到控制面本机服务 `redacted-ip-007:18080`。控制面原始端口不作为公网管理入口。
 
 ## 登录方式
 
@@ -17,7 +17,7 @@ https://xray.zrhe2016.cc
 允许的邮箱：
 
 ```text
-zrhe2016@gmail.com
+redacted-email-001 [at] example.invalid
 ```
 
 登录步骤：
@@ -38,14 +38,14 @@ zrhe2016@gmail.com
 2. 启用 `One-time PIN`。
 3. 可关闭不再使用的 `Google` 登录方式。
 4. 进入 `Access → Applications`，编辑 `xray.zrhe2016.cc`。
-5. Allow 策略选择 `Emails`，填入 `zrhe2016@gmail.com`。
+5. Allow 策略选择 `Emails`，填入 `redacted-email-001 [at] example.invalid`。
 6. 保存并等待策略生效。
 
 不要启用 Cloudflare Tunnel；当前方案使用橙云 DNS + 源站 Nginx 443。
 
 ## 源站安全边界
 
-- 控制面监听地址：`127.0.0.1:18080`。
+- 控制面监听地址：`redacted-ip-007:18080`。
 - 公网 HTTPS 入口：Nginx `443`。
 - SSH `22`、Grafana `3001`、Prometheus `9090` 不属于本入口，保持独立管理。
 - 不要把 `18080` 重新暴露到公网，否则会形成 Cloudflare Access 绕过路径。
@@ -67,12 +67,12 @@ curl -I https://xray.zrhe2016.cc/
 ss -lntp | grep -E ':(443|18080)\\b'
 ```
 
-预期 `18080` 只显示 `127.0.0.1:18080`，`443` 由 Nginx 监听。
+预期 `18080` 只显示 `redacted-ip-007:18080`，`443` 由 Nginx 监听。
 
 如果没有收到验证码：
 
 - 检查垃圾邮件和邮件过滤规则；
-- 确认 Access 应用 Allow 策略仍包含 `zrhe2016@gmail.com`；
+- 确认 Access 应用 Allow 策略仍包含 `redacted-email-001 [at] example.invalid`；
 - 确认 One-time PIN 已启用；
 - 清理浏览器中该域名的 Cloudflare Access Cookie 后重试。
 

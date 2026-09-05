@@ -9,7 +9,7 @@
 [查看 PlantUML 源文件](diagrams/system-architecture.puml)
 
 - **普通数据面**：承载 `VLESS + REALITY` 流量，加载控制面生成的动态 AI 路由
-- **AI 上游池**：主 `nat.qq.pw:27166`，备用 `100.87.76.6:27166`；备用节点是控制面本机 Docker `xray-ai-node`
+- **AI 上游池**：主 `nat.qq.pw:27166`，备用 `redacted-ip-004:27166`；备用节点是控制面本机 Docker `xray-ai-node`
 
 - 控制面：`xray-routing-panel`
 - 普通数据面：本地容器、本地二进制，或远端 SSH 目标上的 Xray
@@ -75,7 +75,7 @@
 - 入口代码：`app/xray/ai_domain_manager.py`
 - 每小时通过普通数据面 SSH 增量读取 `access.log`，统计最近一小时域名窗口；本地模式读取本机日志
 - 结合内建规则、Codex 或 OpenAI 兼容接口做域名分类
-- 探测 `nat.qq.pw:27166` 和 `100.87.76.6:27166` 两个 AI 候选
+- 探测 `nat.qq.pw:27166` 和 `redacted-ip-004:27166` 两个 AI 候选
 - 支持 `auto`、`primary`、`backup`、`forced_fallback` 四种选择模式；人工模式写入 `panel.db` 的 `app_state`
 - 将 `ai_candidates`、`manual_mode`、当前 `ai_target` 和不可达原因提供给控制台
 - 仅将已观测且分类为 `ai` 的域名写入 `panel.db` 的 `ai_domains` / `ai_domain_observations`，并保留已有 AI 历史累计；动态路由只包含 AI 域名，其他域名沿用普通数据面 `freedom` 直出
@@ -119,15 +119,15 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 5. 控制面通过 SSH 将 `config.json` 推送到普通数据面；AI 节点配置同步由 `AI_NODE_CONFIG_PATH` 独立控制，生产当前禁用自动上传。
 6. 普通数据面加载 `config.json` 并通过 Xray API 提供 `statsquery`。
 7. `xray-ai-domain-manager` 每小时从普通数据面 `access.log` 读取域名，探测双 AI 候选，将 AI 观测写入 `panel.db`，并输出只含 AI 域名的路由产物；人工切换会立即触发一次 `--once` 重算。
-8. AI 域名流量通过 `dynamic-routing.json` 转发到选中的 AI 上游；截至 2026 年 8 月 23 日，主节点不可达，备用 `100.87.76.6:27166` 已被选中。
+8. AI 域名流量通过 `dynamic-routing.json` 转发到选中的 AI 上游；截至 2026 年 8 月 23 日，主节点不可达，备用 `redacted-ip-004:27166` 已被选中。
 9. 非 AI 域名不进入 `dynamic-routing.json`，由普通数据面的默认 `freedom` 在 DMIT 直出；自动模式下所有候选不可达，或人工固定目标不可达时，管理器删除 `dynamic-routing.json`，AI 流量也回退数据面 freedom 直出。
 10. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
 11. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
 12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；本机 AI 配置来自 `config/`，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
 13. 首页读取三节点状态、双 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
-AI 观测链路：`xray-ai-node` 将 Xray metrics 绑定到 `127.0.0.1:31097`，面板读取后在
-`/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定 `127.0.0.1:18081`，
+AI 观测链路：`xray-ai-node` 将 Xray metrics 绑定到 `redacted-ip-007:31097`，面板读取后在
+`/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定 `redacted-ip-007:18081`，
 Prometheus 同时采集 `xray-ai-node` 的容器级 CPU、内存和网络总量。AI access log 只
 保留在控制面日志目录，集中日志链路仅采集 `ai-error.log`。面板增量读取
 `ai-access.log`，在最近窗口内按目标域名、端口和网络协议聚合请求量，输出

@@ -4,7 +4,7 @@
 
 三套独立会话：**管理员**、**客户**、**租户**（每端口）。
 
-- 管理员：生产入口使用 Cloudflare Access Email OTP（One-time PIN），允许邮箱为 `zrhe2016@gmail.com`；Access 认证后由 Nginx 反代到本机 `127.0.0.1:18080`。不要公开暴露 `18080`。本地运维 API 仍可使用应用配置的 Basic/session 机制。
+- 管理员：生产入口使用 Cloudflare Access Email OTP（One-time PIN），允许邮箱为 `redacted-email-001 [at] example.invalid`；Access 认证后由 Nginx 反代到本机 `redacted-ip-007:18080`。不要公开暴露 `18080`。本地运维 API 仍可使用应用配置的 Basic/session 机制。
 - 客户：`/api/customer/*`（除 `plans`、`auth/*`）需客户会话，未登录返回 JSON 401（`{"ok":false,"code":"auth_required"}`）；变更请求需 `X-CSRF-Token`
 - 租户：`/api/tenant/<token>/*` 由管理员会话或该端口的租户会话放行
 - `GET /healthz` 永远不要求登录
@@ -94,11 +94,11 @@
 示例：
 
 ```bash
-curl -u admin:secret http://127.0.0.1:18080/api/dashboard
+curl -u admin:secret http://redacted-ip-007:18080/api/dashboard
 
 curl -u admin:secret \
   -H 'Content-Type: application/json' \
-  -X POST http://127.0.0.1:18080/api/ports \
+  -X POST http://redacted-ip-007:18080/api/ports \
   -d '{
     "listen_port": 32001,
     "expires_at": "2026-06-30T20:00",

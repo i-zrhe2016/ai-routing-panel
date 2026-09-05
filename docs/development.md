@@ -50,7 +50,7 @@ docker compose up -d --build
 如果你不使用 compose 里的 `xray-reality` 容器：
 
 - 设置 `DATAPLANE_LOCAL_BIN=/path/to/xray`
-- 设置 `DATAPLANE_API_SERVER=127.0.0.1:10085`
+- 设置 `DATAPLANE_API_SERVER=redacted-ip-007:10085`
 - 让外部 Xray 进程自行加载 `app/xray/runtime/config.json`
 
 注意：
@@ -136,13 +136,13 @@ docker compose --profile backup-xray logs -f xray-reality-backup
 获取 AI 节点状态（目标态 API）：
 
 ```bash
-curl -s -u admin:secret http://127.0.0.1:18080/api/ai-node/status | python3 -m json.tool
+curl -s -u admin:secret http://redacted-ip-007:18080/api/ai-node/status | python3 -m json.tool
 ```
 
 重启 AI 节点（目标态 API）：
 
 ```bash
-curl -s -u admin:secret -X POST http://127.0.0.1:18080/api/ai-node/restart | python3 -m json.tool
+curl -s -u admin:secret -X POST http://redacted-ip-007:18080/api/ai-node/restart | python3 -m json.tool
 ```
 
 手动跑一轮 AI 域名分析：

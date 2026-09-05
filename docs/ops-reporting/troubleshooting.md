@@ -4,11 +4,11 @@
 
 ## 2026-08-31 目标抓取恢复记录
 
-普通数据面 target 曾配置为公网地址 `64.186.224.96:19100/18081`。从控制面访问这两个端口失败，而通过 Tailscale 地址 `100.65.108.93:19100/18081` 均返回 HTTP 200，故障根因是 Prometheus 抓取路径与数据面防火墙边界不一致。
+普通数据面 target 曾配置为公网地址 `redacted-ip-011:19100/18081`。从控制面访问这两个端口失败，而通过 Tailscale 地址 `redacted-ip-003:19100/18081` 均返回 HTTP 200，故障根因是 Prometheus 抓取路径与数据面防火墙边界不一致。
 
 已执行：
 
-- 将 `data-plane-node` 和 `data-plane-cadvisor` 的普通数据面 target 固定为 `100.65.108.93`；
+- 将 `data-plane-node` 和 `data-plane-cadvisor` 的普通数据面 target 固定为 `redacted-ip-003`；
 - 恢复控制面面板的 `METRICS_TOKEN`，并让 Prometheus 以仅自身 UID 可读的文件读取同一 token；
 - 启动控制面 node-exporter 和 Prometheus，校验配置及 active targets。
 
@@ -20,11 +20,11 @@
 
 ## Target 为 down
 
-普通数据面 exporter 应使用其 Tailscale 地址（当前为 `100.65.108.93`），不要从控制面通过公网地址抓取。依次检查 Prometheus `/targets` 的错误、Tailscale 路由、exporter 进程、监听地址、TLS/认证和防火墙来源限制。不得临时向公网放开指标端口；使用与 Prometheus 相同的授权源验证。
+普通数据面 exporter 应使用其 Tailscale 地址（当前为 `redacted-ip-003`），不要从控制面通过公网地址抓取。依次检查 Prometheus `/targets` 的错误、Tailscale 路由、exporter 进程、监听地址、TLS/认证和防火墙来源限制。不得临时向公网放开指标端口；使用与 Prometheus 相同的授权源验证。
 
 ## AI Targets 为 down
 
-AI node-exporter 和 cAdvisor 通过控制面回环 SSH 隧道抓取。先检查 `xray-ai-exporter-tunnel.service` 是否 active，以及 `127.0.0.1:19101`、`127.0.0.1:18082` 是否监听；再检查 SSH 管理端口、严格主机密钥校验和远端 exporter 容器。不得把本地转发地址改成 `0.0.0.0`，也不得为排障开放公网 exporter 端口。隧道异常只影响 AI 遥测，不应修改或重启 AI Xray 业务配置。
+AI node-exporter 和 cAdvisor 通过控制面回环 SSH 隧道抓取。先检查 `xray-ai-exporter-tunnel.service` 是否 active，以及 `redacted-ip-007:19101`、`redacted-ip-007:18082` 是否监听；再检查 SSH 管理端口、严格主机密钥校验和远端 exporter 容器。不得把本地转发地址改成 `redacted-ip-001`，也不得为排障开放公网 exporter 端口。隧道异常只影响 AI 遥测，不应修改或重启 AI Xray 业务配置。
 
 ## 报告为 unknown
 

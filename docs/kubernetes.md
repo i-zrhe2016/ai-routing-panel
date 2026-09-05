@@ -102,11 +102,11 @@ Kubernetes 清单默认不启用远端 SSH 采集（`DB_BACKUP_SSH_COLLECTION_EN
 volumes:
   - name: fleet-ssh-key
     secret:
-      secretName: xray-fleet-ssh
+      X xray-fleet-ssh
       defaultMode: 0600
   - name: fleet-known-hosts
     secret:
-      secretName: xray-fleet-known-hosts
+      X xray-fleet-known-hosts
       defaultMode: 0600
 volumeMounts:
   - name: fleet-ssh-key
@@ -123,7 +123,7 @@ volumeMounts:
     readOnly: true
 ```
 
-Kubernetes 变体若显式启用远端 SSH 采集，普通数据面使用 Tailscale `100.65.108.93:22`；当前本机 AI 备用不需要 SSH。不要把 AI 业务端口 `27166` 当作 SSH 管理端口。完整采集器安全边界见[远端节点配置采集](remote-node-backup.md)。
+Kubernetes 变体若显式启用远端 SSH 采集，普通数据面使用 Tailscale `redacted-ip-003:22`；当前本机 AI 备用不需要 SSH。不要把 AI 业务端口 `27166` 当作 SSH 管理端口。完整采集器安全边界见[远端节点配置采集](remote-node-backup.md)。
 
 如需把 `xray.env`、R2 密钥或其他项目文件加入归档，应通过 Secret/只读挂载提供文件，再在对应 ConfigMap 设置 `DB_BACKUP_EXTRA_PATHS`。R2 上传需显式设置 `DB_BACKUP_R2_ENABLED=1`、归档密码和 R2 认证信息；R2 对象的生命周期和保留策略在 Cloudflare 侧配置，不参与快速恢复。
 

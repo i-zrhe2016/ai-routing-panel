@@ -10,21 +10,21 @@
 
 | 节点 | Tailscale 地址 | 公网地址 | 角色 |
 | --- | --- | --- | --- |
-| 原数据面 | `100.65.108.93` | `64.186.224.96` | 当前运行节点，保留为回退源 |
-| AWS 数据面 | `100.92.231.104` | `52.12.220.85` | 新普通数据面；AWS `us-west-2` |
-| 控制面 | `100.92.111.68` | `143.198.234.31` | DNS 故障切换、远程同步和 AI 路由管理 |
+| 原数据面 | `redacted-ip-003` | `redacted-ip-011` | 当前运行节点，保留为回退源 |
+| AWS 数据面 | `control-plane-host` | `redacted-ip-010` | 新普通数据面；AWS `us-west-2` |
+| 控制面 | `redacted-ip-005` | `redacted-ip-008` | DNS 故障切换、远程同步和 AI 路由管理 |
 
-`100.92.231.104` 是 Tailscale 管理地址，公网客户端不能把它作为 DNS A 记录。公网 DNS、探测和订阅生成应使用 AWS 公网地址 `52.12.220.85`，或使用指向该地址的域名。
+`control-plane-host` 是 Tailscale 管理地址，公网客户端不能把它作为 DNS A 记录。公网 DNS、探测和订阅生成应使用 AWS 公网地址 `redacted-ip-010`，或使用指向该地址的域名。
 
 ## 当前切换状态
 
 2026-09-04 已完成 AWS 普通数据面切换：
 
-- Cloudflare `ai.zrhe2016.cc` 的 A 记录已切换到 `52.12.220.85`，TTL 保持 `60`，当前目标为 `primary`；
-- 控制面已改为通过严格 SSH 主机校验管理 `100.92.231.104`，普通节点备份采集已验证成功；
+- Cloudflare `ai.zrhe2016.cc` 的 A 记录已切换到 `redacted-ip-010`，TTL 保持 `60`，当前目标为 `primary`；
+- 控制面已改为通过严格 SSH 主机校验管理 `control-plane-host`，普通节点备份采集已验证成功；
 - 原节点历史归档已复制到 AWS `/root/xray-routing-panel/migration-history/source-normal-data-plane-20260904/`，包含 Xray/系统/Docker 日志、运行目录、systemd/网络/Docker/Tailscale 状态和 Node Exporter/cAdvisor 快照；
 - AWS 主机 nftables 同步脚本已显式保留订阅 HTTPS `443`，防火墙定时器持续运行；
-- 原数据面 `64.186.224.96` 未停止，仍保留为人工回退源；DNS 自动故障备份仍为控制面 `143.198.234.31`；
+- 原数据面 `redacted-ip-011` 未停止，仍保留为人工回退源；DNS 自动故障备份仍为控制面 `redacted-ip-008`；
 - 切换后的 AWS 端口、REALITY 握手、HTTPS 订阅和 DNS 探测均已验证通过。
 
 源节点没有本地 Prometheus 或 Grafana 时序数据库；Node Exporter、cAdvisor 本身无历史存储，因此已复制其当前指标快照和 Fluent Bit 状态。归档仅用于审计/恢复，不会覆盖 AWS 当前运行配置。
@@ -53,40 +53,40 @@ AWS 实例本地防火墙和绑定安全组已放行并验证以下公网 TCP �
 ## 切换顺序
 
 1. 从控制面和外部网络确认 AWS 公网端口全部可达，并至少对 `31098`、`31333`、`31340` 做 REALITY 握手。
-2. 在控制面 `100.92.111.68` 的受保护 `.env` 中将普通数据面目标改为：
+2. 在控制面 `redacted-ip-005` 的受保护 `.env` 中将普通数据面目标改为：
 
    ```dotenv
-   DATAPLANE_SSH_TARGET=root@100.92.231.104
-   DATAPLANE_PROBE_HOST=52.12.220.85
+   DATAPLANE_SSH_TARGET=root@control-plane-host
+   DATAPLANE_PROBE_HOST=redacted-ip-010
    DATAPLANE_CONFIG_PATH=/root/xray-routing-panel/app/xray/runtime/config.json
    DATAPLANE_PANEL_PORTS_PATH=/root/xray-routing-panel/app/xray/runtime/panel-ports.json
    DATAPLANE_DYNAMIC_ROUTING_PATH=/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json
    DATAPLANE_ACCESS_LOG_PATH=/root/xray-routing-panel/app/xray/logs/access.log
-   DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.92.231.104
-   DNS_FAILOVER_PROBE_HOST=52.12.220.85
+   DB_BACKUP_DATAPLANE_SSH_TARGET=root@control-plane-host
+   DNS_FAILOVER_PROBE_HOST=redacted-ip-010
    DNS_FAILOVER_PROBE_PORT=31098
-   DNS_FAILOVER_PRIMARY_CONTENT=52.12.220.85
+   DNS_FAILOVER_PRIMARY_CONTENT=redacted-ip-010
    ```
 
-   保留 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 和现有控制面备用内容 `143.198.234.31`。修改前先人工核对目标主机指纹并把它加入控制面对应的 `known_hosts`，不要关闭严格主机校验。
+   保留 `CONTROL_PLANE_BACKUP_XRAY_ENABLED=1` 和现有控制面备用内容 `redacted-ip-008`。修改前先人工核对目标主机指纹并把它加入控制面对应的 `known_hosts`，不要关闭严格主机校验。
 
 3. 重启控制面面板/AI 域名管理器，使新环境变量生效；确认面板显示 AWS 数据面可达，并确认备份采集可以读取 AWS 节点。
-4. 将 Cloudflare 普通入口记录的 primary 内容切换为 `52.12.220.85`，保持 TTL 为 `60`，观察至少一个完整探测周期。
+4. 将 Cloudflare 普通入口记录的 primary 内容切换为 `redacted-ip-010`，保持 TTL 为 `60`，观察至少一个完整探测周期。
 5. 确认旧节点保持在线、AWS Xray/订阅/监控均健康后，再结束迁移窗口。
 
 ## 回退
 
 如果 AWS 节点或其公网连通性异常：
 
-1. 在 Cloudflare 将入口记录切回原数据面公网地址 `64.186.224.96`；
+1. 在 Cloudflare 将入口记录切回原数据面公网地址 `redacted-ip-011`；
 2. 将控制面以下变量恢复到原值：
 
    ```dotenv
-   DATAPLANE_SSH_TARGET=root@100.65.108.93
-   DATAPLANE_PROBE_HOST=64.186.224.96
-   DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.65.108.93
-   DNS_FAILOVER_PROBE_HOST=64.186.224.96
-   DNS_FAILOVER_PRIMARY_CONTENT=64.186.224.96
+   DATAPLANE_SSH_TARGET=root@redacted-ip-003
+   DATAPLANE_PROBE_HOST=redacted-ip-011
+   DB_BACKUP_DATAPLANE_SSH_TARGET=root@redacted-ip-003
+   DNS_FAILOVER_PROBE_HOST=redacted-ip-011
+   DNS_FAILOVER_PRIMARY_CONTENT=redacted-ip-011
    ```
 
 3. 重启控制面面板/AI 域名管理器并确认 `data_plane`、备份采集和 DNS 探测恢复；

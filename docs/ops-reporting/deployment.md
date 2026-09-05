@@ -25,4 +25,4 @@
 
 备份只用于审计恢复，不得恢复旧 Collector 或重新启用原始日志采集。
 
-2026-08-31 已恢复控制面 Prometheus 采集：普通数据面使用 Tailscale `100.65.108.93` 抓取 node-exporter/cAdvisor，控制面面板指标认证已补齐，7 个 active targets 均已核验为 `up`。本次修复不改变历史报告结论；修复前时间区间的缺失样本不存在，需从修复后的完整窗口开始重新评估。
+2026-08-31 已恢复控制面 Prometheus 采集：普通数据面使用 Tailscale `redacted-ip-003` 抓取 node-exporter/cAdvisor，控制面面板指标认证已补齐，7 个 active targets 均已核验为 `up`。本次修复不改变历史报告结论；修复前时间区间的缺失样本不存在，需从修复后的完整窗口开始重新评估。

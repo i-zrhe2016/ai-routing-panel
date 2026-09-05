@@ -21,7 +21,7 @@ ai_proxy VLESS + REALITY outbound
       ▼
 AI 上游选择器
       ├─ 主：nat.qq.pw:27166
-      └─ 备：100.87.76.6:27166
+      └─ 备：redacted-ip-004:27166
       │
       ▼
 AI 节点 VLESS + REALITY inbound
@@ -30,7 +30,7 @@ AI 节点 VLESS + REALITY inbound
 freedom → OpenAI HTTPS
 ```
 
-禁止把 AI 流量发往旧上游 `isif.217777.xyz:42994`。当前生产候选为主 `nat.qq.pw:27166` 和备 `100.87.76.6:27166`，实际目标以 `ai_target` 和 `manual_mode` 为准。
+禁止把 AI 流量发往旧上游 `isif.217777.xyz:42994`。当前生产候选为主 `nat.qq.pw:27166` 和备 `redacted-ip-004:27166`，实际目标以 `ai_target` 和 `manual_mode` 为准。
 
 ## 排障顺序
 
@@ -60,7 +60,7 @@ freedom → OpenAI HTTPS
 }
 ```
 
-注意：`ai_node_running=true` 只证明控制面能检测到当前 AI 节点的 `127.0.0.1:27166`（本机 Docker 模式）或远端 SSH 模式 Socket，不证明 REALITY 凭据匹配，也不证明 ChatGPT 请求成功。
+注意：`ai_node_running=true` 只证明控制面能检测到当前 AI 节点的 `redacted-ip-007:27166`（本机 Docker 模式）或远端 SSH 模式 Socket，不证明 REALITY 凭据匹配，也不证明 ChatGPT 请求成功。
 
 ## 2. 检查主数据面
 
@@ -88,7 +88,7 @@ freedom → OpenAI HTTPS
 优先查看最新报表或控制台 AI 路由状态，确认：
 
 - `manual_mode` 是 `auto`、`primary`、`backup` 或 `forced_fallback`；
-- `ai_candidates` 同时列出主 `nat.qq.pw:27166` 与备 `100.87.76.6:27166`；
+- `ai_candidates` 同时列出主 `nat.qq.pw:27166` 与备 `redacted-ip-004:27166`；
 - `ai_target.selected_index` 与实际 `ai_proxy` 目标一致；
 - 固定模式下若状态为 `manual_target_unreachable`，不要期待系统自动切换另一节点。
 
@@ -174,7 +174,7 @@ AI_NODE_CONFIG_PATH=
 - [ ] `ai_node_running=true`。
 - [ ] 主数据面动态路由命中 ChatGPT/OpenAI 域名。
 - [ ] `manual_mode` 和 `ai_target.selected_index` 与预期一致。
-- [ ] 当前 AI 目标是主 `nat.qq.pw:27166` 或备 `100.87.76.6:27166`。
+- [ ] 当前 AI 目标是主 `nat.qq.pw:27166` 或备 `redacted-ip-004:27166`。
 - [ ] 不存在旧 ISIF 上游。
 - [ ] 主数据面到 AI 节点 TCP 可达。
 - [ ] 八个隧道字段全部匹配。

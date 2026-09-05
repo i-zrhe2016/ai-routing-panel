@@ -3,9 +3,9 @@
 状态:**已回退到多端口架构;保留了 Reality dest 修复。生产数据面真实数据验证通过。**
 
 ## 拓扑(务必记住)
-- 控制面/面板:`143.198.234.31`(DigitalOcean),容器 `xray-routing-panel`
-- 生产数据面:`64.186.224.96`(DMIT 独立公网 IP),容器 `xray-reality-local`
-- 面板通过 Tailscale **SSH**(`root@100.65.108.93:22`,key `/run/secrets/fleet_ssh_key`)
+- 控制面/面板:`redacted-ip-008`(DigitalOcean),容器 `xray-routing-panel`
+- 生产数据面:`redacted-ip-011`(DMIT 独立公网 IP),容器 `xray-reality-local`
+- 面板通过 Tailscale **SSH**(`root@redacted-ip-003:22`,key `/run/secrets/fleet_ssh_key`)
   同步本地渲染的 `runtime/config.json` 到远端同路径并 `docker restart` 远端容器。
 - 控制面上也有一个同名 `xray-reality-local` 本地容器,**那不是生产**,别搞混。
 
@@ -28,8 +28,8 @@ TCP 通、openssl 能拿到证书都具迷惑性,连数据面本机 localhost �
 
 ## 验证记录
 - 远端 6 个端口(30005/30006/30088/31000/31098/31666)全部监听
-- 面板订阅(port 31098)= `vless://f0f34f99…@64.186.224.96:31098?…sni=www.amazon.com`
-- 真实数据:端口 31098 共享 UUID 客户端经公网 → HTTP 200,出口 147.81.120.142
+- 面板订阅(port 31098)= `vless://f0f34f99…@redacted-ip-011:31098?…sni=www.amazon.com`
+- 真实数据:端口 31098 共享 UUID 客户端经公网 → HTTP 200,出口 redacted-ip-009
 - 全量 70 测试通过
 
 ## 回滚物料

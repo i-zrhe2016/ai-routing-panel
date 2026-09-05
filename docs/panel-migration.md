@@ -157,7 +157,7 @@ docker compose up -d --build
 ```bash
 docker compose ps
 docker compose logs -f xray-routing-panel
-curl http://127.0.0.1:18080/healthz
+curl http://redacted-ip-007:18080/healthz
 ```
 
 完整栈建议再检查：
@@ -197,7 +197,7 @@ PY
   - 但会丢失“最近一小时访问窗口”这部分原始输入，AI 管理器需要重新积累新日志
 - 新机器上 `/healthz` 返回 `500`
   - 先确认 `xray-reality` 是否已启动
-  - 再确认 `XRAY_API_SERVER` 默认的 `127.0.0.1:10085` 是否可访问
+  - 再确认 `XRAY_API_SERVER` 默认的 `redacted-ip-007:10085` 是否可访问
   - 如果你只恢复了面板而没有恢复 Xray，可临时设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
 
 ## 回滚

@@ -28,7 +28,7 @@ node "Control Plane" as control #EFF6FF {
   component "AI exporter SSH tunnel\nloopback only" as tunnel #E0E7FF
 }
 
-node "Normal Data Plane\nTailscale 100.65.108.93" as normal #ECFDF5 {
+node "Normal Data Plane\nTailscale redacted-ip-003" as normal #ECFDF5 {
   component "Xray\nVLESS + REALITY" as normalXray #D1FAE5
   component "Dynamic routing fragment\nai_proxy" as dynamicRoute #CCFBF1
   component "node-exporter + cAdvisor" as normalMetrics #F3F4F6
@@ -36,9 +36,9 @@ node "Normal Data Plane\nTailscale 100.65.108.93" as normal #ECFDF5 {
 
 node "AI Upstream Pool" as aiPool #FFF7ED {
   component "Primary AI\nnat.qq.pw:27166" as primaryAi #FED7AA
-  component "Backup AI\nlocal Docker xray-ai-node\n100.87.76.6:27166" as backupAi #FED7AA
+  component "Backup AI\nlocal Docker xray-ai-node\nredacted-ip-004:27166" as backupAi #FED7AA
   component "Independent Xray\nfreedom egress" as aiEgress #FFEDD5
-  component "Local AI Xray metrics\n127.0.0.1:31097" as localAiMetrics #F3F4F6
+  component "Local AI Xray metrics\nredacted-ip-007:31097" as localAiMetrics #F3F4F6
   component "node-exporter + cAdvisor\nwhen remotely deployed" as aiMetrics #F3F4F6
 }
 

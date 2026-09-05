@@ -36,7 +36,7 @@ node-recovery-manifest.json
 
 | 节点 | SSH 目标 | 主配置路径 | 配置环境文件 |
 | --- | --- | --- | --- |
-| 普通数据面 | `root@100.65.108.93:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
+| 普通数据面 | `root@redacted-ip-003:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
 | AI 备用 | 本机 Docker `xray-ai-node` | `config/` 下的 `app/xray/runtime/config-ai-node.json` | `config/` 下的 `app/xray/.env` |
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
@@ -90,7 +90,7 @@ node-recovery-manifest.json
 
 ```bash
 DB_BACKUP_SSH_KEY_PATH=/root/.ssh/xray_fleet_ed25519_20260805 \
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.65.108.93 \
+DB_BACKUP_DATAPLANE_SSH_TARGET=root@redacted-ip-003 \
 DB_BACKUP_DATAPLANE_SSH_PORT=22 \
 DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts \
 DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json \

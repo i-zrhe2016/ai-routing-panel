@@ -15,17 +15,17 @@
 | `PANEL_SECRET_KEY` | Session 签名密钥；不设置则每次启动随机生成 |
 | `PANEL_LOG_LEVEL` | 控制面 JSON 日志最低级别，默认 `INFO` |
 | `PANEL_SLOW_REQUEST_MS` | 慢请求阈值（毫秒），默认 `1000`；普通成功 GET 仍不记录 |
-| `METRICS_TOKEN` | Prometheus `/metrics` 抓取令牌；不设置则 `/metrics` 返回 404，设置后需 `Authorization: Bearer <token>` |
+| `METRICS_TOKEN` | Prometheus `/metrics` 抓取令牌；不设置则 `/metrics` 返回 404，设置后需 `Authorization: X <token>` |
 | `METRICS_DP_TTL` | `/metrics` 缓存数据面存活检测的秒数，默认 `30`（抓取路径上唯一的 SSH 调用） |
 | `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台「监控」标签使用该同源地址 |
 | `GRAFANA_OBSERVABILITY_UID` | 「监控」标签内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
-| `DATAPLANE_SSH_TARGET` | 远端数据面 Tailscale SSH 目标；默认 `root@100.65.108.93` |
+| `DATAPLANE_SSH_TARGET` | 远端数据面 Tailscale SSH 目标；默认 `root@redacted-ip-003` |
 | `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；远端生产环境建议包含 `-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1` |
 | `DATAPLANE_SSH_KEY_FILE` | 远端数据面 SSH 私钥路径；Compose 默认使用只读挂载的 `/run/secrets/fleet_ssh_key`，会自动强制 `IdentitiesOnly=yes` |
 | `DATAPLANE_SSH_KNOWN_HOSTS` | 数据面主机密钥文件；默认 `/root/.ssh/known_hosts`，严格校验且不接受未知主机 |
 | `DATAPLANE_REMOTE_COMMAND_TIMEOUT` | 单次远程 SSH/Docker 命令的控制面超时，默认 `8` 秒；避免数据面失联拖住控制面任务 |
-| `DATAPLANE_API_SERVER` | 数据面 Xray API 地址，默认 `127.0.0.1:10085` |
+| `DATAPLANE_API_SERVER` | 数据面 Xray API 地址，默认 `redacted-ip-007:10085` |
 | `DATAPLANE_CONFIG_PATH` | 远端或本地数据面使用的 `config.json` 路径 |
 | `DATAPLANE_DYNAMIC_ROUTING_PATH` | 远端 `dynamic-routing.json` 路径 |
 | `DATAPLANE_AI_REPORT_PATH` | 远端 `reports/hourly-domains/latest.json` 路径 |
@@ -64,12 +64,12 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `AI_NODE_CONTAINER_NAME` | 本机 AI 备用 Xray 容器名；当前为 `xray-ai-node` |
 | `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
 | `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |
-| `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；本机 Docker 生产当前为 `127.0.0.1:27166` |
-| `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；本机默认 `http://127.0.0.1:31097/debug/vars`，只允许回环或受控管理网 |
+| `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；本机 Docker 生产当前为 `redacted-ip-007:27166` |
+| `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；本机默认 `http://redacted-ip-007:31097/debug/vars`，只允许回环或受控管理网 |
 | `AI_NODE_ACCESS_LOG_PATH` | AI access log 路径；默认 `/app/xray/logs/ai-access.log`，只供控制面做本机域名/端口分析 |
 | `AI_NODE_DESTINATION_WINDOW_SECONDS` | AI 域名/端口请求分析窗口，默认 `600` 秒 |
 | `AI_NODE_DESTINATION_MAX_LABELS` | 每次展开的高流量域名/端口 Top 数，默认 `50`，用于限制 Prometheus 标签基数 |
-| `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；当前为 `100.87.76.6` |
+| `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；当前为 `redacted-ip-004` |
 
 节点备份默认请求普通数据面的配置、`.env`、运行时辅助文件和最新报告；远端部署根可用 `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` / `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 配置。节点备份清单和恢复命令见[节点备份完整性与快速恢复](node-recovery.md)。
 
@@ -179,7 +179,7 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - `AI_UPSTREAM_FALLBACKS` 在主上游后追加多个备用上游
 - `AI_UPSTREAMS` 直接覆盖完整优先级列表
 - `AI_UPSTREAM_FALLBACK_URL` 适合备用上游使用不同 UUID / `pbk` / `sid` / `sni`
-- 当前生产候选为主 `nat.qq.pw:27166`、备 `100.87.76.6:27166`；备用节点使用独立 REALITY 凭据
+- 当前生产候选为主 `nat.qq.pw:27166`、备 `redacted-ip-004:27166`；备用节点使用独立 REALITY 凭据
 - 主 AI 上游同样可能使用独立凭据；动态 VLESS outbound 必须与 AI inbound 完整匹配，不能从普通数据面 `XRAY_*` 盲目派生
 - 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
 - `AI_NODE_SSH_TARGET` 只启用 SSH 纳管；它不证明凭据匹配，也不应自动派生独立 AI 节点的 relay URL

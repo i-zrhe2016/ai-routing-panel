@@ -6,9 +6,9 @@
 
 | 节点 | SSH 目标 | 认证策略 |
 | --- | --- | --- |
-| 控制面 | `root@100.87.76.6:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
+| 控制面 | `root@redacted-ip-004:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
 | AI 备用 | 本机 Docker `xray-ai-node` | 不使用 SSH；配置由控制面运行时目录提供 |
-| 普通数据面 | `root@100.65.108.93:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
+| 普通数据面 | `root@redacted-ip-003:22` | Tailscale 网络，仅指定 Ed25519 公钥 |
 
 当前公钥指纹：
 

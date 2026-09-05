@@ -13,7 +13,7 @@ actor "客户端" as client
 component "控制面\n管理与编排" as panel
 component "普通数据面\n主入口" as data
 component "主 AI 上游\nnat.qq.pw:27166" as primary
-component "备用 AI 上游\n100.87.76.6:27166" as backupAi
+component "备用 AI 上游\nredacted-ip-004:27166" as backupAi
 component "控制面备用 Xray\n数据面故障时接管" as backup
 
 client --> data : 正常代理流量

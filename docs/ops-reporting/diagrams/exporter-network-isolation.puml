@@ -38,7 +38,7 @@ normalFirewall --> normalNode
 normalFirewall --> normalCadvisor
 tunnel --> aiNode : SSH-forwarded HTTP
 tunnel --> aiCadvisor : SSH-forwarded HTTP
-prometheus --> tunnel : 127.0.0.1 only
+prometheus --> tunnel : redacted-ip-007 only
 
 legend right
   |= Color |= Meaning |

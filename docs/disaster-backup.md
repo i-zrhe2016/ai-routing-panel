@@ -64,7 +64,7 @@ backup-manifest.json
 node-recovery-manifest.json
 ```
 
-普通数据面通过 Tailscale `100.65.108.93:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `100.87.76.6`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
+普通数据面通过 Tailscale `redacted-ip-003:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `redacted-ip-004`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
 
 Kubernetes 变体默认关闭 SSH 采集，因为清单没有内置生产私钥和 known_hosts。若要启用，必须创建 Secret 并以只读卷挂载 key、两个 known_hosts 文件，再在备份 CronJob 的 ConfigMap/Secret 中显式设置目标和路径；不要把私钥内容提交到仓库。Kubernetes 的具体边界见[K3s 部署](kubernetes.md)。
 

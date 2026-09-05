@@ -23,11 +23,11 @@
 
 | 节点 | Tailscale 地址 | Fluent Bit 角色 | Agent 配置目录 | Xray 日志目录 |
 | --- | --- | --- | --- | --- |
-| 控制面 / AI 备用 | `100.87.76.6` | `control_plane` / `ai_data_plane` | `/root/xray-routing-panel/monitoring/fluent-bit` | `/root/ai-routing-panel/app/xray/logs` |
-| 普通数据面 | `100.65.108.93` | `normal_data_plane` | `/root/xray-fluent-bit` | `/root/xray-routing-panel/app/xray/logs` |
-| AI 备用 | `100.87.76.6` | `ai_data_plane` | 控制面监控栈 | `/root/ai-routing-panel/app/xray/logs` |
+| 控制面 / AI 备用 | `redacted-ip-004` | `control_plane` / `ai_data_plane` | `/root/xray-routing-panel/monitoring/fluent-bit` | `/root/ai-routing-panel/app/xray/logs` |
+| 普通数据面 | `redacted-ip-003` | `normal_data_plane` | `/root/xray-fluent-bit` | `/root/xray-routing-panel/app/xray/logs` |
+| AI 备用 | `redacted-ip-004` | `ai_data_plane` | 控制面监控栈 | `/root/ai-routing-panel/app/xray/logs` |
 
-控制面 Loki 绑定 `100.87.76.6:3100`，Grafana 使用现有本机 `3001` 入口。控制面和普通数据面 Agent 使用相同的 parser 和低基数 label 配置，原配置会在滚动更新前保留为带时间戳的 `.bak` 文件。
+控制面 Loki 绑定 `redacted-ip-004:3100`，Grafana 使用现有本机 `3001` 入口。控制面和普通数据面 Agent 使用相同的 parser 和低基数 label 配置，原配置会在滚动更新前保留为带时间戳的 `.bak` 文件。
 
 当前验收结果：控制面 `/healthz` 返回 `ok=true` 且数据面可达；Loki 可按 `category="business"` 查询到 `dns_failover.checked` 业务事件；Grafana 的 `Control Plane Business Logs` dashboard 已加载。AI 备用的 `ai-error.log` 纳入控制面 Agent 的采集范围；高频 `ai-access.log` 只保留在本机，不进入 Loki。
 
@@ -149,15 +149,15 @@ Grafana 通过 proxy 模式访问 Loki，浏览器不需要直接访问 Loki 端
 在控制面执行：
 
 ```bash
-curl -fsS http://127.0.0.1:18080/healthz
-curl -fsS http://100.87.76.6:3100/ready
-curl -fsS http://127.0.0.1:2020/api/v1/metrics
+curl -fsS http://redacted-ip-007:18080/healthz
+curl -fsS http://redacted-ip-004:3100/ready
+curl -fsS http://redacted-ip-007:2020/api/v1/metrics
 ```
 
 查询控制面业务日志：
 
 ```bash
-curl -G http://100.87.76.6:3100/loki/api/v1/query_range \
+curl -G http://redacted-ip-004:3100/loki/api/v1/query_range \
   --data-urlencode 'query={job="platform-logs",node_role="control_plane",category="business"}' \
   --data-urlencode 'limit=100'
 ```
@@ -251,7 +251,7 @@ Grafana 已预置 `Control Plane Business Logs` dashboard；也可以在 Explore
 Agent 健康检查：
 
 ```bash
-curl -s http://127.0.0.1:2020/api/v1/metrics
+curl -s http://redacted-ip-007:2020/api/v1/metrics
 docker compose -f docker-compose.agent.yml logs --tail=200 fluent-bit
 ```
 
@@ -264,7 +264,7 @@ curl -fsS http://loki.tailnet.example:3100/ready
 
 如果 Grafana 查不到日志，按顺序检查：
 
-1. Loki 绑定地址是日志中心的 Tailscale 地址，而不是 `127.0.0.1`。
+1. Loki 绑定地址是日志中心的 Tailscale 地址，而不是 `redacted-ip-007`。
 2. Tailscale ACL 允许对应 Agent 到 `tag:log-store:3100`。
 3. Agent `.env` 的 `FLUENT_BIT_LOKI_HOST`、节点角色和 Xray 日志目录正确。
 4. `/var/lib/docker/containers` 和 Xray 日志目录以只读方式挂载成功。

@@ -15,7 +15,7 @@ node "Control Plane" as control #EFF6FF {
   component "Panel /metrics\nBearer protected" as panelMetrics #DBEAFE
   component "Control node-exporter" as controlExporter #F3F4F6
   component "xray-ai-exporter-tunnel.service" as sshTunnel #E0E7FF
-  component "Prometheus\n127.0.0.1:9090" as prometheus #FEE2E2
+  component "Prometheus\nredacted-ip-007:9090" as prometheus #FEE2E2
   component "Grafana" as grafana #F3E8FF
   component "Daily Reporter\nrules_only" as reporter #DCFCE7
   folder "Atomic JSON / Markdown" as reportFiles #FEF3C7
@@ -38,7 +38,7 @@ normalNode --> prometheus : restricted scrape
 normalCadvisor --> prometheus : restricted scrape
 aiNode --> sshTunnel : SSH local forward
 aiCadvisor --> sshTunnel : SSH local forward
-sshTunnel --> prometheus : 127.0.0.1:19101 / 18082
+sshTunnel --> prometheus : redacted-ip-007:19101 / 18082
 prometheus --> grafana : dashboards
 prometheus --> reporter : HTTP range queries
 reporter --> reportFiles

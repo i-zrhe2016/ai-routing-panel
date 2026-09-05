@@ -9,9 +9,9 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 ## 当前拓扑
 
 ```text
-控制面 `100.87.76.6`
-  ├─ Docker: xray-ai-node ──▶ 0.0.0.0:27166
-  │                         ├─▶ 127.0.0.1:31097/debug/vars
+控制面 `redacted-ip-004`
+  ├─ Docker: xray-ai-node ──▶ redacted-ip-001:27166
+  │                         ├─▶ redacted-ip-007:31097/debug/vars
   │                         └─▶ /var/log/xray/ai-{access,error}.log
   └─ 本机状态检查/重启
 
@@ -21,7 +21,7 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
        ▼
   AI 上游选择器
     ├─ 主：nat.qq.pw:27166
-    └─ 备：100.87.76.6:27166
+    └─ 备：redacted-ip-004:27166
              │
              ▼
        freedom 直出
@@ -31,7 +31,7 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 
 | 端点 | 用途 |
 | --- | --- |
-| `100.87.76.6:27166` | 控制面本机 Docker AI 备用节点，使用独立 REALITY 凭据 |
+| `redacted-ip-004:27166` | 控制面本机 Docker AI 备用节点，使用独立 REALITY 凭据 |
 | `nat.qq.pw:27166` | AI 业务流量，供主数据面 VLESS outbound 使用 |
 
 禁止使用已下线的旧 AI 上游 `isif.217777.xyz:42994`。
@@ -68,15 +68,15 @@ AI 节点使用 `AI_NODE_*` 独立 UUID、REALITY 私钥、公钥和 Short ID，
 
 | 端点 | 服务 | 指标路径 | 采集目标 | 说明 |
 | --- | --- | --- | --- | --- |
-| Xray 指标 | AI Xray | `/debug/vars` | `127.0.0.1:31097` | 入站与 `direct` 出站累计字节，仅绑定回环 |
+| Xray 指标 | AI Xray | `/debug/vars` | `redacted-ip-007:31097` | 入站与 `direct` 出站累计字节，仅绑定回环 |
 | 控制面监控端点 | Node Exporter/cAdvisor | `/metrics` | `control-plane` | 控制面主机与 `xray-ai-node` 容器网络指标 |
-| 面板指标 | Routing Panel | `/metrics` | Prometheus | 汇总 AI Xray 字节指标，需 Bearer token |
+| 面板指标 | Routing Panel | `/metrics` | Prometheus | 汇总 AI Xray 字节指标，需 Bearer X |
 
 当前 AI 节点容器部署为：
 
 ```text
 xray-ai-node        → host network → :27166（业务端口，不得修改）
-                    → 127.0.0.1:31097（Xray metrics，不得公网开放）
+                    → redacted-ip-007:31097（Xray metrics，不得公网开放）
                     → app/xray/logs/ai-access.log、ai-error.log
 ```
 
@@ -87,9 +87,9 @@ xray-ai-node        → host network → :27166（业务端口，不得修改）
 ```bash
 docker inspect xray-ai-node --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
 docker exec xray-ai-node /usr/local/bin/xray run -test -config /etc/xray/config.json
-curl -fsS http://127.0.0.1:31097/debug/vars >/dev/null
+curl -fsS http://redacted-ip-007:31097/debug/vars >/dev/null
 stat /root/ai-routing-panel/app/xray/logs/ai-access.log /root/ai-routing-panel/app/xray/logs/ai-error.log
-curl -fsS http://127.0.0.1:9090/api/v1/targets
+curl -fsS http://redacted-ip-007:9090/api/v1/targets
 ```
 
 面板 Prometheus 指标中，`xray_panel_ai_node_metrics_available=1` 表示 Xray
@@ -112,7 +112,7 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 仍以 `xray_panel_ai_node_traffic_bytes_total` 和
 `xray_panel_ai_node_egress_bytes_total` 为准。
 
-控制面 cAdvisor 使用 `127.0.0.1:18081`，Prometheus target 为
+控制面 cAdvisor 使用 `redacted-ip-007:18081`，Prometheus target 为
 `control-plane-cadvisor`；它提供 `xray-ai-node` 容器的 CPU、内存和网络总量，
 不替代 Xray 按入站方向的业务计数。
 
@@ -148,15 +148,15 @@ UserKnownHostsFile=/root/.ssh/known_hosts
 ```env
 AI_NODE_SSH_TARGET=
 AI_NODE_CONTAINER_NAME=xray-ai-node
-AI_NODE_PROBE_HOST=100.87.76.6
-AI_NODE_API_SERVER=127.0.0.1:27166
-AI_NODE_METRICS_URL=http://127.0.0.1:31097/debug/vars
+AI_NODE_PROBE_HOST=redacted-ip-004
+AI_NODE_API_SERVER=redacted-ip-007:27166
+AI_NODE_METRICS_URL=http://redacted-ip-007:31097/debug/vars
 AI_NODE_CONFIG_PATH=
 ```
 
 关键语义：
 
-- `AI_NODE_API_SERVER=127.0.0.1:27166`：本机 Docker 模式使用的 TCP 业务端口，用于节点存活检查。
+- `AI_NODE_API_SERVER=redacted-ip-007:27166`：本机 Docker 模式使用的 TCP 业务端口，用于节点存活检查。
 - `AI_NODE_METRICS_URL`：面板读取 AI Xray expvar 的地址；默认只允许控制面回环地址，不得改成公网监听。
 - `AI_NODE_CONFIG_PATH=`：显式留空会使 `supports_sync=false`，禁止控制面上传配置。
 - `AI_NODE_CONTAINER_NAME=xray-ai-node` 提供本机容器状态检查和重启能力。
@@ -169,7 +169,7 @@ AI_UPSTREAM_PORT=27166
 # 备用候选使用 AI_UPSTREAM_FALLBACK_URL 或 AI_UPSTREAM_FALLBACKS 配置
 ```
 
-`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 定义主候选；生产备用候选为 `100.87.76.6:27166`，应通过 `AI_UPSTREAM_FALLBACK_URL` 或 `AI_UPSTREAM_FALLBACKS` 加入候选列表。端点变量不能替代 AI 节点独立的 UUID、REALITY 密钥、Short ID 和 SNI。
+`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 定义主候选；生产备用候选为 `redacted-ip-004:27166`，应通过 `AI_UPSTREAM_FALLBACK_URL` 或 `AI_UPSTREAM_FALLBACKS` 加入候选列表。端点变量不能替代 AI 节点独立的 UUID、REALITY 密钥、Short ID 和 SNI。
 
 ## 为什么默认禁用配置上传
 
@@ -198,13 +198,13 @@ AI_NODE_CONFIG_PATH=
 
 ```bash
 # 控制面健康状态
-curl -fsS http://127.0.0.1:18080/healthz
+curl -fsS http://redacted-ip-007:18080/healthz
 
 # AI 备用容器状态
 docker inspect xray-ai-node --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
 
 # 业务端口
-nc -zv 100.87.76.6 27166
+nc -zv redacted-ip-004 27166
 ```
 
 预期 `/healthz`：

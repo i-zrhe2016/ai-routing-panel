@@ -18,7 +18,7 @@
 
 - 鉴权：必须设置 `METRICS_TOKEN`。
   - 未设置时端点返回 `404`（默认不对外开放）。
-  - 设置后需带请求头 `Authorization: Bearer <METRICS_TOKEN>`，否则返回 `401`。
+  - 设置后需带请求头 `Authorization: X <METRICS_TOKEN>`，否则返回 `401`。
 - 可选 `METRICS_DP_TTL`（默认 `30` 秒）：缓存数据面存活检测和 AI Xray 指标读取，避免高频/并发抓取叠加 I/O。
 - 抓取路径严格只读、不触发流量同步与探针，可放心按 15–30s 抓取。
 
@@ -34,8 +34,8 @@
 
 > `traffic`/`connections` 为 counter，但“重置流量并启用”/配额恢复会清零累计值——这是合法的 counter reset，`rate()`/`increase()` 能正确处理。
 
-- 本机备用 AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。AI Xray metrics 只监听 `127.0.0.1:31097`，由面板聚合后进入 Prometheus。远端 AI 模式才需要单独配置 AI 主机的监控 target。
-- 控制面 cAdvisor 监听 `127.0.0.1:18081`，用于采集 `xray-ai-node` 容器级 CPU、内存和网络总量；该总量不能替代 Xray 入站/出站业务计数。
+- 本机备用 AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。AI Xray metrics 只监听 `redacted-ip-007:31097`，由面板聚合后进入 Prometheus。远端 AI 模式才需要单独配置 AI 主机的监控 target。
+- 控制面 cAdvisor 监听 `redacted-ip-007:18081`，用于采集 `xray-ai-node` 容器级 CPU、内存和网络总量；该总量不能替代 Xray 入站/出站业务计数。
 - AI 域名/端口指标来自本机 `ai-access.log` 的 `accepted` 记录，默认聚合最近 10 分钟请求量；access log 没有按目标拆分的字节数，不应把请求量指标解释为 per-domain 字节量。
 - 高流量查询：`topk(20, xray_panel_ai_destination_requests)`；高请求速率查询：`topk(20, xray_panel_ai_destination_requests_per_second)`。
 - 控制面 Prometheus 的普通数据面和控制面 targets 应显示 `up`；若远端 AI target 出现 `timeout` 或 `connection refused`，再检查远端 AI 节点的 exporter 容器和端口监听。
@@ -76,7 +76,7 @@ scrape_configs:
 
 > ✅ **当前入口**：Grafana 通过 `https://xray.zrhe2016.cc/grafana/` 访问，Cloudflare Access 是公网认证边界；Grafana 的 `3001` 仅供本机 Nginx 反代使用。Cloudflare Access 邮箱会由 Nginx 转为 Grafana Auth Proxy 用户标识，认证后不再显示 Grafana 登录页。
 
-> 前置项：要看**数据面（DMIT `64.186.224.96`）**的系统资源，需在该机部署一份 node_exporter，并在 `monitoring/prometheus/prometheus.yml` 取消 `job_name: node` 下 DMIT target 的注释后 reload；否则「监控」里的主机指标只反映面板主机。
+> 前置项：要看**数据面（DMIT `redacted-ip-011`）**的系统资源，需在该机部署一份 node_exporter，并在 `monitoring/prometheus/prometheus.yml` 取消 `job_name: node` 下 DMIT target 的注释后 reload；否则「监控」里的主机指标只反映面板主机。
 
 ### 监控栈启停
 
@@ -93,10 +93,10 @@ docker compose -f docker-compose.monitoring.yml down  # 保留数据卷
 修改 `prometheus.yml` 后可热加载：
 
 ```bash
-curl -X POST http://127.0.0.1:9090/-/reload
+curl -X POST http://redacted-ip-007:9090/-/reload
 ```
 
-访问入口：Grafana 使用 `https://xray.zrhe2016.cc/grafana/`，Prometheus 是 `127.0.0.1:9090`。Grafana 管理员密码来自
+访问入口：Grafana 使用 `https://xray.zrhe2016.cc/grafana/`，Prometheus 是 `redacted-ip-007:9090`。Grafana 管理员密码来自
 `monitoring/.env`。公网访问 Grafana 前必须通过 Cloudflare Access；不要直接暴露 `3001`、`9090` 或 node_exporter 的 `:9100`。
 
 ### Fluent Bit 日志采集
@@ -152,7 +152,7 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 - `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`，并生成一个包含配置文件的灾备归档
 - 本地 `.db` 和 `tar.gz` 备份文件均落在 `./backups`
 - 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env`、运行时/报告、`data/uploads` 和部署脚本
-- Compose 还会在打包前通过 Tailscale 上的严格只读 SSH 采集普通数据面（`100.65.108.93:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
+- Compose 还会在打包前通过 Tailscale 上的严格只读 SSH 采集普通数据面（`redacted-ip-003:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
 - 每个归档都包含 `node-recovery-manifest.json`，任务还会生成 `node-recovery-status.json`，明确标记 `recoveryReady`
 - 远端采集默认是非必需的：普通数据面失联不会丢弃控制面归档；要把普通数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
 - 当 `DB_BACKUP_R2_ENABLED=1` 时，归档成功后会继续调用 `R2 灾备上传`
@@ -188,7 +188,7 @@ SSH 采集的密钥、known_hosts、实测路径和只读排障命令见[远端�
 
 远端模式注意：
 
-- 探针目标不能继续是 `127.0.0.1`
+- 探针目标不能继续是 `redacted-ip-007`
 - 把 `DATAPLANE_PROBE_HOST` 设置成远端入口 IP 或域名
 
 ## DNS 故障切换
@@ -292,7 +292,7 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 
 - 使用密码文件包装器时，密码只从只读文件读取，不写入环境变量或命令行
 - `AI_NODE_SSH_OPTIONS` 必须启用严格主机校验并使用专用 `known_hosts`
-- `AI_NODE_API_SERVER` 用于远端 Socket 状态检查；当前生产检查 `127.0.0.1:27166`
+- `AI_NODE_API_SERVER` 用于远端 Socket 状态检查；当前生产检查 `redacted-ip-007:27166`
 - `AI_NODE_CONFIG_PATH` 非空时才支持上传；生产当前显式留空，因此配置上传关闭
 - 即使上传关闭，`GET /api/ai-node/status` 和 `POST /api/ai-node/restart` 仍可用
 - AI 节点使用独立 REALITY 凭据，主数据面 outbound 必须与其 inbound 完整匹配

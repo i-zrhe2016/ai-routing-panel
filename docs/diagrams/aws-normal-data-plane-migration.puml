@@ -5,14 +5,14 @@ left to right direction
 actor "客户端" as client
 cloud "Cloudflare DNS\nprimary → AWS 公网 IP\nbackup → 控制面公网 IP" as dns
 
-node "AWS 普通数据面\nTailscale 100.92.231.104\n公网 52.12.220.85" as aws #A9DFBF {
+node "AWS 普通数据面\nTailscale control-plane-host\n公网 redacted-ip-010" as aws #A9DFBF {
   component "Xray 26.5.3\n8 个 VLESS + REALITY TCP 入口" as xray
   component "verge-sub\n订阅 HTTPS" as subscription
   component "Exporter / cAdvisor\nFluent Bit" as monitoring
 }
 
-node "原普通数据面（回退源）\nTailscale 100.65.108.93\n公网 64.186.224.96" as old #FAD7A0
-node "控制面\nTailscale 100.92.111.68\nDNS Failover + AI Manager" as control #AED6F1
+node "原普通数据面（回退源）\nTailscale redacted-ip-003\n公网 redacted-ip-011" as old #FAD7A0
+node "控制面\nTailscale redacted-ip-005\nDNS Failover + AI Manager" as control #AED6F1
 
 client --> dns : 解析入口
 dns --> aws : 正常流量
@@ -24,7 +24,7 @@ aws --> subscription
 aws --> monitoring
 
 note bottom of aws
-100.92.231.104 仅用于 Tailscale 管理。
-公网 DNS 必须使用 52.12.220.85。
+control-plane-host 仅用于 Tailscale 管理。
+公网 DNS 必须使用 redacted-ip-010。
 end note
 @enduml

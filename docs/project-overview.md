@@ -27,7 +27,7 @@
   - 数据面模式由 `docker`、`local`、`ssh`、`unmanaged` 四类自动判定
   - 运行 `ai_domain_manager`，生成 `dynamic-routing.json` 将 AI 域名流量转发到选中的 AI 候选
 - AI 路由控制器
-  - 探测主 `nat.qq.pw:27166` 与备 `100.87.76.6:27166`
+  - 探测主 `nat.qq.pw:27166` 与备 `redacted-ip-004:27166`
   - 支持 `auto`、`primary`、`backup`、`forced_fallback` 四种模式
   - 将人工模式和当前候选状态持久化到 `app_state`
 - AI 节点（当前备用为控制面本机 Docker；也支持远端独立机器）
@@ -165,7 +165,7 @@ docker compose --profile backup-xray up -d xray-reality-backup
 注意：
 
 - 控制面会先在本地渲染，再通过 SSH 上传产物
-- 如果控制面和数据面分离，`DATAPLANE_PROBE_HOST` 应改成远端入口 IP 或域名，而不是 `127.0.0.1`
+- 如果控制面和数据面分离，`DATAPLANE_PROBE_HOST` 应改成远端入口 IP 或域名，而不是 `redacted-ip-007`
 
 ### AI 节点
 
@@ -244,7 +244,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 ## 灾备归档与 R2 上传
 
-默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过 Tailscale 严格只读 SSH 采集普通数据面 `100.65.108.93:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
+默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过 Tailscale 严格只读 SSH 采集普通数据面 `redacted-ip-003:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
 
 Compose 备份服务默认会在备份完成后自动加密并上传到 Cloudflare R2；首次部署前请在根 `.env` 中填入：
 
@@ -270,7 +270,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 ## 常用接口摘要
 
-管理后台（需管理员会话 / Basic 认证）：
+管理后台（需管理员会话 / Basic X
 
 - `GET /`: 管理后台 SPA 壳
 - `GET /api/dashboard`: 首页完整状态
@@ -300,7 +300,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 公共与其他：
 
 - `GET /healthz`: 返回 `{"ok": <bool>, "data_plane_running": <bool>}`
-- `GET /metrics`: Prometheus 文本格式指标（需 `METRICS_TOKEN`，`Authorization: Bearer <token>`）；管理后台「监控」标签把这些指标经 Grafana 内嵌出图（需 `GRAFANA_PUBLIC_URL`）
+- `GET /metrics`: Prometheus 文本格式指标（需 `METRICS_TOKEN`，`Authorization: X <token>`）；管理后台「监控」标签把这些指标经 Grafana 内嵌出图（需 `GRAFANA_PUBLIC_URL`）
 - `GET /probe-dashboard`: TCP 探针监控页
 - `GET /ai-domain-dashboard`: AI 域名统计页
 

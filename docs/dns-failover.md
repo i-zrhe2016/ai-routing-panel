@@ -359,7 +359,7 @@ backup 活跃时，每轮 DNS failover 检测:
         "label": "普通数据面",
         "status": "running",
         "status_label": "运行中",
-        "target": "64.186.224.96",
+        "target": "redacted-ip-011",
         "reachable": true,
         "xray_running": true,
         "supports_restart": true,
@@ -407,7 +407,7 @@ backup 活跃时，每轮 DNS failover 检测:
 ### 获取 DNS 故障切换状态
 
 ```bash
-curl -u admin:secret http://127.0.0.1:18080/api/dns-failover
+curl -u admin:secret http://redacted-ip-007:18080/api/dns-failover
 ```
 
 返回体包含 `enabled`、`configured`、`current_target`、`current_target_label`、`record_content`、`primary_content`、`backup_content`、`last_probe_status` 等字段。
@@ -415,7 +415,7 @@ curl -u admin:secret http://127.0.0.1:18080/api/dns-failover
 ### 立即执行一次 DNS 检测
 
 ```bash
-curl -u admin:secret -X POST http://127.0.0.1:18080/api/dns-failover/check
+curl -u admin:secret -X POST http://redacted-ip-007:18080/api/dns-failover/check
 ```
 
 返回最新的 `dns_failover_status`。
@@ -424,12 +424,12 @@ curl -u admin:secret -X POST http://127.0.0.1:18080/api/dns-failover/check
 
 ```bash
 # 切到主数据面
-curl -u admin:secret -X POST http://127.0.0.1:18080/api/dns-failover/switch \
+curl -u admin:secret -X POST http://redacted-ip-007:18080/api/dns-failover/switch \
   -H 'Content-Type: application/json' \
   -d '{"target": "primary"}'
 
 # 切到控制面备用
-curl -u admin:secret -X POST http://127.0.0.1:18080/api/dns-failover/switch \
+curl -u admin:secret -X POST http://redacted-ip-007:18080/api/dns-failover/switch \
   -H 'Content-Type: application/json' \
   -d '{"target": "backup"}'
 ```
@@ -455,13 +455,13 @@ AI 节点不参与 DNS 切换。需要立即固定 AI 流量目标时，可调�
 
 ```bash
 # 固定主 AI
-curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+curl -u admin:secret http://redacted-ip-007:18080/api/ai-routing/switch \
   -H 'Content-Type: application/json' \
   -X POST \
   -d '{"mode":"primary"}'
 
 # 固定备用 AI
-curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+curl -u admin:secret http://redacted-ip-007:18080/api/ai-routing/switch \
   -H 'Content-Type: application/json' \
   -X POST \
   -d '{"mode":"backup"}'
@@ -470,7 +470,7 @@ curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
 如果需要立即停止所有 AI 动态转发并让 AI 域名回到数据面直出：
 
 ```bash
-curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+curl -u admin:secret http://redacted-ip-007:18080/api/ai-routing/switch \
   -H 'Content-Type: application/json' \
   -X POST \
   -d '{"mode":"forced_fallback"}'
@@ -479,7 +479,7 @@ curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
 控制面会删除动态 AI 路由并在可用时重启数据面；`forced_fallback` 状态会持久化。恢复自动：
 
 ```bash
-curl -u admin:secret http://127.0.0.1:18080/api/ai-routing/switch \
+curl -u admin:secret http://redacted-ip-007:18080/api/ai-routing/switch \
   -H 'Content-Type: application/json' \
   -X POST \
   -d '{"mode":"auto"}'
