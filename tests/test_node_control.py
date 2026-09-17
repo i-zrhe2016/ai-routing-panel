@@ -801,6 +801,72 @@ class NodeControlTest(unittest.TestCase):
         self.assertFalse(second_payload["skip_until_newline"])
         self.assertIn("after.example.com", second_payload["data"])
 
+    def test_remote_access_log_script_keeps_discard_state_at_eof(self):
+        log_path = self.root / "access.log"
+        log_path.write_text("header\n" + "x" * (8 * 1024 * 1024 + 1024), encoding="utf-8")
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        recorded_inode = str(log_path.stat().st_ino)
+
+        first = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertEqual(first_payload["offset"], log_path.stat().st_size)
+        self.assertTrue(first_payload["skip_until_newline"])
+
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(" continuation accepted tcp:discarded.example.com:443")
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(log_path),
+                recorded_inode,
+                str(first_payload["offset"]),
+                "",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertTrue(second_payload["skip_until_newline"])
+        self.assertEqual(second_payload["data"], "")
+
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\n2026/08/31 11:31:00.000000 accepted tcp:after.example.com:443 [direct]\n"
+            )
+        third = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(log_path),
+                recorded_inode,
+                str(second_payload["offset"]),
+                "",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(third.returncode, 0, third.stderr)
+        third_payload = json.loads(third.stdout)
+        self.assertFalse(third_payload["skip_until_newline"])
+        self.assertNotIn("discarded.example.com", third_payload["data"])
+        self.assertIn("after.example.com", third_payload["data"])
+
     def test_remote_access_log_delta_passes_optional_timestamp_cutoff(self):
         controller = DataPlaneController(
             DataPlaneConfig(

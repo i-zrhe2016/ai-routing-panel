@@ -81,7 +81,6 @@ with open(path, "rb") as handle:
         raw_data = handle.read(MAX_READ_BYTES)
         if not raw_data:
             offset = handle.tell() if skip_until_newline else read_offset
-            skip_until_newline = False
             break
 
         data_start = read_offset
@@ -93,8 +92,6 @@ with open(path, "rb") as handle:
                 if handle.tell() < stat.st_size and scan_bytes < MAX_SCAN_BYTES:
                     continue
                 offset = handle.tell()
-                if handle.tell() >= stat.st_size:
-                    skip_until_newline = False
                 break
             raw_data = raw_data[first_newline + 1 :]
             data_start = read_offset + first_newline + 1
