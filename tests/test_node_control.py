@@ -12,7 +12,11 @@ from types import ModuleType, SimpleNamespace
 from unittest import mock
 
 from app.xray.node import DataPlaneConfig, DataPlaneController
-from app.xray.node.files import REMOTE_FILE_DELTA_SCRIPT, build_temp_target_path
+from app.xray.node.files import (
+    REMOTE_FILE_DELTA_SCRIPT,
+    REMOTE_READ_HTTP_JSON_SCRIPT,
+    build_temp_target_path,
+)
 from app.xray.operation_lock import exclusive_file_lock
 
 
@@ -347,6 +351,148 @@ class NodeControlTest(unittest.TestCase):
             state.set_ai_routing_manual_mode("auto")
         self.assertEqual(state.ai_routing_manual_state()["mode"], "forced_fallback")
 
+    def test_single_promoted_ai_candidate_is_visible_and_can_be_fixed_primary(self):
+        os.environ["AI_ROUTING_ENABLED"] = "1"
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"
+        os.environ["AI_UPSTREAM_FALLBACK_AS_PRIMARY"] = "1"
+        env_file = self.root / "xray" / ".env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(
+            "AI_UPSTREAM_HOST=127.0.0.1\n"
+            "AI_UPSTREAM_PORT=27166\n"
+            "AI_UPSTREAM_FALLBACK_AS_PRIMARY=0\n"
+            "AI_UPSTREAM_FALLBACK_URL=vless://22222222-2222-2222-2222-222222222222@"
+            "127.0.0.1:27166?encryption=none&security=reality&type=tcp&"
+            "sni=www.amazon.com&fp=chrome&pbk=public-key&sid=abcdef0123456789\n",
+            encoding="utf-8",
+        )
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        state.ai_routing._trigger_ai_domain_manager = mock.Mock()
+        with state.connect() as conn:
+            state.set_state(conn, "ai_routing_manual_mode", "backup")
+            conn.commit()
+
+        status = state.ai_routing_manual_state()
+        self.assertEqual(status["candidate_count"], 1)
+        self.assertEqual(status["candidates"][0]["candidate_type"], "share_url")
+        self.assertEqual(status["mode"], "primary")
+
+        state.set_ai_routing_manual_mode("primary")
+
+        state.ai_routing._trigger_ai_domain_manager.assert_called_once_with("primary")
+        self.assertEqual(state.ai_routing_manual_state()["mode"], "primary")
+
+    def test_ai_manual_state_does_not_use_stale_report_when_current_config_is_empty(self):
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "docker"
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        report_path = self.root / "xray" / "reports" / "hourly-domains" / "latest.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "ai_target": {
+                        "selected_index": 1,
+                        "candidates": [
+                            {"upstream_host": "stale.example.com", "upstream_port": 27166}
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (self.root / "xray" / ".env").write_text("AI_UPSTREAM_HOST=\n", encoding="utf-8")
+
+        status = state.ai_routing_manual_state()
+
+        self.assertEqual(status["candidate_count"], 0)
+        self.assertEqual(status["candidates"], [])
+
+    def test_ai_manual_state_preserves_mode_when_current_config_is_unknown(self):
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "docker"
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        report_path = self.root / "xray" / "reports" / "hourly-domains" / "latest.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "ai_target": {
+                        "candidates": [
+                            {"upstream_host": "reported.example.com", "upstream_port": 27166}
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with state.connect() as conn:
+            state.set_state(conn, "ai_routing_manual_mode", "backup")
+            conn.commit()
+
+        status = state.ai_routing_manual_state()
+
+        self.assertEqual(status["mode"], "backup")
+        self.assertEqual(status["candidate_count"], 1)
+
+    def test_ai_manual_state_merges_current_report_probe_and_selection(self):
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "docker"
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        (self.root / "xray" / ".env").write_text(
+            "AI_UPSTREAM_HOST=reported.example.com\nAI_UPSTREAM_PORT=27166\n",
+            encoding="utf-8",
+        )
+        report_path = self.root / "xray" / "reports" / "hourly-domains" / "latest.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "ai_target": {
+                        "selected_index": 0,
+                        "candidates": [
+                            {
+                                "candidate_type": "template",
+                                "upstream_host": "reported.example.com",
+                                "upstream_port": 27166,
+                                "is_reachable": True,
+                                "checked_at": "2026-09-17T00:00:00+00:00",
+                                "probe_method": "tcp",
+                            }
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        status = state.ai_routing_manual_state()
+
+        self.assertTrue(status["candidates"][0]["selected"])
+        self.assertTrue(status["candidates"][0]["is_reachable"])
+        self.assertEqual(status["candidates"][0]["checked_at"], "2026-09-17T00:00:00+00:00")
+        self.assertEqual(status["candidates"][0]["probe_method"], "tcp")
+
+    def test_environment_only_ai_candidate_without_env_file_is_rejected(self):
+        os.environ["AI_ROUTING_ENABLED"] = "1"
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"
+        os.environ["AI_UPSTREAM_HOST"] = "127.0.0.1"
+        os.environ["AI_UPSTREAM_PORT"] = "27166"
+        os.environ["AI_UPSTREAM_FALLBACK_AS_PRIMARY"] = "0"
+        state_module = load_state_module(self.root)
+        state = state_module.PanelState()
+        state.init_db()
+
+        with self.assertRaisesRegex(state_module.ValidationError, "未配置可用 AI 节点"):
+            state.set_ai_routing_manual_mode("primary")
+
+    def test_manual_ai_mode_rejects_when_no_candidates_are_configured(self):
+        os.environ["AI_ROUTING_ENABLED"] = "1"
+        state_module = load_state_module(self.root)
+        state = state_module.PanelState()
+        state.init_db()
+
+        with self.assertRaisesRegex(state_module.ValidationError, "未配置可用 AI 节点"):
+            state.set_ai_routing_manual_mode("primary")
+
     def test_manual_manager_can_run_locally_in_a_shared_pod(self):
         os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"
         state = load_state_module(self.root).PanelState()
@@ -524,6 +670,203 @@ class NodeControlTest(unittest.TestCase):
         self.assertIn("api.openai.com", payload["data"])
         self.assertEqual(payload["offset"], log_path.stat().st_size)
 
+    def test_remote_access_log_script_bounds_initial_tail_read(self):
+        log_path = self.root / "access.log"
+        log_path.write_text(
+            "x" * (8 * 1024 * 1024 + 1024)
+            + "\n"
+            + "2026/08/31 11:30:00.000000 recent accepted tcp:api.openai.com:443 [direct]\n",
+            encoding="utf-8",
+        )
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+
+        completed = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), "", "0"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertLessEqual(len(payload["data"].encode("utf-8")), 8 * 1024 * 1024)
+        self.assertIn("api.openai.com", payload["data"])
+        self.assertEqual(payload["offset"], log_path.stat().st_size)
+
+    def test_remote_access_log_script_preserves_incomplete_line_offset(self):
+        log_path = self.root / "access.log"
+        log_path.write_text("header\n" + "partial" * (1024 * 1024), encoding="utf-8")
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        recorded_inode = str(log_path.stat().st_ino)
+
+        first = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertEqual(first_payload["offset"], 7)
+        self.assertEqual(first_payload["data"], "")
+
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+        second = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertEqual(second_payload["offset"], log_path.stat().st_size)
+        self.assertIn("partial", second_payload["data"])
+
+    def test_remote_access_log_script_advances_past_oversized_line(self):
+        log_path = self.root / "access.log"
+        log_path.write_text(
+            "header\n"
+            + "2026/08/31 11:30:00.000000 accepted tcp:oversized.example.com:443 "
+            + "x" * (8 * 1024 * 1024 + 1024)
+            + "\n2026/08/31 11:31:00.000000 accepted tcp:after.example.com:443 [direct]\n",
+            encoding="utf-8",
+        )
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        recorded_inode = str(log_path.stat().st_ino)
+
+        first = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertGreater(first_payload["offset"], 7)
+        self.assertLessEqual(len(first_payload["data"].encode("utf-8")), 8 * 1024 * 1024)
+        self.assertEqual(first_payload["offset"], log_path.stat().st_size)
+        self.assertNotIn("oversized.example.com", first_payload["data"])
+        self.assertIn("after.example.com", first_payload["data"])
+
+    def test_remote_access_log_script_bounds_unterminated_oversized_scan(self):
+        log_path = self.root / "access.log"
+        log_path.write_text(
+            "header\n"
+            + "x" * (16 * 1024 * 1024 + 1024)
+            + "\n2026/08/31 11:31:00.000000 accepted tcp:after.example.com:443 [direct]\n",
+            encoding="utf-8",
+        )
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        recorded_inode = str(log_path.stat().st_ino)
+
+        first = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertEqual(first_payload["offset"], 7 + 16 * 1024 * 1024)
+        self.assertEqual(first_payload["data"], "")
+        self.assertTrue(first_payload["skip_until_newline"])
+
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(log_path),
+                recorded_inode,
+                str(first_payload["offset"]),
+                "",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertEqual(second_payload["offset"], log_path.stat().st_size)
+        self.assertFalse(second_payload["skip_until_newline"])
+        self.assertIn("after.example.com", second_payload["data"])
+
+    def test_remote_access_log_script_keeps_discard_state_at_eof(self):
+        log_path = self.root / "access.log"
+        log_path.write_text("header\n" + "x" * (8 * 1024 * 1024 + 1024), encoding="utf-8")
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        recorded_inode = str(log_path.stat().st_ino)
+
+        first = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertEqual(first_payload["offset"], log_path.stat().st_size)
+        self.assertTrue(first_payload["skip_until_newline"])
+
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(" continuation accepted tcp:discarded.example.com:443")
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(log_path),
+                recorded_inode,
+                str(first_payload["offset"]),
+                "",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertTrue(second_payload["skip_until_newline"])
+        self.assertEqual(second_payload["data"], "")
+
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\n2026/08/31 11:31:00.000000 accepted tcp:after.example.com:443 [direct]\n"
+            )
+        third = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(log_path),
+                recorded_inode,
+                str(second_payload["offset"]),
+                "",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(third.returncode, 0, third.stderr)
+        third_payload = json.loads(third.stdout)
+        self.assertFalse(third_payload["skip_until_newline"])
+        self.assertNotIn("discarded.example.com", third_payload["data"])
+        self.assertIn("after.example.com", third_payload["data"])
+
     def test_remote_access_log_delta_passes_optional_timestamp_cutoff(self):
         controller = DataPlaneController(
             DataPlaneConfig(
@@ -549,6 +892,67 @@ class NodeControlTest(unittest.TestCase):
 
         self.assertTrue(result["exists"])
         self.assertEqual(calls[0][-1], "123.5")
+
+    def test_remote_access_log_delta_passes_skip_state(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                access_log_path="/var/log/xray/access.log",
+            )
+        )
+        calls = []
+
+        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
+            calls.append(args)
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"exists": true, "inode": "1", "offset": 12, "data": "", "skip_until_newline": true}',
+                stderr="",
+            )
+
+        controller._run_remote = fake_run_remote
+
+        result = controller.read_access_log_delta("1", 8, skip_until_newline=True)
+
+        self.assertTrue(result["skip_until_newline"])
+        self.assertEqual(calls[0][-2:], ["", "1"])
+
+    def test_remote_metrics_payload_reads_loopback_endpoint(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="ai_node",
+                label="AI 节点",
+                ssh_target="root@example.com",
+            )
+        )
+        calls = []
+
+        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
+            calls.append((args, timeout))
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"stats": {"inbound": {}, "outbound": {}}}',
+                stderr="",
+            )
+
+        controller._run_remote = fake_run_remote
+
+        result = controller.read_metrics_payload("http://127.0.0.1:31097/debug/vars", 5)
+
+        self.assertEqual(result["stats"], {"inbound": {}, "outbound": {}})
+        self.assertEqual(calls[0][0][:3], ["python3", "-c", REMOTE_READ_HTTP_JSON_SCRIPT])
+        self.assertEqual(calls[0][0][-2:], ["http://127.0.0.1:31097/debug/vars", "5.0"])
+        self.assertEqual(calls[0][1], 5.0)
+
+    def test_remote_metrics_payload_rejects_non_loopback_endpoint(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(role="ai_node", label="AI 节点", ssh_target="root@example.com")
+        )
+
+        with self.assertRaisesRegex(ValueError, "回环地址"):
+            controller.read_metrics_payload("http://metrics.example.com/debug/vars", 5)
 
     def test_remote_dynamic_routing_sync_updates_local_copy(self):
         local_path = self.root / "dynamic-routing.json"

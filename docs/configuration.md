@@ -20,7 +20,7 @@
 | `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台「监控」标签使用该同源地址 |
 | `GRAFANA_OBSERVABILITY_UID` | 「监控」标签内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
-| `DATAPLANE_SSH_TARGET` | 远端数据面内网 SSH 目标；默认 `root@100.116.187.106`（Compose） |
+| `DATAPLANE_SSH_TARGET` | 远端数据面内网 SSH 目标；默认 `root@<normal-data-plane-host>`（Compose） |
 | `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；认证固定为密码/键盘交互，禁止注入私钥 |
 | `DATAPLANE_SSH_KNOWN_HOSTS` | 数据面主机密钥文件；默认 `/root/.ssh/known_hosts`，严格校验且不接受未知主机 |
 | `DATAPLANE_REMOTE_COMMAND_TIMEOUT` | 单次远程 SSH/Docker 命令的控制面超时，默认 `8` 秒；避免数据面失联拖住控制面任务 |
@@ -52,7 +52,7 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 - `PROBE_INTERVAL`
 - `PROBE_TEST_LISTEN_PORT`
 - `PANEL_HEALTH_REQUIRES_XRAY`
-- `PANEL_INTERNAL_HOSTS`：免管理员登录和 CSRF 的内网 Host 列表，默认包含 `100.112.13.103`
+- `PANEL_INTERNAL_HOSTS`：免管理员登录和 CSRF 的内网 Host 列表；默认仅允许回环地址，部署时需显式加入受控的控制面内网地址
 
 Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 `monitoring/loki/.env`，Grafana 使用 `monitoring/.env` 中的 `GRAFANA_LOKI_URL`。三节点生产路径和实际主机角色见 [Fluent Bit 日志采集](logging-fluent-bit.md#当前生产部署)。
 
@@ -60,26 +60,26 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 
 | 变量 | 说明 |
 | --- | --- |
-| `AI_NODE_SSH_TARGET` | 可选远端 AI 节点 SSH 目标；当前本机备用为空 |
+| `AI_NODE_SSH_TARGET` | 可选远端 AI 节点 SSH 目标；多节点配置优先使用 `AI_NODE_SSH_TARGETS` |
 | `AI_NODE_SSH_TARGETS` | 多个远端 AI 节点 SSH 目标，按逗号或换行分隔；与 `AI_NODE_IDS`、`AI_NODE_LABELS` 按顺序对应 |
 | `AI_NODE_IDS` | 多节点稳定 ID，按逗号或换行分隔；用于逐节点重启 API 和界面定位 |
 | `AI_NODE_LABELS` | 多节点显示名，按逗号或换行分隔 |
 | `AI_NODE_SSH_BIN` | SSH 可执行文件；默认 `ssh` |
 | `AI_NODE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；远端纳管使用内网直连和密码/键盘交互认证 |
 | `AI_NODE_SSH_KNOWN_HOSTS` | AI 节点主机密钥文件；默认 `/root/.ssh/known_hosts_ai` |
-| `AI_NODE_CONTAINER_NAME` | 本机 AI 备用 Xray 容器名；当前为 `xray-ai-node` |
+| `AI_NODE_CONTAINER_NAME` | 本机 Docker 模式的 AI Xray 容器名；示例为 `xray-ai-node` |
 | `AI_NODE_CONTAINER_NAMES` | 多节点远端容器名，按顺序对应 SSH 目标 |
 | `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
 | `AI_NODE_RESTART_COMMANDS` | 多节点自定义重启命令，按顺序对应；留空时使用容器名执行 `docker restart` |
 | `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |
 | `AI_NODE_CONFIG_PATHS` | 多节点配置路径；当前多节点纳管建议留空，避免控制面配置覆盖独立节点配置 |
-| `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；本机 Docker 生产当前为 `redacted-ip-007:27166` |
+| `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；远端模式通常填写目标主机回环地址 |
 | `AI_NODE_API_SERVERS` | 多节点 Socket 存活检查地址，按顺序对应；支持远端回环地址，如 `127.0.0.1:27166` |
-| `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；本机默认 `http://redacted-ip-007:31097/debug/vars`，只允许回环或受控管理网 |
-| `AI_NODE_ACCESS_LOG_PATH` | AI access log 路径；默认 `/app/xray/logs/ai-access.log`，只供控制面做本机域名/端口分析 |
+| `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；远端 SSH 模式通过 AI 节点回环读取，禁止改成公网监听 |
+| `AI_NODE_ACCESS_LOG_PATH` | AI access log 路径；本机 Docker 默认 `/app/xray/logs/ai-access.log`，远端 SSH 默认 `/var/log/xray/ai-access.log`，只做域名/端口分析 |
 | `AI_NODE_DESTINATION_WINDOW_SECONDS` | AI 域名/端口请求分析窗口，默认 `600` 秒 |
 | `AI_NODE_DESTINATION_MAX_LABELS` | 每次展开的高流量域名/端口 Top 数，默认 `50`，用于限制 Prometheus 标签基数 |
-| `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；当前为 `redacted-ip-004` |
+| `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；多节点时使用 `AI_NODE_PROBE_HOSTS` 按序对应 |
 | `AI_NODE_PROBE_HOSTS` | 多节点探测目标，按顺序对应；仅用于需要生成分享地址的兼容场景 |
 
 节点备份默认请求普通数据面的配置、`.env`、运行时辅助文件和最新报告；远端部署根可用 `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` / `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 配置。节点备份清单和恢复命令见[节点备份完整性与快速恢复](node-recovery.md)。
@@ -87,8 +87,8 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 说明：
 
 - AI 节点使用独立 REALITY 凭据，不能复用或由普通数据面的 `XRAY_*` 参数覆盖
-- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）定义主数据面 VLESS outbound 的目标，生产为 `nat.qq.pw:27166`
-- 当前生产保持 `AI_NODE_CONFIG_PATH=`，由本机 Docker 挂载 `config-ai-node.json`，不通过 SSH 上传
+- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）定义主数据面 VLESS outbound 的目标；当前生产为台湾 AI 节点，带独立凭据的分享链接通过 `AI_UPSTREAM_FALLBACK_URL` 配合 `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 提升为主候选
+- 当前生产保持 `AI_NODE_CONFIG_PATH=`，由远端台湾节点维护独立配置，不通过 SSH 上传
 - 详见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)和 [AI 节点独立凭据](ai-node-credentials.md)
 
 ## DNS 故障切换变量
@@ -122,7 +122,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 - 当前只支持通过 `CF_DNS_RECORD_ID` 更新单条记录
 - 自动切换只看 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
 - DNS 故障切换运行在独立 worker 中，不依赖数据面日志、Xray API、流量统计或配置同步
-- 数据面远程命令受 `DATAPLANE_REMOTE_COMMAND_TIMEOUT` 限制；SSH 连接参数仍建议通过 `DATAPLANE_SSH_OPTIONS` 配置连接超时和 keepalive。控制面直接连接 `100.116.187.106:22`，不使用私钥。
+- 数据面远程命令受 `DATAPLANE_REMOTE_COMMAND_TIMEOUT` 限制；SSH 连接参数仍建议通过 `DATAPLANE_SSH_OPTIONS` 配置连接超时和 keepalive。控制面直接连接 `<normal-data-plane-host>:22`，不使用私钥。
 - AI 候选故障不触发 DNS 切换：`auto` 模式优先切换到另一候选，全部候选不可达时由 `ai_domain_manager` 回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
 - 若启用高峰窗口，窗口内会把备用/专用节点视为首选目标；窗口外恢复主节点优先
 - 如果是本地数据面且 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP；远端数据面必须显式填写，避免数据面失联时 DNS worker 依赖数据面 SSH
@@ -146,7 +146,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `DB_BACKUP_BUNDLE_ENABLED` | 是否生成包含数据库和配置文件的灾备归档；默认 `1` |
 | `DB_BACKUP_EXTRA_PATHS` | 逗号/换行分隔的额外文件、目录或 glob |
 | `DB_BACKUP_BUNDLE_DIR` / `DB_BACKUP_BUNDLE_KEEP_DAYS` | 本地归档目录和保留天数 |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否通过只读 SSH 采集普通数据面；本机 AI 备用随控制面运行时目录归档 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否通过只读 SSH 采集普通数据面；控制面 AI 运行时产物随目录归档 |
 
 R2 对象不会由备份任务删除；生命周期规则在 Cloudflare 侧配置。恢复时人工下载、解密、校验 manifest，再恢复数据库和配置。
 
@@ -181,6 +181,7 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - `AI_UPSTREAM_HOST`
 - `AI_UPSTREAM_PORT`
 - `AI_UPSTREAM_FALLBACK_URL`
+- `AI_UPSTREAM_FALLBACK_AS_PRIMARY`
 - `AI_UPSTREAM_FALLBACKS`
 - `AI_UPSTREAMS`
 - `AI_UPSTREAM_PROBE_TIMEOUT_SECONDS`
@@ -192,7 +193,8 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - `AI_UPSTREAM_FALLBACKS` 在主上游后追加多个备用上游
 - `AI_UPSTREAMS` 直接覆盖完整优先级列表
 - `AI_UPSTREAM_FALLBACK_URL` 适合备用上游使用不同 UUID / `pbk` / `sid` / `sni`
-- 当前生产候选为主 `nat.qq.pw:27166`、备 `redacted-ip-004:27166`；备用节点使用独立 REALITY 凭据
+- `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 会把 `AI_UPSTREAM_FALLBACK_URL` 提升为候选 0，适合移除原主节点后保留带独立凭据的唯一节点
+- 当前生产仅保留台湾 AI 节点作为主候选；原主候选已移除，台湾节点继续使用独立 REALITY 凭据
 - 主 AI 上游同样可能使用独立凭据；动态 VLESS outbound 必须与 AI inbound 完整匹配，不能从普通数据面 `XRAY_*` 盲目派生
 - 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
 - `AI_NODE_SSH_TARGET` 只启用 SSH 纳管；它不证明节点凭据匹配，也不应自动派生独立 AI 节点的 relay URL
@@ -233,10 +235,11 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 
 ### AI 节点模式
 
-- `AI_NODE_SSH_TARGET` 生效后，AI 节点模式为 `ssh`；当前留空时由 `AI_NODE_CONTAINER_NAME=xray-ai-node` 使用本机 Docker 模式
+- `AI_NODE_SSH_TARGET` 或 `AI_NODE_SSH_TARGETS` 生效后，AI 节点模式为 `ssh`；未设置远端目标时才由 `AI_NODE_CONTAINER_NAME=xray-ai-node` 使用本机 Docker 模式
 - 多节点使用 `AI_NODE_SSH_TARGETS`；面板按 `AI_NODE_IDS` / `AI_NODE_LABELS` 分别展示状态，并通过 `POST /api/ai-nodes/<node_id>/restart` 单独重启
 - `AI_NODE_CONFIG_PATH` 非空时控制面才具备上传 `config-ai-node.json` 的能力；生产当前显式留空以禁止上传
-- `AI_NODE_API_SERVER` 用于 AI 业务 Socket 状态检查；`AI_NODE_METRICS_URL` 用于读取仅回环开放的 Xray expvar 流量指标
+- `AI_NODE_API_SERVER` 用于 AI 业务 Socket 状态检查；`AI_NODE_METRICS_URL` 用于读取仅回环开放的 Xray expvar 流量指标，远端模式通过 SSH 执行读取
+- `AI_NODE_ACCESS_LOG_PATH` 用于读取 AI access log；远端模式通过同一 SSH 纳管通道增量读取，不需要开放公网日志或业务端口
 - AI 节点使用独立 REALITY 凭据，字段契约见 [AI 节点独立凭据](ai-node-credentials.md)
 - 详见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)
 

@@ -58,6 +58,12 @@ def normalize_log_state(state):
         state["log_offset"] = int(state.get("log_offset", 0))
     except (TypeError, ValueError):
         state["log_offset"] = 0
+    state["skip_until_newline"] = str(state.get("skip_until_newline", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     return state
 
 
@@ -69,6 +75,7 @@ def save_log_state(path, state):
     serializable = {
         "log_inode": state["log_inode"],
         "log_offset": state["log_offset"],
+        "skip_until_newline": bool(state.get("skip_until_newline")),
         "events": [
             {
                 "seen_at": format_timestamp(item["seen_at"]),
@@ -85,11 +92,19 @@ def sync_log(log_path, state, data_plane_controller=None, lookback_seconds=3600,
     if data_plane_controller is not None and data_plane_controller.supports_logs():
         current_time = now or utc_now()
         cutoff = current_time - timedelta(seconds=lookback_seconds)
-        payload = data_plane_controller.read_access_log_delta(
-            state["log_inode"],
-            state["log_offset"],
-            since_epoch=cutoff.timestamp(),
-        )
+        if state.get("skip_until_newline"):
+            payload = data_plane_controller.read_access_log_delta(
+                state["log_inode"],
+                state["log_offset"],
+                since_epoch=cutoff.timestamp(),
+                skip_until_newline=True,
+            )
+        else:
+            payload = data_plane_controller.read_access_log_delta(
+                state["log_inode"],
+                state["log_offset"],
+                since_epoch=cutoff.timestamp(),
+            )
         if not payload["exists"]:
             return
         for line in str(payload["data"]).splitlines():
@@ -98,6 +113,7 @@ def sync_log(log_path, state, data_plane_controller=None, lookback_seconds=3600,
                 state["events"].append(parsed)
         state["log_inode"] = payload["inode"]
         state["log_offset"] = int(payload["offset"])
+        state["skip_until_newline"] = bool(payload.get("skip_until_newline"))
         return
 
     if not log_path.exists():
@@ -117,6 +133,7 @@ def sync_log(log_path, state, data_plane_controller=None, lookback_seconds=3600,
                 state["events"].append(parsed)
         state["log_offset"] = handle.tell()
     state["log_inode"] = current_inode
+    state["skip_until_newline"] = False
 
 
 def purge_old_events(state, lookback_seconds, now):

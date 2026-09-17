@@ -7,6 +7,7 @@ import shlex
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.xray.file_io import write_text_atomic
 
@@ -16,9 +17,15 @@ import json
 import os
 import sys
 
+MAX_READ_BYTES = 8 * 1024 * 1024
+MAX_SCAN_BYTES = 2 * MAX_READ_BYTES
+
 path = sys.argv[1]
 recorded_inode = sys.argv[2]
 offset = int(sys.argv[3])
+skip_until_newline = False
+if len(sys.argv) > 5 and sys.argv[5]:
+    skip_until_newline = str(sys.argv[5]).strip().lower() not in {"0", "false", "no", "off"}
 since_epoch = None
 if len(sys.argv) > 4 and sys.argv[4]:
     try:
@@ -32,7 +39,7 @@ def is_after_cutoff(line):
         return True
     parts = line.split(" ", 2)
     if len(parts) < 2:
-        return False
+        return True
     timestamp = f"{parts[0]} {parts[1]}"
     for format_string in ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S"):
         try:
@@ -47,6 +54,7 @@ result = {
     "inode": "",
     "offset": 0,
     "data": "",
+    "skip_until_newline": False,
 }
 try:
     stat = os.stat(path)
@@ -57,20 +65,73 @@ except FileNotFoundError:
 current_inode = str(stat.st_ino)
 if recorded_inode != current_inode or stat.st_size < offset:
     offset = 0
+    skip_until_newline = False
 
-with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+initial_tail = not skip_until_newline and offset == 0 and stat.st_size > MAX_READ_BYTES
+if initial_tail:
+    offset = stat.st_size - MAX_READ_BYTES
+
+data_text = ""
+skip_until_newline = bool(skip_until_newline or initial_tail)
+scan_bytes = 0
+with open(path, "rb") as handle:
     handle.seek(offset)
-    if since_epoch is None:
-        data = handle.read()
-    else:
-        data = "".join(line for line in handle if is_after_cutoff(line))
-    offset = handle.tell()
+    while True:
+        read_offset = handle.tell()
+        raw_data = handle.read(MAX_READ_BYTES)
+        if not raw_data:
+            offset = handle.tell() if skip_until_newline else read_offset
+            break
+
+        data_start = read_offset
+        discarded_prefix = False
+        if skip_until_newline:
+            first_newline = raw_data.find(b"\\n")
+            if first_newline < 0:
+                scan_bytes += len(raw_data)
+                if handle.tell() < stat.st_size and scan_bytes < MAX_SCAN_BYTES:
+                    continue
+                offset = handle.tell()
+                break
+            raw_data = raw_data[first_newline + 1 :]
+            data_start = read_offset + first_newline + 1
+            skip_until_newline = False
+            scan_bytes = 0
+            discarded_prefix = True
+
+        last_newline = raw_data.rfind(b"\\n")
+        if last_newline < 0:
+            if discarded_prefix:
+                offset = data_start
+                break
+            if handle.tell() < stat.st_size:
+                scan_bytes += len(raw_data)
+                if scan_bytes < MAX_SCAN_BYTES:
+                    skip_until_newline = True
+                    continue
+                offset = handle.tell()
+                skip_until_newline = True
+                break
+            offset = read_offset
+            break
+
+        complete_data = raw_data[: last_newline + 1]
+        offset = data_start + len(complete_data)
+        data_text = complete_data.decode("utf-8", errors="ignore")
+        break
+if since_epoch is None:
+    data = data_text
+else:
+    data = "".join(
+        line for line in data_text.splitlines(keepends=True) if is_after_cutoff(line)
+    )
 
 result = {
     "exists": True,
     "inode": current_inode,
     "offset": offset,
     "data": data,
+    "skip_until_newline": skip_until_newline,
 }
 print(json.dumps(result, ensure_ascii=True))
 """
@@ -130,6 +191,18 @@ print(
         }
     )
 )
+"""
+
+REMOTE_READ_HTTP_JSON_SCRIPT = """
+import sys
+from urllib.request import Request, urlopen
+
+endpoint = sys.argv[1]
+timeout = max(1, int(float(sys.argv[2])))
+request = Request(endpoint, headers={"Accept": "application/json"})
+with urlopen(request, timeout=timeout) as response:
+    payload = response.read(8 * 1024 * 1024)
+sys.stdout.buffer.write(payload)
 """
 
 REMOTE_AI_DOMAINS_SNAPSHOT_SCRIPT = """
@@ -200,11 +273,11 @@ def join_shell_args(args):
 def build_temp_target_path(path_text):
     path = Path(str(path_text))
     suffix = "".join(path.suffixes)
-    token = uuid.uuid4().hex
+    path_token = uuid.uuid4().hex
     if not suffix:
-        return f"{path}.codex-tmp-{token}"
+        return f"{path}.codex-tmp-{path_token}"
     base_name = path.name[: -len(suffix)]
-    return str(path.with_name(f"{base_name}.codex-tmp-{token}{suffix}"))
+    return str(path.with_name(f"{base_name}.codex-tmp-{path_token}{suffix}"))
 
 
 class RemoteFileOperations:
@@ -385,7 +458,7 @@ class RemoteFileOperations:
             "ai_domains": [item for item in rows if isinstance(item, dict)],
         }
 
-    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None):
+    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None, skip_until_newline=False):
         command_args = [
             "python3",
             "-c",
@@ -394,8 +467,10 @@ class RemoteFileOperations:
             str(recorded_inode or ""),
             str(int(offset or 0)),
         ]
-        if since_epoch is not None:
-            command_args.append(str(float(since_epoch)))
+        if since_epoch is not None or skip_until_newline:
+            command_args.append("" if since_epoch is None else str(float(since_epoch)))
+        if skip_until_newline:
+            command_args.append("1")
         completed = self._run_remote(
             command_args,
             f"{self.config.label} 访问日志读取失败",
@@ -411,7 +486,32 @@ class RemoteFileOperations:
             "inode": str(payload.get("inode", "")),
             "offset": int(payload.get("offset", 0) or 0),
             "data": str(payload.get("data", "")),
+            "skip_until_newline": bool(payload.get("skip_until_newline")),
         }
+
+    def read_metrics_payload(self, metrics_url, timeout_seconds):
+        parsed = urlsplit(str(metrics_url))
+        if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        }:
+            raise ValueError("远端 Xray 指标地址必须绑定回环地址")
+        completed = self._run_remote(
+            [
+                "python3",
+                "-c",
+                REMOTE_READ_HTTP_JSON_SCRIPT,
+                str(metrics_url),
+                str(float(timeout_seconds)),
+            ],
+            f"{self.config.label} Xray 指标读取失败",
+            timeout=max(1, float(timeout_seconds)),
+        )
+        try:
+            return json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"{self.config.label} Xray 指标返回无效 JSON") from exc
 
 
 __all__ = [
@@ -419,6 +519,7 @@ __all__ = [
     "REMOTE_DELETE_FILE_SCRIPT",
     "REMOTE_FILE_DELTA_SCRIPT",
     "REMOTE_READ_FILE_SCRIPT",
+    "REMOTE_READ_HTTP_JSON_SCRIPT",
     "REMOTE_REPLACE_FILE_SCRIPT",
     "REMOTE_WRITE_FILE_SCRIPT",
     "RemoteFileOperations",

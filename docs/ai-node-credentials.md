@@ -23,7 +23,7 @@ app/xray/.env              AI 节点权威配置
 
 | 主数据面 `ai_proxy` outbound | AI 节点 inbound | 要求 |
 | --- | --- | --- |
-| `vnext[0].address` | 公网入口 | `nat.qq.pw` |
+| `vnext[0].address` | 公网入口 | `<taiwan-ai-host>` |
 | `vnext[0].port` | `inbound.port` | `27166` |
 | `users[0].id` | `clients[0].id` | UUID 完全一致 |
 | `users[0].flow` | `clients[0].flow` | Flow 完全一致 |

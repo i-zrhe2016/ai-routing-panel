@@ -18,9 +18,23 @@ from ..helpers import (
 from ..observability.logging import emit_business_event
 from ..xray.ai_routing.candidates import build_ai_upstream_candidates
 from ..xray.ai_routing.launcher import AiDomainManagerRunner
-from ..xray.ai_routing.repository import ensure_ai_domain_schema
-from ..xray.envfile import load_env_file
+from ..xray.ai_routing.repository import ensure_ai_domain_schema, normalize_ai_routing_manual_mode
+from ..xray.envfile import load_env_file, read_env_or_file
 from ..xray.operation_lock import LockBusyError, exclusive_file_lock
+
+
+def _ai_candidate_identity(candidate):
+    if not isinstance(candidate, dict):
+        return None
+    host = str(candidate.get("upstream_host", "")).strip().lower()
+    try:
+        port = int(candidate.get("upstream_port"))
+    except (TypeError, ValueError):
+        return None
+    candidate_type = str(candidate.get("candidate_type", "template")).strip() or "template"
+    if not host or port <= 0:
+        return None
+    return candidate_type, host, port
 
 
 class AiRoutingService:
@@ -141,13 +155,14 @@ class AiRoutingService:
 
     def ai_routing_manual_state(self):
         report = self.read_ai_domain_report()
-        candidates = []
+        report_candidates = []
         if isinstance(report, dict):
             target = report.get("ai_target")
             if isinstance(target, dict):
-                candidates = [item for item in target.get("candidates", []) if isinstance(item, dict)]
-        if not candidates:
-            candidates = self._configured_ai_candidates()
+                report_candidates = [item for item in target.get("candidates", []) if isinstance(item, dict)]
+        configured_candidates = self._configured_ai_candidates()
+        configuration_known = configured_candidates is not None
+        candidates = configured_candidates if configuration_known else report_candidates
         report_selected_index = None
         if isinstance(report, dict):
             target = report.get("ai_target")
@@ -156,13 +171,53 @@ class AiRoutingService:
                     report_selected_index = int(target.get("selected_index"))
                 except (TypeError, ValueError):
                     report_selected_index = None
+        report_candidate_by_identity = {}
+        for report_candidate in report_candidates:
+            identity = _ai_candidate_identity(report_candidate)
+            if identity is not None:
+                report_candidate_by_identity[identity] = report_candidate
         with self.repository.connect() as conn:
             mode = str(self.repository.get_state(conn, "ai_routing_manual_mode", "auto") or "auto").strip().lower()
             updated_at = str(self.repository.get_state(conn, "ai_routing_manual_updated_at", "") or "").strip()
         if mode not in {"auto", "primary", "backup", "forced_fallback"}:
             mode = "auto"
-        selected_index = {"primary": 0, "backup": 1}.get(mode, report_selected_index)
+        database_path = getattr(self.repository, "path", None)
+        if configuration_known and database_path is not None:
+            normalized_mode = normalize_ai_routing_manual_mode(database_path, len(candidates))
+            if normalized_mode != mode:
+                mode = normalized_mode
+                updated_at = utc_iso_now()
+        selected_index = {"primary": 0, "backup": 1}.get(mode)
+        if selected_index is None and report_selected_index is not None:
+            if configuration_known:
+                try:
+                    report_selected_candidate = report_candidates[report_selected_index]
+                except (IndexError, TypeError):
+                    report_selected_candidate = None
+                selected_identity = _ai_candidate_identity(report_selected_candidate)
+                selected_index = next(
+                    (
+                        index
+                        for index, candidate in enumerate(candidates)
+                        if _ai_candidate_identity(candidate) == selected_identity
+                    ),
+                    None,
+                )
+            else:
+                selected_index = report_selected_index
+        probe_fields = (
+            "is_reachable",
+            "failure_reason",
+            "checked_at",
+            "probe_method",
+            "probe_management_error",
+        )
         for index, candidate in enumerate(candidates):
+            report_candidate = report_candidate_by_identity.get(_ai_candidate_identity(candidate))
+            if report_candidate is not None:
+                for field in probe_fields:
+                    if field in report_candidate:
+                        candidate[field] = report_candidate[field]
             candidate["index"] = index
             candidate["number"] = index + 1
             candidate["selected"] = selected_index == index
@@ -186,15 +241,42 @@ class AiRoutingService:
     def _configured_ai_candidates(self):
         try:
             values = load_env_file(XRAY_ENV_FILE_PATH)
+            # Docker-mode manager runs have their own environment and shared
+            # env file; accepting panel-only overrides there would make the
+            # displayed candidate list differ from the applied configuration.
+            use_process_env = AI_DOMAIN_MANAGER_EXECUTION_MODE == "local"
+
+            def configured_value(name, default=""):
+                if use_process_env:
+                    return read_env_or_file(name, default, values)
+                return str(values.get(name, default) or default).strip()
+
+            upstream_values = {
+                name: configured_value(name)
+                for name in (
+                    "AI_UPSTREAM_HOST",
+                    "AI_UPSTREAM_PORT",
+                    "AI_UPSTREAMS",
+                    "AI_UPSTREAM_FALLBACKS",
+                    "AI_UPSTREAM_FALLBACK_URL",
+                )
+            }
+            if not any(upstream_values.values()):
+                return []
             candidates = build_ai_upstream_candidates(
-                values.get("AI_UPSTREAM_HOST", ""),
-                int(values.get("AI_UPSTREAM_PORT", "27166")),
-                upstreams_raw=values.get("AI_UPSTREAMS", ""),
-                fallbacks_raw=values.get("AI_UPSTREAM_FALLBACKS", ""),
-                fallback_share_url=values.get("AI_UPSTREAM_FALLBACK_URL", ""),
+                upstream_values["AI_UPSTREAM_HOST"] or "upstream.example.com",
+                int(upstream_values["AI_UPSTREAM_PORT"] or "27166"),
+                upstreams_raw=upstream_values["AI_UPSTREAMS"],
+                fallbacks_raw=upstream_values["AI_UPSTREAM_FALLBACKS"],
+                fallback_share_url=upstream_values["AI_UPSTREAM_FALLBACK_URL"],
+                promote_fallback=configured_value(
+                    "AI_UPSTREAM_FALLBACK_AS_PRIMARY",
+                    "0",
+                ).lower()
+                not in {"0", "false", "no", "off", ""},
             )
         except (OSError, ValueError, TypeError):
-            return []
+            return None
         return [
             {
                 "upstream_host": item.get("upstream_host", ""),
@@ -225,8 +307,11 @@ class AiRoutingService:
 
         if mode in {"primary", "backup"}:
             candidate_state = self.ai_routing_manual_state()
-            if len(candidate_state["candidates"]) < 2:
-                raise ValidationError("当前只配置了一个 AI 节点，无法执行双节点切换。")
+            candidate_count = len(candidate_state["candidates"])
+            if candidate_count == 0:
+                raise ValidationError("当前未配置可用 AI 节点，无法固定 AI 节点。")
+            if mode == "backup" and candidate_count < 2:
+                raise ValidationError("当前只配置了一个 AI 节点，无法固定备用节点。")
 
         updated_at = utc_iso_now()
 

@@ -35,10 +35,9 @@ node "Normal Data Plane\nTailscale redacted-ip-003" as normal #ECFDF5 {
 }
 
 node "AI Upstream Pool" as aiPool #FFF7ED {
-  component "Primary AI\nnat.qq.pw:27166" as primaryAi #FED7AA
-  component "Backup AI\nlocal Docker xray-ai-node\nredacted-ip-004:27166" as backupAi #FED7AA
+  component "Primary AI\nTaiwan AI node:27166" as primaryAi #FED7AA
   component "Independent Xray\nfreedom egress" as aiEgress #FFEDD5
-  component "Local AI Xray metrics\nredacted-ip-007:31097" as localAiMetrics #F3F4F6
+  component "AI Xray metrics\nmanaged endpoint" as localAiMetrics #F3F4F6
   component "node-exporter + cAdvisor\nwhen remotely deployed" as aiMetrics #F3F4F6
 }
 
@@ -49,9 +48,7 @@ client --> dns : resolve proxy entry
 dns --> normalXray : primary traffic
 normalXray --> internet : non-AI traffic
 normalXray --> primaryAi : selected AI upstream
-normalXray --> backupAi : selected AI upstream
 primaryAi --> aiEgress
-backupAi --> aiEgress
 aiEgress --> internet
 normalXray ..> internet : local fallback when AI unavailable
 
@@ -59,12 +56,11 @@ panel --> paneldb
 panel --> aiController : dashboard + POST /api/ai-routing/switch
 aiController --> paneldb : persist auto / primary / backup / forced_fallback
 aiController ..> normalXray : probe / render / restart
-aiController ..> primaryAi : probe candidate
-aiController ..> backupAi : local Docker status / restart
+aiController ..> primaryAi : probe current candidate
 panel ..> normalXray : status / controlled management
 panel ..> dns : failover updates
 panel ..> backup : render and manage
-backup ..> backupAi : relay when enabled
+backup ..> primaryAi : relay when enabled
 backup ..> internet : direct fallback
 panel --> localAiMetrics : loopback /debug/vars
 

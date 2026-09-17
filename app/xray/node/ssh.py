@@ -79,29 +79,29 @@ class SSHBackend(NodeBackend):
         normalized = []
         index = 0
         while index < len(options):
-            token = str(options[index])
-            lowered = token.lower()
-            if token == "-i":
+            option_text = str(options[index])
+            lowered = option_text.lower()
+            if option_text == "-i":
                 index += 2
                 continue
-            if lowered.startswith("-i") and len(token) > 2:
+            if lowered.startswith("-i") and len(option_text) > 2:
                 index += 1
                 continue
-            if token == "-o" and index + 1 < len(options):
+            if option_text == "-o" and index + 1 < len(options):
                 option = str(options[index + 1])
                 option_lowered = option.lower()
                 option_key = option_lowered.split("=", 1)[0].strip()
                 if option_key == "identityfile" or option_key in forced_keys:
                     index += 2
                     continue
-                normalized.extend((token, option))
+                normalized.extend((option_text, option))
                 index += 2
                 continue
             option_key = lowered.split("=", 1)[0].strip()
             if option_key == "identityfile" or option_key in forced_keys:
                 index += 1
                 continue
-            normalized.append(token)
+            normalized.append(option_text)
             index += 1
 
         normalized.extend(
@@ -285,10 +285,23 @@ class SSHBackend(NodeBackend):
         )
         return True
 
-    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None):
+    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None, skip_until_newline=False):
         if not self.supports_logs():
-            return super().read_access_log_delta(recorded_inode, offset, since_epoch)
-        return self.files.read_access_log_delta(recorded_inode, offset, since_epoch)
+            return super().read_access_log_delta(
+                recorded_inode,
+                offset,
+                since_epoch,
+                skip_until_newline,
+            )
+        return self.files.read_access_log_delta(
+            recorded_inode,
+            offset,
+            since_epoch,
+            skip_until_newline,
+        )
+
+    def read_metrics_payload(self, metrics_url, timeout_seconds):
+        return self.files.read_metrics_payload(metrics_url, timeout_seconds)
 
     def run_statsquery(self, timeout_seconds, pattern):
         if not self.supports_stats():

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
-from .common import connect_panel_db, run_with_sqlite_lock_retry
+from .common import connect_panel_db, format_timestamp, run_with_sqlite_lock_retry, utc_now
 
 
 def read_panel_target(panel_db_path, preferred_listen_port):
@@ -275,9 +276,63 @@ def read_ai_routing_manual_mode(panel_db_path):
     return mode if mode in {"auto", "primary", "backup", "forced_fallback"} else "auto"
 
 
+def normalize_ai_routing_manual_mode(panel_db_path, candidate_count):
+    """Promote a stale backup override when the configured pool has one node."""
+    path = Path(str(panel_db_path or "").strip())
+    if not path or not path.is_file():
+        return "auto"
+    try:
+        candidate_count = int(candidate_count)
+    except (TypeError, ValueError):
+        candidate_count = 0
+
+    mode = read_ai_routing_manual_mode(path)
+    if mode != "backup" or candidate_count >= 2:
+        return mode
+    normalized_mode = "primary" if candidate_count == 1 else "auto"
+    updated_at = format_timestamp(utc_now())
+
+    def persist_mode():
+        conn = connect_panel_db(path)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            changed = conn.execute(
+                """
+                UPDATE app_state
+                SET value = ?
+                WHERE key = 'ai_routing_manual_mode' AND value = 'backup'
+                """,
+                (normalized_mode,),
+            ).rowcount
+            if changed:
+                conn.execute(
+                    """
+                    INSERT INTO app_state (key, value)
+                    VALUES ('ai_routing_manual_updated_at', ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (updated_at,),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    try:
+        run_with_sqlite_lock_retry(persist_mode)
+    except (OSError, sqlite3.Error):
+        # The normalized value still protects this manager cycle; a later
+        # cycle can retry persistence when the database becomes writable.
+        pass
+    return normalized_mode
+
+
 __all__ = [
     "connect_panel_db",
     "ensure_ai_domain_schema",
+    "normalize_ai_routing_manual_mode",
     "read_ai_routing_manual_mode",
     "read_panel_target",
     "run_with_sqlite_lock_retry",

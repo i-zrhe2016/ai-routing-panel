@@ -1,15 +1,15 @@
 # 内网 SSH 纳管
 
 本文说明控制面通过内网 SSH 管理数据面。当前控制面为
-`100.92.231.104`，普通数据面为 `100.116.187.106`。
+`<control-plane-host>`，普通数据面为 `<normal-data-plane-host>`。
 
 ## 当前策略
 
 | 节点 | SSH 目标 | 认证策略 |
 | --- | --- | --- |
-| 控制面 | `100.92.231.104` | 服务本机运行控制面 |
-| 普通数据面 | `root@100.116.187.106:22` | 内网直连，密码/键盘交互认证 |
-| AI 备用 | 控制面本机 Docker `xray-ai-node` | 不使用 SSH |
+| 控制面 | `<control-plane-host>` | 服务本机运行控制面 |
+| 普通数据面 | `root@<normal-data-plane-host>:22` | 内网直连，密码/键盘交互认证 |
+| AI 主节点 | 远端台湾 AI 节点 | 内网直连，密码/键盘交互认证 |
 
 控制面连接普通数据面时直接执行 SSH，不经过跳板，也不注入私钥：
 
@@ -17,7 +17,7 @@
 ssh \
   -o PubkeyAuthentication=no \
   -o PreferredAuthentications=password,keyboard-interactive \
-  root@100.116.187.106
+  root@<normal-data-plane-host>
 ```
 
 应用和备份任务同样不读取 `-i`、`IdentityFile` 或任何私钥挂载。旧的
@@ -27,10 +27,10 @@ ssh \
 ## 应用配置
 
 ```dotenv
-DATAPLANE_SSH_TARGET=root@100.116.187.106
+DATAPLANE_SSH_TARGET=root@<normal-data-plane-host>
 DATAPLANE_SSH_OPTIONS=
 DATAPLANE_SSH_KNOWN_HOSTS=/root/.ssh/known_hosts
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@100.116.187.106
+DB_BACKUP_DATAPLANE_SSH_TARGET=root@<normal-data-plane-host>
 DB_BACKUP_DATAPLANE_SSH_PORT=22
 DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts
 ```
@@ -43,8 +43,8 @@ DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts
 
 在控制面上执行：
 
-1. `ssh -o PubkeyAuthentication=no root@100.116.187.106 true`，确认内网 SSH 可达。
-2. `ssh -o PubkeyAuthentication=no root@100.116.187.106 hostname`，确认远端账号具备纳管所需权限。
+1. `ssh -o PubkeyAuthentication=no root@<normal-data-plane-host> true`，确认内网 SSH 可达。
+2. `ssh -o PubkeyAuthentication=no root@<normal-data-plane-host> hostname`，确认远端账号具备纳管所需权限。
 3. 重启面板和备份服务，确认数据面状态、配置同步和只读备份采集均成功。
 
 如果目标只允许密码认证，人工验证时会出现密码提示；后台任务不会把密码写入环境变量、镜像、日志或备份归档。

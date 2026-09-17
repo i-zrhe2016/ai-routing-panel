@@ -31,6 +31,129 @@ def test_parse_ai_node_metrics_rejects_missing_stats():
     assert _parse_ai_node_metrics_payload({}) is None
 
 
+def test_remote_ai_node_metrics_uses_managed_node(monkeypatch):
+    from app.web import metrics
+
+    class RemoteNode:
+        is_remote = True
+
+        def read_metrics_payload(self, metrics_url, timeout_seconds):
+            assert metrics_url.endswith("/debug/vars")
+            assert timeout_seconds >= 1
+            return {
+                "stats": {
+                    "inbound": {"panel-27166": {"uplink": 7, "downlink": 11}},
+                    "outbound": {"direct": {"uplink": 13, "downlink": 17}},
+                }
+            }
+
+    monkeypatch.setattr(metrics, "_ai_node_controller", lambda: RemoteNode())
+
+    assert metrics._read_ai_node_metrics() == {
+        "available": 1,
+        "received": 7,
+        "sent": 11,
+        "egress_received": 17,
+        "egress_sent": 13,
+    }
+
+
+def test_remote_ai_destination_metrics_reads_managed_log(monkeypatch):
+    from app.web import metrics
+
+    class RemoteNode:
+        is_remote = True
+
+        def display_target(self):
+            return "root@example.com"
+
+        def read_access_log_delta(self, inode, offset, since_epoch=None):
+            assert inode is None
+            assert offset == 0
+            assert since_epoch is not None
+            return {
+                "exists": True,
+                "inode": "42",
+                "offset": 120,
+                "data": "accepted tcp:api.openai.com:443 [direct]\n",
+            }
+
+    monkeypatch.setattr(metrics, "_ai_node_controller", lambda: RemoteNode())
+    monkeypatch.setattr(metrics, "AI_NODE_ACCESS_LOG_PATH", "/var/log/xray/ai-access.log")
+    monkeypatch.setattr(metrics, "_FALLBACK_METRICS_STATE", metrics._new_metrics_state())
+
+    result = metrics._read_ai_destination_metrics()
+
+    assert result["available"] == 1
+    assert result["requests"][0]["domain"] == "api.openai.com"
+    assert result["requests"][0]["port"] == "443"
+
+
+def test_remote_ai_destination_metrics_clears_partial_on_rotation(monkeypatch):
+    from app.web import metrics
+
+    class RemoteNode:
+        is_remote = True
+        calls = 0
+
+        def display_target(self):
+            return "root@example.com"
+
+        def read_access_log_delta(self, inode, offset, since_epoch=None):
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "exists": True,
+                    "inode": "old",
+                    "offset": 120,
+                    "data": "accepted tcp:old.example.com:443 [direct]",
+                }
+            return {
+                "exists": True,
+                "inode": "new",
+                "offset": 80,
+                "data": "accepted tcp:new.example.com:443 [direct]\n",
+            }
+
+    node = RemoteNode()
+    monkeypatch.setattr(metrics, "_ai_node_controller", lambda: node)
+    monkeypatch.setattr(metrics, "AI_NODE_ACCESS_LOG_PATH", "/var/log/xray/ai-access.log")
+    monkeypatch.setattr(metrics, "_FALLBACK_METRICS_STATE", metrics._new_metrics_state())
+
+    metrics._read_ai_destination_metrics()
+    result = metrics._read_ai_destination_metrics()
+
+    assert result["requests"][0]["domain"] == "new.example.com"
+
+
+def test_remote_ai_destination_metrics_caps_partial_record(monkeypatch):
+    from app.web import metrics
+
+    class RemoteNode:
+        is_remote = True
+
+        def display_target(self):
+            return "root@example.com"
+
+        def read_access_log_delta(self, inode, offset, since_epoch=None):
+            return {
+                "exists": True,
+                "inode": "one",
+                "offset": 10,
+                "data": "x" * (metrics._AI_DESTINATION_READ_CHUNK_BYTES + 1),
+            }
+
+    monkeypatch.setattr(metrics, "_ai_node_controller", lambda: RemoteNode())
+    monkeypatch.setattr(metrics, "AI_NODE_ACCESS_LOG_PATH", "/var/log/xray/ai-access.log")
+    monkeypatch.setattr(metrics, "_FALLBACK_METRICS_STATE", metrics._new_metrics_state())
+
+    metrics._read_ai_destination_metrics()
+
+    assert len(metrics._FALLBACK_METRICS_STATE["destination_log_state"]["partial"]) <= (
+        metrics._AI_DESTINATION_READ_CHUNK_BYTES
+    )
+
+
 def test_parse_ai_access_line_extracts_destination_and_ignores_non_access_lines():
     from app.web.metrics import _parse_ai_access_line
 

@@ -181,6 +181,7 @@ def build_application_components():
                     container_name=containers[index],
                     restart_command=restart_commands[index],
                     config_path=config_paths[index],
+                    access_log_path=config.AI_NODE_ACCESS_LOG_PATH,
                     source_config_path=None if config.AI_NODE_LIST_CONFIGURED else config.AI_NODE_CONFIG_OUT,
                     upstream_host=probe_hosts[index],
                 )

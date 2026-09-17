@@ -1,6 +1,6 @@
 @startuml
 !theme plain
-title 三节点与双 AI 上游人工切换拓扑
+title 三节点与 AI 路由人工切换拓扑
 
 left to right direction
 skinparam componentStyle rectangle
@@ -12,20 +12,17 @@ skinparam componentBackgroundColor #F7F9FC
 actor "客户端" as client
 component "控制面\n管理与编排" as panel
 component "普通数据面\n主入口" as data
-component "主 AI 上游\nnat.qq.pw:27166" as primary
-component "备用 AI 上游\nredacted-ip-004:27166" as backupAi
+component "主 AI 上游\n台湾 AI 节点" as primary
 component "控制面备用 Xray\n数据面故障时接管" as backup
 
 client --> data : 正常代理流量
 data --> primary : AI 域名\nauto / 人工主
-data --> backupAi : AI 域名\nauto / 人工备
 data --> data : 直出 / AI 人工回退
 client --> backup : DNS 手动或自动切换
-backup --> backupAi : relay
-backup --> backup : AI 同时故障时直出
+backup --> primary : relay
+backup --> backup : AI 节点故障时直出
 panel ..> data : 探测 / 配置 / 重启
 panel ..> primary : 探测主候选
-panel ..> backupAi : 探测备用候选
 panel ..> backup : 渲染 relay / direct
 
 note bottom of panel

@@ -126,6 +126,9 @@ def build_args():
     args.ai_upstreams = read_env_or_file("AI_UPSTREAMS", "", env_file_values)
     args.ai_upstream_fallbacks = read_env_or_file("AI_UPSTREAM_FALLBACKS", "", env_file_values)
     args.ai_upstream_fallback_url = read_env_or_file("AI_UPSTREAM_FALLBACK_URL", "", env_file_values)
+    args.ai_upstream_fallback_as_primary = read_env_or_file(
+        "AI_UPSTREAM_FALLBACK_AS_PRIMARY", "0", env_file_values
+    ).lower() not in {"0", "false", "no", "off", ""}
     args.data_plane_remote_command_timeout = parse_positive_float(
         os.environ.get("DATAPLANE_REMOTE_COMMAND_TIMEOUT", "8"), "DATAPLANE_REMOTE_COMMAND_TIMEOUT"
     )
@@ -140,6 +143,7 @@ def build_args():
         upstreams_raw=args.ai_upstreams,
         fallbacks_raw=args.ai_upstream_fallbacks,
         fallback_share_url=args.ai_upstream_fallback_url,
+        promote_fallback=args.ai_upstream_fallback_as_primary,
     )
     return args
 

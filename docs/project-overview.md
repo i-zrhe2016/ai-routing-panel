@@ -20,17 +20,17 @@
   - Flask 作为 JSON API + SPA 壳服务端：托管管理后台 SPA（`/`）、订阅者门户 SPA（`/portal`）、服务端渲染的公共/认证页（`/customer/login`、`/customer/register`、`/plans`）以及探针/AI 仪表盘
   - 前端发布资源位于 `app/static/admin/*`、`app/static/portal/*` 与 `app/static/landing/*`；Admin 源码与 Vite 配置位于 `frontend/`，构建产物写回 `app/static/admin/*`
   - 维护 `data/panel.db`（客户、套餐、订单、服务订阅、支付凭证，以及端口/流量/AI/DNS 状态）
-  - 通过内网 SSH 直连纳管普通数据面；AI 节点当前是控制面本机 Docker `xray-ai-node`，也支持显式切换为远端 SSH 模式
+  - 通过内网 SSH 直连纳管普通数据面和当前台湾 AI 主节点；也支持本机 Docker AI 节点模式
   - 维护 `dns_failover_state` / `dns_failover_history`
 - 普通数据面（`xray-reality-local` 或远端数据面）
   - 实际承载 `VLESS + REALITY` 流量
   - 数据面模式由 `docker`、`local`、`ssh`、`unmanaged` 四类自动判定
   - 运行 `ai_domain_manager`，生成 `dynamic-routing.json` 将 AI 域名流量转发到选中的 AI 候选
 - AI 路由控制器
-  - 探测主 `nat.qq.pw:27166` 与备 `redacted-ip-004:27166`
+  - 当前生产探测唯一的台湾 AI 主候选；候选池支持通过环境变量扩展备用节点
   - 支持 `auto`、`primary`、`backup`、`forced_fallback` 四种模式
   - 将人工模式和当前候选状态持久化到 `app_state`
-- AI 节点（当前备用为控制面本机 Docker；也支持远端独立机器）
+- AI 节点（当前为远端台湾主节点；也支持本机 Docker 或其他远端独立机器）
   - 运行 VLESS + REALITY Xray，监听 `AI_UPSTREAM_PORT`，接收数据面转发的 AI 流量
   - freedom 直出，不做域名分类、不运行 `ai_domain_manager`
   - 使用独立于普通数据面的 REALITY 凭据；主数据面 outbound 必须与 AI inbound 完整匹配
@@ -169,7 +169,7 @@ docker compose --profile backup-xray up -d xray-reality-backup
 
 ### AI 节点
 
-AI 节点当前是控制面本机 Docker 上的独立 VLESS + REALITY Xray，接收数据面转发的 AI 流量并 freedom 直出；也支持远端独立机器部署。部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，凭据边界见 [AI 节点独立凭据](ai-node-credentials.md)。
+AI 节点当前是远端台湾节点上的独立 VLESS + REALITY Xray，接收数据面转发的 AI 流量并 freedom 直出；也支持本机 Docker 或其他远端独立机器部署。部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，凭据边界见 [AI 节点独立凭据](ai-node-credentials.md)。
 
 至少配置：
 
@@ -244,7 +244,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 ## 灾备归档与 R2 上传
 
-默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过内网直连 SSH 以只读方式采集普通数据面 `root@100.116.187.106:22`，本机 AI 备用配置随 `app/xray/.env` 和运行时目录一并归档。
+默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 生成一次本地 SQLite 备份和带节点恢复清单的灾备归档；Compose 通过内网直连 SSH 以只读方式采集普通数据面 `root@<normal-data-plane-host>:22`，远端 AI 主节点配置按其纳管策略归档。
 
 Compose 备份服务默认会在备份完成后自动加密并上传到 Cloudflare R2；首次部署前请在根 `.env` 中填入：
 
@@ -344,7 +344,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 - [../frontend/](../frontend/): 前端源码快照；实际部署使用已生成的 `app/static/{admin,portal,landing}` 发布资源
 - [disaster-backup.md](disaster-backup.md): 配置归档、R2 灾备保留和离线恢复边界
-- [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集普通数据面实际配置；本机 AI 配置随控制面归档
+- [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集普通数据面实际配置；控制面 AI 运行时产物随归档，远端 AI 节点维护独立配置
 - [node-recovery.md](node-recovery.md): 节点备份完整性、校验和快速准备替换节点
 - [db-backup-uploader.md](db-backup-uploader.md): 加密和 R2 上传组件
 - [../Dockerfile](../Dockerfile): 复制静态发布资源并安装 Python 依赖

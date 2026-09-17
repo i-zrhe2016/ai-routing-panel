@@ -18,8 +18,8 @@ database "app_state" as state
 participant "Normal Data Plane Xray" as normal
 participant "Dynamic Routing Rules" as rules
 participant "AI Upstream Selector" as selector
-participant "Primary AI\nnat.qq.pw:27166" as primary
-participant "Backup AI\nredacted-ip-004:27166" as backup
+participant "Primary AI\nTaiwan node" as primary
+participant "Backup AI\n(optional)" as backup
 participant "AI freedom egress" as egress
 participant "Normal freedom egress" as fallback
 
@@ -61,7 +61,7 @@ end
 normal --> client : proxy response
 
 note over selector,rules
-  Automatic mode probes both candidates and chooses the first reachable one.
+  Automatic mode probes configured candidates and chooses the first reachable one.
   Manual primary/backup keeps the selected index; an unreachable fixed target
   disables dynamic routing and reports manual_target_unreachable.
 end note

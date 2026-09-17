@@ -183,6 +183,50 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(state["log_offset"], 256)
         self.assertEqual(state["events"][0]["domain"], "api.openai.com")
 
+    def test_sync_log_persists_remote_skip_state(self):
+        controller = mock.Mock()
+        controller.supports_logs.return_value = True
+        controller.read_access_log_delta.side_effect = [
+            {
+                "exists": True,
+                "inode": "remote-inode",
+                "offset": 256,
+                "data": "",
+                "skip_until_newline": True,
+            },
+            {
+                "exists": True,
+                "inode": "remote-inode",
+                "offset": 320,
+                "data": "",
+                "skip_until_newline": False,
+            },
+        ]
+        state = {"log_inode": "", "log_offset": 0, "events": []}
+        now = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+
+        observations.sync_log(
+            Path("/does/not/exist"),
+            state,
+            data_plane_controller=controller,
+            lookback_seconds=3600,
+            now=now,
+        )
+        self.assertTrue(state["skip_until_newline"])
+        observations.sync_log(
+            Path("/does/not/exist"),
+            state,
+            data_plane_controller=controller,
+            lookback_seconds=3600,
+            now=now,
+        )
+
+        self.assertEqual(
+            controller.read_access_log_delta.call_args_list[1].kwargs["skip_until_newline"],
+            True,
+        )
+        self.assertFalse(state["skip_until_newline"])
+
     def test_domain_report_records_classifier_and_effective_traffic_route(self):
         observed_at = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
         state = {
@@ -265,6 +309,51 @@ class AiDomainManagerTest(unittest.TestCase):
             self.assertEqual(repository.read_ai_routing_manual_mode(db_path), "forced_fallback")
             self.assertEqual(repository.read_ai_routing_manual_mode(Path(tmpdir) / "missing.db"), "auto")
 
+    def test_normalize_ai_routing_manual_mode_promotes_stale_backup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "panel.db"
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                conn.execute(
+                    "INSERT INTO app_state (key, value) VALUES (?, ?)",
+                    ("ai_routing_manual_mode", "backup"),
+                )
+                conn.commit()
+
+            self.assertEqual(repository.normalize_ai_routing_manual_mode(db_path, 1), "primary")
+            self.assertEqual(repository.read_ai_routing_manual_mode(db_path), "primary")
+
+    def test_build_ai_upstream_candidates_can_promote_fallback_share_url(self):
+        result = candidates.build_ai_upstream_candidates(
+            "127.0.0.1",
+            27166,
+            fallback_share_url=(
+                "vless://22222222-2222-2222-2222-222222222222@127.0.0.1:27166?"
+                "encryption=none&security=reality&type=tcp&sni=www.amazon.com&fp=chrome&"
+                "pbk=public-key&sid=abcdef0123456789&flow=xtls-rprx-vision"
+            ),
+            promote_fallback=True,
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["candidate_type"], "share_url")
+        self.assertEqual(result[0]["upstream_host"], "127.0.0.1")
+        self.assertEqual(result[0]["upstream_port"], 27166)
+        self.assertIn("proxy_payload_override", result[0])
+
+    def test_build_ai_upstream_candidates_keeps_fallback_order_by_default(self):
+        result = candidates.build_ai_upstream_candidates(
+            "primary.example.com",
+            27166,
+            fallback_share_url=(
+                "vless://22222222-2222-2222-2222-222222222222@127.0.0.1:27166?"
+                "encryption=none&security=reality&type=tcp&sni=www.amazon.com&fp=chrome&"
+                "pbk=public-key&sid=abcdef0123456789"
+            ),
+        )
+
+        self.assertEqual([item["candidate_type"] for item in result], ["template", "share_url"])
+
     def test_build_data_plane_controller_uses_remote_command_timeout(self):
         args = mock.Mock(
             ai_upstream_candidates=[{"upstream_host": "primary.example.com", "upstream_port": 27166}],
@@ -313,6 +402,68 @@ class AiDomainManagerTest(unittest.TestCase):
 
     def test_run_once_honors_explicit_manual_mode_override(self):
         self._check_run_once_recovery(forced=True, manual_mode_override="forced_fallback")
+
+    def test_run_once_promotes_explicit_backup_override_with_one_candidate(self):
+        controller = mock.Mock()
+        controller.is_configured.return_value = True
+        controller.supports_sync.return_value = False
+        controller.supports_restart.return_value = False
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_out = root / "runtime" / "config.json"
+            config_out.parent.mkdir()
+            config_out.write_text("same", encoding="utf-8")
+            dynamic_routing_path = root / "runtime" / "dynamic-routing.json"
+            args = mock.Mock(
+                log_state_path=root / "log-state.json",
+                log_path=root / "access.log",
+                lookback_seconds=3600,
+                classification_state_path=root / "decisions.json",
+                panel_db_path=root / "panel.db",
+                panel_route_listen_port=None,
+                ai_upstream_candidates=[{"upstream_host": "ai.example.com", "upstream_port": 27166}],
+                ai_upstream_probe_timeout_seconds=2.0,
+                batch_size=50,
+                codex_classifier_enabled=False,
+                openai_classifier_enabled=False,
+                proxy_template_path=root / "missing-template.json",
+                dynamic_routing_path=dynamic_routing_path,
+                render_script="app.xray.render_config",
+                env_file=root / "xray.env",
+                config_out=config_out,
+                client_out=root / "runtime" / "client-test.json",
+                share_out=root / "runtime" / "client-share.txt",
+                data_plane_config_path="/root/xray/runtime/config.json",
+                restart_command="",
+                restart_container_name="",
+                docker_timeout_seconds=5,
+                report_output_dir=root / "reports",
+                manual_mode="backup",
+            )
+
+            with mock.patch.object(manager, "build_data_plane_controller", return_value=controller), \
+                mock.patch.object(manager, "sync_log"), \
+                mock.patch.object(manager, "sync_builtin_domain_decisions"), \
+                mock.patch.object(manager, "read_ai_routing_manual_mode", side_effect=AssertionError), \
+                mock.patch.object(
+                    manager,
+                    "select_ai_target",
+                    return_value={
+                        "probe_status": "all_reachable",
+                        "is_reachable": True,
+                        "upstream_host": "ai.example.com",
+                        "upstream_port": 27166,
+                        "candidates": [],
+                    },
+                ) as select_target, \
+                mock.patch.object(manager, "rerender_config", side_effect=lambda *args: None), \
+                mock.patch.object(manager, "save_ai_domains_to_panel_db", return_value={}), \
+                mock.patch.object(manager, "write_domain_report"), \
+                mock.patch.object(manager, "save_log_state"):
+                manager.run_once(args)
+
+        self.assertEqual(select_target.call_args.kwargs["preferred_index"], 0)
 
     def test_run_once_reports_success_when_post_apply_persistence_fails(self):
         result = self._check_run_once_recovery(report_failure=True)
@@ -747,7 +898,7 @@ class AiDomainManagerTest(unittest.TestCase):
 
     def test_local_openai_base_url_detection(self):
         self.assertTrue(classifier.is_local_openai_base_url("http://127.0.0.1:11434/v1"))
-        self.assertTrue(classifier.is_local_openai_base_url("http://192.168.1.10:8000"))
+        self.assertTrue(classifier.is_local_openai_base_url("http://127.0.0.1:8000"))
         self.assertFalse(classifier.is_local_openai_base_url("https://api.openai.com/v1/responses"))
 
     @mock.patch("urllib.request.urlopen")
@@ -813,7 +964,7 @@ class AiDomainManagerTest(unittest.TestCase):
 
         result = classifier.classify_domains_via_openai(
             ["openai.com"],
-            api_key="secret-key",
+            api_key="dummy-api-key",
             model="gpt-5.5",
             base_url="https://api.openai.com",
             timeout_seconds=5,
@@ -822,7 +973,7 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(result["openai.com"]["classification"], "ai")
         request = mocked_urlopen.call_args.args[0]
         self.assertEqual(request.full_url, "https://api.openai.com/v1/responses")
-        self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
+        self.assertEqual(request.get_header("Authorization"), "Bearer dummy-api-key")
         payload = json.loads(request.data.decode("utf-8"))
         self.assertIn("input", payload)
 

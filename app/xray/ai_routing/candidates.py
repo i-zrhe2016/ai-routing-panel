@@ -156,10 +156,10 @@ def parse_upstream_list(raw, default_port=None, field_name="AI_UPSTREAMS"):
     if not text:
         return []
     candidates = []
-    for token in UPSTREAM_LIST_SEPARATOR_RE.split(text):
-        token = token.strip()
-        if token:
-            candidates.append(parse_upstream_endpoint(token, default_port=default_port, field_name=field_name))
+    for entry in UPSTREAM_LIST_SEPARATOR_RE.split(text):
+        entry = entry.strip()
+        if entry:
+            candidates.append(parse_upstream_endpoint(entry, default_port=default_port, field_name=field_name))
     return candidates
 
 
@@ -189,6 +189,7 @@ def build_ai_upstream_candidates(
     upstreams_raw="",
     fallbacks_raw="",
     fallback_share_url="",
+    promote_fallback=False,
 ):
     if str(upstreams_raw or "").strip():
         candidates = [
@@ -196,9 +197,12 @@ def build_ai_upstream_candidates(
             for item in parse_upstream_list(upstreams_raw, default_port=primary_port, field_name="AI_UPSTREAMS")
         ]
     else:
-        candidates = [build_template_upstream_candidate(primary_host, primary_port)]
         fallback_candidate = parse_vless_fallback_url(fallback_share_url, field_name="AI_UPSTREAM_FALLBACK_URL")
-        if fallback_candidate:
+        if promote_fallback and fallback_candidate:
+            candidates = [fallback_candidate]
+        else:
+            candidates = [build_template_upstream_candidate(primary_host, primary_port)]
+        if fallback_candidate and not (promote_fallback and fallback_candidate):
             candidates.append(fallback_candidate)
         candidates.extend(
             [

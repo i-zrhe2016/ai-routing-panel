@@ -6,7 +6,8 @@ from node_exporter, not this endpoint.
 
 The handler is strictly read-only on the scrape path: it reads the tables the
 background maintenance loop keeps fresh, reads the AI node's loopback-only
-expvar endpoint, and incrementally tails the local AI access log for bounded
+expvar endpoint through the configured local or SSH-managed node, and
+incrementally tails the local or SSH-managed AI access log for bounded
 destination aggregates. It never calls ``sync_traffic_state``/
 ``dns_failover_status``/probes (any of which may do I/O). The data-plane status
 check and AI metrics reads are wrapped in TTL caches.
@@ -74,6 +75,7 @@ def _new_metrics_state():
             "inode": None,
             "offset": 0,
             "partial": "",
+            "skip_until_newline": False,
             "events": deque(),
         },
         "destination_lock": threading.Lock(),
@@ -130,17 +132,33 @@ def _data_plane_running_cached():
     return cache["val"]
 
 
+def _ai_node_controller():
+    try:
+        return state.nodes.ai_node
+    except (AttributeError, RuntimeError):
+        return None
+
+
 def _read_ai_node_metrics():
-    """Read the loopback-only Xray expvar endpoint and keep only byte totals."""
+    """Read the Xray expvar endpoint and keep only byte totals."""
     if not AI_NODE_METRICS_URL:
         return None
     parsed = urlsplit(AI_NODE_METRICS_URL)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
 
-    request = Request(AI_NODE_METRICS_URL, headers={"Accept": "application/json"})
-    with urlopen(request, timeout=max(1, int(XRAY_STATS_QUERY_TIMEOUT))) as response:
-        payload = json.loads(response.read(8 * 1024 * 1024).decode("utf-8"))
+    controller = _ai_node_controller()
+    if controller is not None and getattr(controller, "is_remote", False):
+        if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            return None
+        reader = getattr(controller, "read_metrics_payload", None)
+        if not callable(reader):
+            return None
+        payload = reader(AI_NODE_METRICS_URL, max(1, int(XRAY_STATS_QUERY_TIMEOUT)))
+    else:
+        request = Request(AI_NODE_METRICS_URL, headers={"Accept": "application/json"})
+        with urlopen(request, timeout=max(1, int(XRAY_STATS_QUERY_TIMEOUT))) as response:
+            payload = json.loads(response.read(8 * 1024 * 1024).decode("utf-8"))
     return _parse_ai_node_metrics_payload(payload)
 
 
@@ -181,7 +199,7 @@ def _ai_node_metrics_cached():
     if now - cache["ts"] >= METRICS_DP_TTL:
         try:
             result = _read_ai_node_metrics()
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        except (OSError, RuntimeError, ValueError, TypeError, json.JSONDecodeError):
             result = None
         if result is None:
             result = {
@@ -294,27 +312,125 @@ def _summarize_ai_destination_events(events, now, window_seconds, max_labels):
     }
 
 
+def _empty_ai_destination_metrics():
+    return {
+        "available": 0,
+        "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
+        "requests": [],
+        "other_requests": 0,
+    }
+
+
+def _state_flag(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _read_remote_ai_destination_metrics(controller):
+    if not AI_NODE_ACCESS_LOG_PATH or not callable(
+        getattr(controller, "read_access_log_delta", None)
+    ):
+        return _empty_ai_destination_metrics()
+
+    now = time.time()
+    metrics_state = _metrics_state()
+    with metrics_state["destination_lock"]:
+        log_state = metrics_state["destination_log_state"]
+        target = getattr(controller, "display_target", lambda: "")()
+        identity = f"remote:{target}:{AI_NODE_ACCESS_LOG_PATH}"
+        if log_state["path"] != identity:
+            log_state.update(
+                {
+                    "path": identity,
+                    "inode": None,
+                    "offset": 0,
+                    "partial": "",
+                    "skip_until_newline": False,
+                    "events": deque(),
+                }
+            )
+
+        try:
+            if log_state["skip_until_newline"]:
+                result = controller.read_access_log_delta(
+                    log_state["inode"],
+                    log_state["offset"],
+                    since_epoch=now - AI_NODE_DESTINATION_WINDOW_SECONDS,
+                    skip_until_newline=True,
+                )
+            else:
+                result = controller.read_access_log_delta(
+                    log_state["inode"],
+                    log_state["offset"],
+                    since_epoch=now - AI_NODE_DESTINATION_WINDOW_SECONDS,
+                )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return _empty_ai_destination_metrics()
+        if not isinstance(result, dict) or not result.get("exists"):
+            return _empty_ai_destination_metrics()
+
+        result_inode = str(result.get("inode", ""))
+        try:
+            result_offset = int(result.get("offset", 0) or 0)
+        except (TypeError, ValueError):
+            return _empty_ai_destination_metrics()
+        previous_inode = log_state["inode"]
+        previous_offset = int(log_state["offset"] or 0)
+        result_skip_until_newline = _state_flag(result.get("skip_until_newline"))
+        rotated = (
+            previous_inode not in {None, ""}
+            and result_inode != str(previous_inode)
+        ) or result_offset < previous_offset
+        if rotated:
+            log_state["partial"] = ""
+            log_state["events"] = deque()
+        log_state["inode"] = result_inode
+        log_state["offset"] = result_offset
+        log_state["skip_until_newline"] = result_skip_until_newline
+        incoming = str(result.get("data") or "")
+        if len(incoming) > _AI_DESTINATION_READ_CHUNK_BYTES:
+            incoming = incoming[-_AI_DESTINATION_READ_CHUNK_BYTES:]
+        partial = str(log_state["partial"] or "")
+        if len(partial) > _AI_DESTINATION_READ_CHUNK_BYTES:
+            partial = ""
+        text = partial + incoming
+        if len(text) > _AI_DESTINATION_READ_CHUNK_BYTES:
+            text = incoming
+            log_state["partial"] = ""
+        lines = text.splitlines()
+        if text and not text.endswith(("\n", "\r")):
+            log_state["partial"] = lines.pop() if lines else text
+        else:
+            log_state["partial"] = ""
+        for line in lines:
+            event = _parse_ai_access_line(line, fallback_timestamp=now)
+            if event is not None:
+                log_state["events"].append(event)
+
+        cutoff = now - AI_NODE_DESTINATION_WINDOW_SECONDS
+        while log_state["events"] and log_state["events"][0]["timestamp"] < cutoff:
+            log_state["events"].popleft()
+        return _summarize_ai_destination_events(
+            log_state["events"],
+            now,
+            AI_NODE_DESTINATION_WINDOW_SECONDS,
+            AI_NODE_DESTINATION_MAX_LABELS,
+        )
+
+
 def _read_ai_destination_metrics():
     """Tail the AI access log and aggregate recent accepted destinations."""
+    controller = _ai_node_controller()
+    if controller is not None and getattr(controller, "is_remote", False):
+        return _read_remote_ai_destination_metrics(controller)
     if not AI_NODE_ACCESS_LOG_PATH:
-        return {
-            "available": 0,
-            "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
-            "requests": [],
-            "other_requests": 0,
-        }
+        return _empty_ai_destination_metrics()
 
     path = Path(AI_NODE_ACCESS_LOG_PATH)
     now = time.time()
     try:
         info = path.stat()
     except OSError:
-        return {
-            "available": 0,
-            "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
-            "requests": [],
-            "other_requests": 0,
-        }
+        return _empty_ai_destination_metrics()
 
     metrics_state = _metrics_state()
     with metrics_state["destination_lock"]:
@@ -345,12 +461,7 @@ def _read_ai_destination_metrics():
                 chunk = handle.read(_AI_DESTINATION_READ_CHUNK_BYTES)
                 log_state["offset"] = handle.tell()
         except OSError:
-            return {
-                "available": 0,
-                "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
-                "requests": [],
-                "other_requests": 0,
-            }
+            return _empty_ai_destination_metrics()
 
         text = log_state["partial"] + chunk
         lines = text.splitlines()
@@ -383,13 +494,8 @@ def _ai_destination_metrics_cached():
     if now - cache["ts"] >= METRICS_DP_TTL:
         try:
             result = _read_ai_destination_metrics()
-        except (OSError, TypeError, ValueError):
-            result = {
-                "available": 0,
-                "window_seconds": AI_NODE_DESTINATION_WINDOW_SECONDS,
-                "requests": [],
-                "other_requests": 0,
-            }
+        except (OSError, RuntimeError, TypeError, ValueError):
+            result = _empty_ai_destination_metrics()
         cache.update(result)
         cache["ts"] = now
     return cache
