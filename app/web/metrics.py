@@ -370,7 +370,16 @@ def _read_remote_ai_destination_metrics(controller):
             log_state["events"] = deque()
         log_state["inode"] = result_inode
         log_state["offset"] = result_offset
-        text = log_state["partial"] + str(result.get("data") or "")
+        incoming = str(result.get("data") or "")
+        if len(incoming) > _AI_DESTINATION_READ_CHUNK_BYTES:
+            incoming = incoming[-_AI_DESTINATION_READ_CHUNK_BYTES:]
+        partial = str(log_state["partial"] or "")
+        if len(partial) > _AI_DESTINATION_READ_CHUNK_BYTES:
+            partial = ""
+        text = partial + incoming
+        if len(text) > _AI_DESTINATION_READ_CHUNK_BYTES:
+            text = incoming
+            log_state["partial"] = ""
         lines = text.splitlines()
         if text and not text.endswith(("\n", "\r")):
             log_state["partial"] = lines.pop() if lines else text

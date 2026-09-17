@@ -65,27 +65,46 @@ initial_tail = offset == 0 and stat.st_size > MAX_READ_BYTES
 if initial_tail:
     offset = stat.st_size - MAX_READ_BYTES
 
+data_text = ""
+skip_until_newline = initial_tail
 with open(path, "rb") as handle:
     handle.seek(offset)
-    read_offset = handle.tell()
-    raw_data = handle.read(MAX_READ_BYTES)
-    last_newline = raw_data.rfind(b"\\n")
+    while True:
+        read_offset = handle.tell()
+        raw_data = handle.read(MAX_READ_BYTES)
+        if not raw_data:
+            offset = handle.tell() if skip_until_newline else read_offset
+            break
 
-if last_newline < 0:
-    has_more_data = read_offset + len(raw_data) < stat.st_size
-    if initial_tail or has_more_data:
-        data_text = raw_data.decode("utf-8", errors="ignore")
-        offset = read_offset + len(raw_data)
-    else:
-        data_text = ""
-        offset = read_offset
-else:
-    complete_data = raw_data[: last_newline + 1]
-    offset = read_offset + len(complete_data)
-    data_text = complete_data.decode("utf-8", errors="ignore")
-    if initial_tail:
-        first_newline = data_text.find("\\n")
-        data_text = data_text[first_newline + 1 :] if first_newline >= 0 else ""
+        data_start = read_offset
+        discarded_prefix = False
+        if skip_until_newline:
+            first_newline = raw_data.find(b"\\n")
+            if first_newline < 0:
+                if handle.tell() < stat.st_size:
+                    continue
+                offset = handle.tell()
+                break
+            raw_data = raw_data[first_newline + 1 :]
+            data_start = read_offset + first_newline + 1
+            skip_until_newline = False
+            discarded_prefix = True
+
+        last_newline = raw_data.rfind(b"\\n")
+        if last_newline < 0:
+            if discarded_prefix:
+                offset = data_start
+                break
+            if handle.tell() < stat.st_size:
+                skip_until_newline = True
+                continue
+            offset = read_offset
+            break
+
+        complete_data = raw_data[: last_newline + 1]
+        offset = data_start + len(complete_data)
+        data_text = complete_data.decode("utf-8", errors="ignore")
+        break
 if since_epoch is None:
     data = data_text
 else:

@@ -126,6 +126,34 @@ def test_remote_ai_destination_metrics_clears_partial_on_rotation(monkeypatch):
     assert result["requests"][0]["domain"] == "new.example.com"
 
 
+def test_remote_ai_destination_metrics_caps_partial_record(monkeypatch):
+    from app.web import metrics
+
+    class RemoteNode:
+        is_remote = True
+
+        def display_target(self):
+            return "root@example.com"
+
+        def read_access_log_delta(self, inode, offset, since_epoch=None):
+            return {
+                "exists": True,
+                "inode": "one",
+                "offset": 10,
+                "data": "x" * (metrics._AI_DESTINATION_READ_CHUNK_BYTES + 1),
+            }
+
+    monkeypatch.setattr(metrics, "_ai_node_controller", lambda: RemoteNode())
+    monkeypatch.setattr(metrics, "AI_NODE_ACCESS_LOG_PATH", "/var/log/xray/ai-access.log")
+    monkeypatch.setattr(metrics, "_FALLBACK_METRICS_STATE", metrics._new_metrics_state())
+
+    metrics._read_ai_destination_metrics()
+
+    assert len(metrics._FALLBACK_METRICS_STATE["destination_log_state"]["partial"]) <= (
+        metrics._AI_DESTINATION_READ_CHUNK_BYTES
+    )
+
+
 def test_parse_ai_access_line_extracts_destination_and_ignores_non_access_lines():
     from app.web.metrics import _parse_ai_access_line
 

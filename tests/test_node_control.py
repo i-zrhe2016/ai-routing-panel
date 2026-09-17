@@ -751,24 +751,9 @@ class NodeControlTest(unittest.TestCase):
         first_payload = json.loads(first.stdout)
         self.assertGreater(first_payload["offset"], 7)
         self.assertLessEqual(len(first_payload["data"].encode("utf-8")), 8 * 1024 * 1024)
-
-        second = subprocess.run(
-            [
-                sys.executable,
-                str(script_path),
-                str(log_path),
-                recorded_inode,
-                str(first_payload["offset"]),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertEqual(second.returncode, 0, second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assertEqual(second_payload["offset"], log_path.stat().st_size)
-        self.assertIn("after.example.com", second_payload["data"])
+        self.assertEqual(first_payload["offset"], log_path.stat().st_size)
+        self.assertNotIn("oversized.example.com", first_payload["data"])
+        self.assertIn("after.example.com", first_payload["data"])
 
     def test_remote_access_log_delta_passes_optional_timestamp_cutoff(self):
         controller = DataPlaneController(
