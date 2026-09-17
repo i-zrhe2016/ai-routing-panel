@@ -1,5 +1,6 @@
 """Process boundary for invoking the AI domain manager."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,13 @@ class AiDomainManagerRunner:
             project_root = Path(__file__).resolve().parents[2]
         return project_root
 
+    @staticmethod
+    def _docker_environment_overrides():
+        value = os.environ.get("AI_UPSTREAM_FALLBACK_AS_PRIMARY")
+        if value is None or not str(value).strip():
+            return []
+        return ["--env", f"AI_UPSTREAM_FALLBACK_AS_PRIMARY={str(value).strip()}"]
+
     def build_command(self, manual_mode=None):
         if self.execution_mode == "local":
             command = [self.python_executable, "-m", "app.xray.ai_routing.runner", "--once"]
@@ -44,6 +52,7 @@ class AiDomainManagerRunner:
             command = [
                 self.docker_bin,
                 "exec",
+                *self._docker_environment_overrides(),
                 self.container_name,
                 "python3",
                 "-m",

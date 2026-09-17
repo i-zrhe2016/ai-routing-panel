@@ -185,13 +185,31 @@ class AiRoutingService:
 
     def _configured_ai_candidates(self):
         try:
-            values = load_env_file(XRAY_ENV_FILE_PATH)
+            try:
+                values = load_env_file(XRAY_ENV_FILE_PATH)
+            except OSError:
+                # The local runner can operate from process environment only;
+                # keep panel validation aligned when the optional env file is
+                # absent or not readable.
+                values = {}
+            upstream_values = {
+                name: read_env_or_file(name, "", values)
+                for name in (
+                    "AI_UPSTREAM_HOST",
+                    "AI_UPSTREAM_PORT",
+                    "AI_UPSTREAMS",
+                    "AI_UPSTREAM_FALLBACKS",
+                    "AI_UPSTREAM_FALLBACK_URL",
+                )
+            }
+            if not any(upstream_values.values()):
+                return []
             candidates = build_ai_upstream_candidates(
-                values.get("AI_UPSTREAM_HOST", ""),
-                int(values.get("AI_UPSTREAM_PORT", "27166")),
-                upstreams_raw=values.get("AI_UPSTREAMS", ""),
-                fallbacks_raw=values.get("AI_UPSTREAM_FALLBACKS", ""),
-                fallback_share_url=values.get("AI_UPSTREAM_FALLBACK_URL", ""),
+                upstream_values["AI_UPSTREAM_HOST"] or "upstream.example.com",
+                int(upstream_values["AI_UPSTREAM_PORT"] or "27166"),
+                upstreams_raw=upstream_values["AI_UPSTREAMS"],
+                fallbacks_raw=upstream_values["AI_UPSTREAM_FALLBACKS"],
+                fallback_share_url=upstream_values["AI_UPSTREAM_FALLBACK_URL"],
                 promote_fallback=read_env_or_file(
                     "AI_UPSTREAM_FALLBACK_AS_PRIMARY",
                     "0",

@@ -374,6 +374,25 @@ class NodeControlTest(unittest.TestCase):
         state.ai_routing._trigger_ai_domain_manager.assert_called_once_with("primary")
         self.assertEqual(state.ai_routing_manual_state()["mode"], "primary")
 
+    def test_environment_only_ai_candidate_is_visible_and_can_be_fixed_primary(self):
+        os.environ["AI_ROUTING_ENABLED"] = "1"
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"
+        os.environ["AI_UPSTREAM_HOST"] = "127.0.0.1"
+        os.environ["AI_UPSTREAM_PORT"] = "27166"
+        os.environ["AI_UPSTREAM_FALLBACK_AS_PRIMARY"] = "0"
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        state.ai_routing._trigger_ai_domain_manager = mock.Mock()
+
+        status = state.ai_routing_manual_state()
+        self.assertEqual(status["candidate_count"], 1)
+        self.assertEqual(status["candidates"][0]["upstream_host"], "127.0.0.1")
+
+        state.set_ai_routing_manual_mode("primary")
+
+        state.ai_routing._trigger_ai_domain_manager.assert_called_once_with("primary")
+        self.assertEqual(state.ai_routing_manual_state()["mode"], "primary")
+
     def test_manual_ai_mode_rejects_when_no_candidates_are_configured(self):
         os.environ["AI_ROUTING_ENABLED"] = "1"
         state_module = load_state_module(self.root)
