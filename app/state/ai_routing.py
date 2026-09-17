@@ -18,7 +18,7 @@ from ..helpers import (
 from ..observability.logging import emit_business_event
 from ..xray.ai_routing.candidates import build_ai_upstream_candidates
 from ..xray.ai_routing.launcher import AiDomainManagerRunner
-from ..xray.ai_routing.repository import ensure_ai_domain_schema
+from ..xray.ai_routing.repository import ensure_ai_domain_schema, normalize_ai_routing_manual_mode
 from ..xray.envfile import load_env_file, read_env_or_file
 from ..xray.operation_lock import LockBusyError, exclusive_file_lock
 
@@ -161,6 +161,12 @@ class AiRoutingService:
             updated_at = str(self.repository.get_state(conn, "ai_routing_manual_updated_at", "") or "").strip()
         if mode not in {"auto", "primary", "backup", "forced_fallback"}:
             mode = "auto"
+        database_path = getattr(self.repository, "path", None)
+        if database_path is not None:
+            normalized_mode = normalize_ai_routing_manual_mode(database_path, len(candidates))
+            if normalized_mode != mode:
+                mode = normalized_mode
+                updated_at = utc_iso_now()
         selected_index = {"primary": 0, "backup": 1}.get(mode, report_selected_index)
         for index, candidate in enumerate(candidates):
             candidate["index"] = index

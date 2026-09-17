@@ -265,6 +265,20 @@ class AiDomainManagerTest(unittest.TestCase):
             self.assertEqual(repository.read_ai_routing_manual_mode(db_path), "forced_fallback")
             self.assertEqual(repository.read_ai_routing_manual_mode(Path(tmpdir) / "missing.db"), "auto")
 
+    def test_normalize_ai_routing_manual_mode_promotes_stale_backup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "panel.db"
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                conn.execute(
+                    "INSERT INTO app_state (key, value) VALUES (?, ?)",
+                    ("ai_routing_manual_mode", "backup"),
+                )
+                conn.commit()
+
+            self.assertEqual(repository.normalize_ai_routing_manual_mode(db_path, 1), "primary")
+            self.assertEqual(repository.read_ai_routing_manual_mode(db_path), "primary")
+
     def test_build_ai_upstream_candidates_can_promote_fallback_share_url(self):
         result = candidates.build_ai_upstream_candidates(
             "127.0.0.1",

@@ -27,6 +27,7 @@ from .classifier import (
 from .common import save_json, utc_now
 from .observations import load_log_state, purge_old_events, save_log_state, sync_log
 from .repository import (
+    normalize_ai_routing_manual_mode,
     read_ai_routing_manual_mode,
     read_panel_target,
     save_ai_domains_to_panel_db,
@@ -134,7 +135,11 @@ def _run_once_locked(args):
     manual_mode_override = getattr(args, "manual_mode", None)
     if not isinstance(manual_mode_override, str):
         manual_mode_override = ""
-    manual_mode = manual_mode_override.strip().lower() or read_ai_routing_manual_mode(args.panel_db_path)
+    manual_mode = manual_mode_override.strip().lower()
+    if not manual_mode:
+        manual_mode = read_ai_routing_manual_mode(args.panel_db_path)
+        if manual_mode == "backup" and len(args.ai_upstream_candidates) < 2:
+            manual_mode = normalize_ai_routing_manual_mode(args.panel_db_path, len(args.ai_upstream_candidates))
     if manual_mode == "forced_fallback":
         ai_target = {
             "probe_status": "manual_fallback",

@@ -365,10 +365,14 @@ class NodeControlTest(unittest.TestCase):
         state = load_state_module(self.root).PanelState()
         state.init_db()
         state.ai_routing._trigger_ai_domain_manager = mock.Mock()
+        with state.connect() as conn:
+            state.set_state(conn, "ai_routing_manual_mode", "backup")
+            conn.commit()
 
         status = state.ai_routing_manual_state()
         self.assertEqual(status["candidate_count"], 1)
         self.assertEqual(status["candidates"][0]["candidate_type"], "share_url")
+        self.assertEqual(status["mode"], "primary")
 
         state.set_ai_routing_manual_mode("primary")
 
