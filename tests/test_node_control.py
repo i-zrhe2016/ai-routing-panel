@@ -349,12 +349,13 @@ class NodeControlTest(unittest.TestCase):
 
     def test_single_promoted_ai_candidate_is_visible_and_can_be_fixed_primary(self):
         os.environ["AI_ROUTING_ENABLED"] = "1"
+        os.environ["AI_UPSTREAM_FALLBACK_AS_PRIMARY"] = "1"
         env_file = self.root / "xray" / ".env"
         env_file.parent.mkdir(parents=True, exist_ok=True)
         env_file.write_text(
             "AI_UPSTREAM_HOST=127.0.0.1\n"
             "AI_UPSTREAM_PORT=27166\n"
-            "AI_UPSTREAM_FALLBACK_AS_PRIMARY=1\n"
+            "AI_UPSTREAM_FALLBACK_AS_PRIMARY=0\n"
             "AI_UPSTREAM_FALLBACK_URL=vless://22222222-2222-2222-2222-222222222222@"
             "127.0.0.1:27166?encryption=none&security=reality&type=tcp&"
             "sni=www.amazon.com&fp=chrome&pbk=public-key&sid=abcdef0123456789\n",
@@ -372,6 +373,15 @@ class NodeControlTest(unittest.TestCase):
 
         state.ai_routing._trigger_ai_domain_manager.assert_called_once_with("primary")
         self.assertEqual(state.ai_routing_manual_state()["mode"], "primary")
+
+    def test_manual_ai_mode_rejects_when_no_candidates_are_configured(self):
+        os.environ["AI_ROUTING_ENABLED"] = "1"
+        state_module = load_state_module(self.root)
+        state = state_module.PanelState()
+        state.init_db()
+
+        with self.assertRaisesRegex(state_module.ValidationError, "未配置可用 AI 节点"):
+            state.set_ai_routing_manual_mode("primary")
 
     def test_manual_manager_can_run_locally_in_a_shared_pod(self):
         os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"

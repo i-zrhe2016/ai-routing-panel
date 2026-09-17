@@ -19,7 +19,7 @@ from ..observability.logging import emit_business_event
 from ..xray.ai_routing.candidates import build_ai_upstream_candidates
 from ..xray.ai_routing.launcher import AiDomainManagerRunner
 from ..xray.ai_routing.repository import ensure_ai_domain_schema
-from ..xray.envfile import load_env_file
+from ..xray.envfile import load_env_file, read_env_or_file
 from ..xray.operation_lock import LockBusyError, exclusive_file_lock
 
 
@@ -192,9 +192,11 @@ class AiRoutingService:
                 upstreams_raw=values.get("AI_UPSTREAMS", ""),
                 fallbacks_raw=values.get("AI_UPSTREAM_FALLBACKS", ""),
                 fallback_share_url=values.get("AI_UPSTREAM_FALLBACK_URL", ""),
-                promote_fallback=str(values.get("AI_UPSTREAM_FALLBACK_AS_PRIMARY", ""))
-                .strip()
-                .lower()
+                promote_fallback=read_env_or_file(
+                    "AI_UPSTREAM_FALLBACK_AS_PRIMARY",
+                    "0",
+                    values,
+                ).lower()
                 not in {"0", "false", "no", "off", ""},
             )
         except (OSError, ValueError, TypeError):
@@ -227,9 +229,12 @@ class AiRoutingService:
         if not AI_ROUTING_ENABLED:
             raise ValidationError("AI 路由未启用。")
 
-        if mode == "backup":
+        if mode in {"primary", "backup"}:
             candidate_state = self.ai_routing_manual_state()
-            if len(candidate_state["candidates"]) < 2:
+            candidate_count = len(candidate_state["candidates"])
+            if candidate_count == 0:
+                raise ValidationError("当前未配置可用 AI 节点，无法固定 AI 节点。")
+            if mode == "backup" and candidate_count < 2:
                 raise ValidationError("当前只配置了一个 AI 节点，无法固定备用节点。")
 
         updated_at = utc_iso_now()
