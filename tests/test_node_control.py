@@ -727,6 +727,49 @@ class NodeControlTest(unittest.TestCase):
         self.assertEqual(second_payload["offset"], log_path.stat().st_size)
         self.assertIn("partial", second_payload["data"])
 
+    def test_remote_access_log_script_advances_past_oversized_line(self):
+        log_path = self.root / "access.log"
+        log_path.write_text(
+            "header\n"
+            + "2026/08/31 11:30:00.000000 accepted tcp:oversized.example.com:443 "
+            + "x" * (8 * 1024 * 1024 + 1024)
+            + "\n2026/08/31 11:31:00.000000 accepted tcp:after.example.com:443 [direct]\n",
+            encoding="utf-8",
+        )
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        recorded_inode = str(log_path.stat().st_ino)
+
+        first = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertGreater(first_payload["offset"], 7)
+        self.assertLessEqual(len(first_payload["data"].encode("utf-8")), 8 * 1024 * 1024)
+
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(log_path),
+                recorded_inode,
+                str(first_payload["offset"]),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertEqual(second_payload["offset"], log_path.stat().st_size)
+        self.assertIn("after.example.com", second_payload["data"])
+
     def test_remote_access_log_delta_passes_optional_timestamp_cutoff(self):
         controller = DataPlaneController(
             DataPlaneConfig(

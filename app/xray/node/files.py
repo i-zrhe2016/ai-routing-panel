@@ -72,8 +72,13 @@ with open(path, "rb") as handle:
     last_newline = raw_data.rfind(b"\\n")
 
 if last_newline < 0:
-    data_text = ""
-    offset = read_offset
+    has_more_data = read_offset + len(raw_data) < stat.st_size
+    if initial_tail or has_more_data:
+        data_text = raw_data.decode("utf-8", errors="ignore")
+        offset = read_offset + len(raw_data)
+    else:
+        data_text = ""
+        offset = read_offset
 else:
     complete_data = raw_data[: last_newline + 1]
     offset = read_offset + len(complete_data)
