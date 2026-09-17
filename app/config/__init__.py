@@ -127,11 +127,13 @@ AI_NODE_DOCKER_BIN = os.environ.get("AI_NODE_DOCKER_BIN", "docker").strip() or "
 AI_NODE_RESTART_COMMAND = os.environ.get("AI_NODE_RESTART_COMMAND", "").strip()
 AI_NODE_CONFIG_PATH = os.environ.get("AI_NODE_CONFIG_PATH", "/etc/xray/config.json").strip()
 AI_NODE_API_SERVER = os.environ.get("AI_NODE_API_SERVER", "127.0.0.1:10085").strip()
-AI_NODE_METRICS_URL = os.environ.get(
-    "AI_NODE_METRICS_URL", "http://127.0.0.1:31097/debug/vars"
+AI_NODE_METRICS_URL = (
+    os.environ.get("AI_NODE_METRICS_URL") or "http://127.0.0.1:31097/debug/vars"
 ).strip()
-AI_NODE_ACCESS_LOG_PATH = os.environ.get(
-    "AI_NODE_ACCESS_LOG_PATH", str(BASE_DIR / "xray" / "logs" / "ai-access.log")
+_AI_NODE_REMOTE_MODE = bool(AI_NODE_SSH_TARGETS or AI_NODE_SSH_TARGET)
+AI_NODE_ACCESS_LOG_PATH = (
+    os.environ.get("AI_NODE_ACCESS_LOG_PATH")
+    or ("/var/log/xray/ai-access.log" if _AI_NODE_REMOTE_MODE else str(BASE_DIR / "xray" / "logs" / "ai-access.log"))
 ).strip()
 AI_NODE_DESTINATION_WINDOW_SECONDS = parse_positive_env_int(
     os.environ.get("AI_NODE_DESTINATION_WINDOW_SECONDS", "600"),
@@ -159,7 +161,7 @@ PANEL_INTERNAL_HOSTS = frozenset(
     item.strip().lower().strip("[]")
     for item in (
         _parse_csv_env("PANEL_INTERNAL_HOSTS")
-        or ("100.112.13.103",)
+        or ("127.0.0.1",)
     )
     if item.strip()
 )

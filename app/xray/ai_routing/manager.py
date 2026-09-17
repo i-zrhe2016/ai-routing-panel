@@ -138,7 +138,10 @@ def _run_once_locked(args):
     manual_mode = manual_mode_override.strip().lower()
     if not manual_mode:
         manual_mode = read_ai_routing_manual_mode(args.panel_db_path)
-        if manual_mode == "backup" and len(args.ai_upstream_candidates) < 2:
+    if manual_mode == "backup" and len(args.ai_upstream_candidates) < 2:
+        if manual_mode_override.strip():
+            manual_mode = "primary" if len(args.ai_upstream_candidates) == 1 else "auto"
+        else:
             manual_mode = normalize_ai_routing_manual_mode(args.panel_db_path, len(args.ai_upstream_candidates))
     if manual_mode == "forced_fallback":
         ai_target = {

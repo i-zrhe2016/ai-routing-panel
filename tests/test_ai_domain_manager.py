@@ -359,6 +359,68 @@ class AiDomainManagerTest(unittest.TestCase):
     def test_run_once_honors_explicit_manual_mode_override(self):
         self._check_run_once_recovery(forced=True, manual_mode_override="forced_fallback")
 
+    def test_run_once_promotes_explicit_backup_override_with_one_candidate(self):
+        controller = mock.Mock()
+        controller.is_configured.return_value = True
+        controller.supports_sync.return_value = False
+        controller.supports_restart.return_value = False
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_out = root / "runtime" / "config.json"
+            config_out.parent.mkdir()
+            config_out.write_text("same", encoding="utf-8")
+            dynamic_routing_path = root / "runtime" / "dynamic-routing.json"
+            args = mock.Mock(
+                log_state_path=root / "log-state.json",
+                log_path=root / "access.log",
+                lookback_seconds=3600,
+                classification_state_path=root / "decisions.json",
+                panel_db_path=root / "panel.db",
+                panel_route_listen_port=None,
+                ai_upstream_candidates=[{"upstream_host": "ai.example.com", "upstream_port": 27166}],
+                ai_upstream_probe_timeout_seconds=2.0,
+                batch_size=50,
+                codex_classifier_enabled=False,
+                openai_classifier_enabled=False,
+                proxy_template_path=root / "missing-template.json",
+                dynamic_routing_path=dynamic_routing_path,
+                render_script="app.xray.render_config",
+                env_file=root / "xray.env",
+                config_out=config_out,
+                client_out=root / "runtime" / "client-test.json",
+                share_out=root / "runtime" / "client-share.txt",
+                data_plane_config_path="/root/xray/runtime/config.json",
+                restart_command="",
+                restart_container_name="",
+                docker_timeout_seconds=5,
+                report_output_dir=root / "reports",
+                manual_mode="backup",
+            )
+
+            with mock.patch.object(manager, "build_data_plane_controller", return_value=controller), \
+                mock.patch.object(manager, "sync_log"), \
+                mock.patch.object(manager, "sync_builtin_domain_decisions"), \
+                mock.patch.object(manager, "read_ai_routing_manual_mode", side_effect=AssertionError), \
+                mock.patch.object(
+                    manager,
+                    "select_ai_target",
+                    return_value={
+                        "probe_status": "all_reachable",
+                        "is_reachable": True,
+                        "upstream_host": "ai.example.com",
+                        "upstream_port": 27166,
+                        "candidates": [],
+                    },
+                ) as select_target, \
+                mock.patch.object(manager, "rerender_config", side_effect=lambda *args: None), \
+                mock.patch.object(manager, "save_ai_domains_to_panel_db", return_value={}), \
+                mock.patch.object(manager, "write_domain_report"), \
+                mock.patch.object(manager, "save_log_state"):
+                manager.run_once(args)
+
+        self.assertEqual(select_target.call_args.kwargs["preferred_index"], 0)
+
     def test_run_once_reports_success_when_post_apply_persistence_fails(self):
         result = self._check_run_once_recovery(report_failure=True)
         self.assertEqual(result["status"], "applied_with_reporting_error")

@@ -146,10 +146,11 @@ AI 节点当前目标使用 `ssh` 模式；未设置远端目标时才使用 `do
 12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；控制面 AI 运行时产物来自 `config/`，远端 AI 节点保持独立配置，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
 13. 首页读取三节点状态、已配置 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
-AI 观测链路：`xray-ai-node` 将 Xray metrics 绑定到 `redacted-ip-007:31097`，面板读取后在
-`/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定 `redacted-ip-007:18081`，
-Prometheus 同时采集 `xray-ai-node` 的容器级 CPU、内存和网络总量。AI access log 只
-保留在控制面日志目录，集中日志链路仅采集 `ai-error.log`。面板增量读取
+AI 观测链路：本机 Docker 的 `xray-ai-node` 将 Xray metrics 绑定到控制面回环地址，
+远端 AI 则由面板通过 SSH 在节点回环读取同一 `/debug/vars`，两者均在面板
+`/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定控制面回环地址，
+Prometheus 同时采集 AI 主机的容器级 CPU、内存和网络总量。AI access log 只
+保留在各自节点，集中日志链路仅采集 `ai-error.log`。面板增量读取本机或远端
 `ai-access.log`，在最近窗口内按目标域名、端口和网络协议聚合请求量，输出
 `xray_panel_ai_destination_*` Top 指标；Xray access log 不提供按目标拆分的字节量。
 

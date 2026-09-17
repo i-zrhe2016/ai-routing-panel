@@ -12,7 +12,11 @@ from types import ModuleType, SimpleNamespace
 from unittest import mock
 
 from app.xray.node import DataPlaneConfig, DataPlaneController
-from app.xray.node.files import REMOTE_FILE_DELTA_SCRIPT, build_temp_target_path
+from app.xray.node.files import (
+    REMOTE_FILE_DELTA_SCRIPT,
+    REMOTE_READ_HTTP_JSON_SCRIPT,
+    build_temp_target_path,
+)
 from app.xray.operation_lock import exclusive_file_lock
 
 
@@ -379,6 +383,57 @@ class NodeControlTest(unittest.TestCase):
         state.ai_routing._trigger_ai_domain_manager.assert_called_once_with("primary")
         self.assertEqual(state.ai_routing_manual_state()["mode"], "primary")
 
+    def test_ai_manual_state_does_not_use_stale_report_when_current_config_is_empty(self):
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "docker"
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        report_path = self.root / "xray" / "reports" / "hourly-domains" / "latest.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "ai_target": {
+                        "selected_index": 1,
+                        "candidates": [
+                            {"upstream_host": "stale.example.com", "upstream_port": 27166}
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (self.root / "xray" / ".env").write_text("AI_UPSTREAM_HOST=\n", encoding="utf-8")
+
+        status = state.ai_routing_manual_state()
+
+        self.assertEqual(status["candidate_count"], 0)
+        self.assertEqual(status["candidates"], [])
+
+    def test_ai_manual_state_preserves_mode_when_current_config_is_unknown(self):
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "docker"
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        report_path = self.root / "xray" / "reports" / "hourly-domains" / "latest.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "ai_target": {
+                        "candidates": [
+                            {"upstream_host": "reported.example.com", "upstream_port": 27166}
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with state.connect() as conn:
+            state.set_state(conn, "ai_routing_manual_mode", "backup")
+            conn.commit()
+
+        status = state.ai_routing_manual_state()
+
+        self.assertEqual(status["mode"], "backup")
+        self.assertEqual(status["candidate_count"], 1)
+
     def test_environment_only_ai_candidate_without_env_file_is_rejected(self):
         os.environ["AI_ROUTING_ENABLED"] = "1"
         os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"
@@ -603,6 +658,41 @@ class NodeControlTest(unittest.TestCase):
 
         self.assertTrue(result["exists"])
         self.assertEqual(calls[0][-1], "123.5")
+
+    def test_remote_metrics_payload_reads_loopback_endpoint(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="ai_node",
+                label="AI 节点",
+                ssh_target="root@example.com",
+            )
+        )
+        calls = []
+
+        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
+            calls.append((args, timeout))
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"stats": {"inbound": {}, "outbound": {}}}',
+                stderr="",
+            )
+
+        controller._run_remote = fake_run_remote
+
+        result = controller.read_metrics_payload("http://127.0.0.1:31097/debug/vars", 5)
+
+        self.assertEqual(result["stats"], {"inbound": {}, "outbound": {}})
+        self.assertEqual(calls[0][0][:3], ["python3", "-c", REMOTE_READ_HTTP_JSON_SCRIPT])
+        self.assertEqual(calls[0][0][-2:], ["http://127.0.0.1:31097/debug/vars", "5.0"])
+        self.assertEqual(calls[0][1], 5.0)
+
+    def test_remote_metrics_payload_rejects_non_loopback_endpoint(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(role="ai_node", label="AI 节点", ssh_target="root@example.com")
+        )
+
+        with self.assertRaisesRegex(ValueError, "回环地址"):
+            controller.read_metrics_payload("http://metrics.example.com/debug/vars", 5)
 
     def test_remote_dynamic_routing_sync_updates_local_copy(self):
         local_path = self.root / "dynamic-routing.json"

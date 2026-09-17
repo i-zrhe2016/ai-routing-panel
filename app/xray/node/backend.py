@@ -231,6 +231,9 @@ class NodeBackend:
     def read_access_log_delta(self, recorded_inode, offset, since_epoch=None):
         return {"exists": False, "inode": "", "offset": 0, "data": ""}
 
+    def read_metrics_payload(self, metrics_url, timeout_seconds):
+        del metrics_url, timeout_seconds
+
     def run_statsquery(self, timeout_seconds, pattern):
         return None
 

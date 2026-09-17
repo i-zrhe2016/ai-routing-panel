@@ -141,15 +141,16 @@ class AiRoutingService:
 
     def ai_routing_manual_state(self):
         report = self.read_ai_domain_report()
-        candidates = []
+        report_candidates = []
         if isinstance(report, dict):
             target = report.get("ai_target")
             if isinstance(target, dict):
-                candidates = [item for item in target.get("candidates", []) if isinstance(item, dict)]
-        if not candidates:
-            candidates = self._configured_ai_candidates()
+                report_candidates = [item for item in target.get("candidates", []) if isinstance(item, dict)]
+        configured_candidates = self._configured_ai_candidates()
+        configuration_known = configured_candidates is not None
+        candidates = configured_candidates if configuration_known else report_candidates
         report_selected_index = None
-        if isinstance(report, dict):
+        if not configuration_known and isinstance(report, dict):
             target = report.get("ai_target")
             if isinstance(target, dict):
                 try:
@@ -162,7 +163,7 @@ class AiRoutingService:
         if mode not in {"auto", "primary", "backup", "forced_fallback"}:
             mode = "auto"
         database_path = getattr(self.repository, "path", None)
-        if database_path is not None:
+        if configuration_known and database_path is not None:
             normalized_mode = normalize_ai_routing_manual_mode(database_path, len(candidates))
             if normalized_mode != mode:
                 mode = normalized_mode
@@ -227,7 +228,7 @@ class AiRoutingService:
                 not in {"0", "false", "no", "off", ""},
             )
         except (OSError, ValueError, TypeError):
-            return []
+            return None
         return [
             {
                 "upstream_host": item.get("upstream_host", ""),

@@ -114,7 +114,12 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 本机 Docker 模式下，控制面 cAdvisor 提供 `xray-ai-node` 容器的 CPU、内存和网络总量，
 不替代 Xray 按入站方向的业务计数。
 
-远端 AI 模式在 `monitoring/prometheus/prometheus.yml` 中为节点配置独立 target；当前仅保留
+远端 AI 模式下，面板通过同一条已纳管的 SSH 连接在 AI 节点回环读取 Xray
+`/debug/vars`，并增量读取 AI access log；不需要为面板指标开放 AI 业务端口或公网
+指标端口。`AI_NODE_METRICS_URL` 默认使用 `http://127.0.0.1:31097/debug/vars`，
+`AI_NODE_ACCESS_LOG_PATH` 默认使用远端主机的 `/var/log/xray/ai-access.log`；若远端
+容器把日志映射到其他宿主机路径，必须显式填写实际宿主机路径。远端 AI 模式仍在
+`monitoring/prometheus/prometheus.yml` 中为节点配置独立 target；当前仅保留
 台湾的 `9100/18081`。Grafana 的 AI 主机面板按
 `node_role="ai_data_plane"` 和 `node_id` 区分节点，容器面板按 `host` 和 `name` 区分容器。
 
@@ -153,12 +158,15 @@ AI_NODE_LABELS=AI 台湾
 AI_NODE_CONTAINER_NAMES=xray-ai-node
 AI_NODE_API_SERVERS=127.0.0.1:27166
 AI_NODE_CONFIG_PATHS=
+AI_NODE_METRICS_URL=http://127.0.0.1:31097/debug/vars
+AI_NODE_ACCESS_LOG_PATH=/var/log/xray/ai-access.log
 ```
 
 关键语义：
 
 - `AI_NODE_API_SERVERS=127.0.0.1:27166`：远端 AI 节点通过 SSH 执行本机 TCP 业务端口检查。
-- `AI_NODE_METRICS_URL`：面板读取 AI Xray expvar 的地址；默认只允许控制面回环地址，不得改成公网监听。
+- `AI_NODE_METRICS_URL`：面板读取 AI Xray expvar 的地址；远端 SSH 模式由面板在 AI 节点回环读取，不得改成公网监听。
+- `AI_NODE_ACCESS_LOG_PATH`：面板读取 AI access log 的远端宿主机路径；远端默认是 `/var/log/xray/ai-access.log`，本机 Docker 默认使用控制面挂载路径。
 - `AI_NODE_CONFIG_PATH=`：显式留空会使 `supports_sync=false`，禁止控制面上传配置。
 - `AI_NODE_CONTAINER_NAMES=xray-ai-node` 提供远端容器状态检查和重启能力。
 

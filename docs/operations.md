@@ -34,9 +34,9 @@
 
 > `traffic`/`connections` 为 counter，但“重置流量并启用”/配额恢复会清零累计值——这是合法的 counter reset，`rate()`/`increase()` 能正确处理。
 
-- 本机备用 AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。AI Xray metrics 只监听 `redacted-ip-007:31097`，由面板聚合后进入 Prometheus。远端 AI 模式才需要单独配置 AI 主机的监控 target。
+- 本机 Docker AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。AI Xray metrics 只监听控制面回环地址，由面板聚合后进入 Prometheus。远端 SSH AI 通过已纳管 SSH 通道在节点回环读取 `/debug/vars` 和 access log；Prometheus 仍单独采集 AI 主机的 node-exporter/cAdvisor target。
 - 控制面 cAdvisor 监听 `redacted-ip-007:18081`，用于采集 `xray-ai-node` 容器级 CPU、内存和网络总量；该总量不能替代 Xray 入站/出站业务计数。
-- AI 域名/端口指标来自本机 `ai-access.log` 的 `accepted` 记录，默认聚合最近 10 分钟请求量；access log 没有按目标拆分的字节数，不应把请求量指标解释为 per-domain 字节量。
+- AI 域名/端口指标来自本机或远端 AI `ai-access.log` 的 `accepted` 记录，默认聚合最近 10 分钟请求量；access log 没有按目标拆分的字节数，不应把请求量指标解释为 per-domain 字节量。
 - 高流量查询：`topk(20, xray_panel_ai_destination_requests)`；高请求速率查询：`topk(20, xray_panel_ai_destination_requests_per_second)`。
 - 控制面 Prometheus 的普通数据面和控制面 targets 应显示 `up`；若远端 AI target 出现 `timeout` 或 `connection refused`，再检查远端 AI 节点的 exporter 容器和端口监听。
 
@@ -156,7 +156,7 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 - `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`，并生成一个包含配置文件的灾备归档
 - 本地 `.db` 和 `tar.gz` 备份文件均落在 `./backups`
 - 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env`、运行时/报告、`data/uploads` 和部署脚本
-- Compose 还会在打包前通过内网直连 SSH 以只读方式采集普通数据面（`root@100.116.187.106:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
+ - Compose 还会在打包前通过内网直连 SSH 以只读方式采集普通数据面（`root@<normal-data-plane-host>:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
 - 每个归档都包含 `node-recovery-manifest.json`，任务还会生成 `node-recovery-status.json`，明确标记 `recoveryReady`
 - 远端采集默认是非必需的：普通数据面失联不会丢弃控制面归档；要把普通数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
 - 当 `DB_BACKUP_R2_ENABLED=1` 时，归档成功后会继续调用 `R2 灾备上传`
