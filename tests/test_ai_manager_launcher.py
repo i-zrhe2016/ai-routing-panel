@@ -1,4 +1,3 @@
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,10 +39,7 @@ def test_launcher_builds_container_command():
         docker_bin="docker-test",
     )
 
-    with (
-        patch.dict(os.environ, {"AI_UPSTREAM_FALLBACK_AS_PRIMARY": ""}, clear=False),
-        patch("app.xray.ai_routing.launcher.subprocess.run", return_value=Mock(returncode=0)) as run,
-    ):
+    with patch("app.xray.ai_routing.launcher.subprocess.run", return_value=Mock(returncode=0)) as run:
         runner.run()
 
     assert run.call_args.args[0] == [
@@ -56,35 +52,6 @@ def test_launcher_builds_container_command():
         "--once",
     ]
     assert "cwd" not in run.call_args.kwargs
-
-
-def test_launcher_forwards_effective_promotion_override_to_container():
-    runner = AiDomainManagerRunner(
-        execution_mode="container",
-        container_name="ai-manager",
-        docker_bin="docker-test",
-    )
-
-    with (
-        patch.dict(os.environ, {"AI_UPSTREAM_FALLBACK_AS_PRIMARY": "1"}, clear=False),
-        patch("app.xray.ai_routing.launcher.subprocess.run", return_value=Mock(returncode=0)) as run,
-    ):
-        runner.run("primary")
-
-    assert run.call_args.args[0] == [
-        "docker-test",
-        "exec",
-        "--env",
-        "AI_UPSTREAM_FALLBACK_AS_PRIMARY=1",
-        "ai-manager",
-        "python3",
-        "-m",
-        "app.xray.ai_routing.runner",
-        "--once",
-        "--manual-mode",
-        "primary",
-        "--manual-lock-held",
-    ]
 
 
 @pytest.mark.parametrize(

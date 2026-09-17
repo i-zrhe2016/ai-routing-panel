@@ -185,15 +185,19 @@ class AiRoutingService:
 
     def _configured_ai_candidates(self):
         try:
-            try:
-                values = load_env_file(XRAY_ENV_FILE_PATH)
-            except OSError:
-                # The local runner can operate from process environment only;
-                # keep panel validation aligned when the optional env file is
-                # absent or not readable.
-                values = {}
+            values = load_env_file(XRAY_ENV_FILE_PATH)
+            # Docker-mode manager runs have their own environment and shared
+            # env file; accepting panel-only overrides there would make the
+            # displayed candidate list differ from the applied configuration.
+            use_process_env = AI_DOMAIN_MANAGER_EXECUTION_MODE == "local"
+
+            def configured_value(name, default=""):
+                if use_process_env:
+                    return read_env_or_file(name, default, values)
+                return str(values.get(name, default) or default).strip()
+
             upstream_values = {
-                name: read_env_or_file(name, "", values)
+                name: configured_value(name)
                 for name in (
                     "AI_UPSTREAM_HOST",
                     "AI_UPSTREAM_PORT",
@@ -210,10 +214,9 @@ class AiRoutingService:
                 upstreams_raw=upstream_values["AI_UPSTREAMS"],
                 fallbacks_raw=upstream_values["AI_UPSTREAM_FALLBACKS"],
                 fallback_share_url=upstream_values["AI_UPSTREAM_FALLBACK_URL"],
-                promote_fallback=read_env_or_file(
+                promote_fallback=configured_value(
                     "AI_UPSTREAM_FALLBACK_AS_PRIMARY",
                     "0",
-                    values,
                 ).lower()
                 not in {"0", "false", "no", "off", ""},
             )
