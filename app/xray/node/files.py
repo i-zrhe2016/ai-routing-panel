@@ -67,13 +67,20 @@ if initial_tail:
 
 with open(path, "rb") as handle:
     handle.seek(offset)
+    read_offset = handle.tell()
     raw_data = handle.read(MAX_READ_BYTES)
-    offset = handle.tell()
+    last_newline = raw_data.rfind(b"\\n")
 
-data_text = raw_data.decode("utf-8", errors="ignore")
-if initial_tail:
-    first_newline = data_text.find("\\n")
-    data_text = data_text[first_newline + 1 :] if first_newline >= 0 else ""
+if last_newline < 0:
+    data_text = ""
+    offset = read_offset
+else:
+    complete_data = raw_data[: last_newline + 1]
+    offset = read_offset + len(complete_data)
+    data_text = complete_data.decode("utf-8", errors="ignore")
+    if initial_tail:
+        first_newline = data_text.find("\\n")
+        data_text = data_text[first_newline + 1 :] if first_newline >= 0 else ""
 if since_epoch is None:
     data = data_text
 else:

@@ -354,8 +354,22 @@ def _read_remote_ai_destination_metrics(controller):
         if not isinstance(result, dict) or not result.get("exists"):
             return _empty_ai_destination_metrics()
 
-        log_state["inode"] = str(result.get("inode", ""))
-        log_state["offset"] = int(result.get("offset", 0) or 0)
+        result_inode = str(result.get("inode", ""))
+        try:
+            result_offset = int(result.get("offset", 0) or 0)
+        except (TypeError, ValueError):
+            return _empty_ai_destination_metrics()
+        previous_inode = log_state["inode"]
+        previous_offset = int(log_state["offset"] or 0)
+        rotated = (
+            previous_inode not in {None, ""}
+            and result_inode != str(previous_inode)
+        ) or result_offset < previous_offset
+        if rotated:
+            log_state["partial"] = ""
+            log_state["events"] = deque()
+        log_state["inode"] = result_inode
+        log_state["offset"] = result_offset
         text = log_state["partial"] + str(result.get("data") or "")
         lines = text.splitlines()
         if text and not text.endswith(("\n", "\r")):

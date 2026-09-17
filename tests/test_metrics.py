@@ -89,6 +89,43 @@ def test_remote_ai_destination_metrics_reads_managed_log(monkeypatch):
     assert result["requests"][0]["port"] == "443"
 
 
+def test_remote_ai_destination_metrics_clears_partial_on_rotation(monkeypatch):
+    from app.web import metrics
+
+    class RemoteNode:
+        is_remote = True
+        calls = 0
+
+        def display_target(self):
+            return "root@example.com"
+
+        def read_access_log_delta(self, inode, offset, since_epoch=None):
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "exists": True,
+                    "inode": "old",
+                    "offset": 120,
+                    "data": "accepted tcp:old.example.com:443 [direct]",
+                }
+            return {
+                "exists": True,
+                "inode": "new",
+                "offset": 80,
+                "data": "accepted tcp:new.example.com:443 [direct]\n",
+            }
+
+    node = RemoteNode()
+    monkeypatch.setattr(metrics, "_ai_node_controller", lambda: node)
+    monkeypatch.setattr(metrics, "AI_NODE_ACCESS_LOG_PATH", "/var/log/xray/ai-access.log")
+    monkeypatch.setattr(metrics, "_FALLBACK_METRICS_STATE", metrics._new_metrics_state())
+
+    metrics._read_ai_destination_metrics()
+    result = metrics._read_ai_destination_metrics()
+
+    assert result["requests"][0]["domain"] == "new.example.com"
+
+
 def test_parse_ai_access_line_extracts_destination_and_ignores_non_access_lines():
     from app.web.metrics import _parse_ai_access_line
 
