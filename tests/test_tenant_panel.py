@@ -246,11 +246,11 @@ class TenantPanelTest(unittest.TestCase):
 
     def csrf_token(self):
         with self.client.session_transaction() as session:
-            token = session.get("csrf_token")
-            if not token:
-                token = "test-csrf-token"
-                session["csrf_token"] = token
-            return token
+            csrf_value = session.get("csrf_token")
+            if not csrf_value:
+                csrf_value = "test-csrf-token"
+                session["csrf_token"] = csrf_value
+            return csrf_value
 
     def test_port_api_create_returns_snapshot_without_second_maintenance_pass(self):
         original_sync = self.panel.state.sync_traffic_state
@@ -499,11 +499,11 @@ class UnifiedAdminLoginTest(unittest.TestCase):
 
     def csrf_token(self):
         with self.client.session_transaction() as session:
-            token = session.get("csrf_token")
-            if not token:
-                token = "test-csrf-token"
-                session["csrf_token"] = token
-            return token
+            csrf_value = session.get("csrf_token")
+            if not csrf_value:
+                csrf_value = "test-csrf-token"
+                session["csrf_token"] = csrf_value
+            return csrf_value
 
     def test_admin_login_uses_unified_login_page(self):
         response = self.client.get("/")
@@ -549,7 +549,7 @@ class UnifiedAdminLoginTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_internal_panel_host_bypasses_admin_auth_and_csrf(self):
-        headers = {"Host": "100.112.13.103:18080"}
+        headers = {"Host": "127.0.0.1:18080"}
 
         index = self.client.get("/", headers=headers)
         self.assertEqual(index.status_code, 200)

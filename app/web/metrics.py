@@ -198,7 +198,7 @@ def _ai_node_metrics_cached():
     if now - cache["ts"] >= METRICS_DP_TTL:
         try:
             result = _read_ai_node_metrics()
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        except (OSError, RuntimeError, ValueError, TypeError, json.JSONDecodeError):
             result = None
         if result is None:
             result = {
