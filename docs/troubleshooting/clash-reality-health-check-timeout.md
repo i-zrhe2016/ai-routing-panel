@@ -21,7 +21,7 @@ failed to listen Unix Domain Socket ... bind: address already in use
 | 检查项 | 结果 | 判定 |
 | --- | --- | --- |
 | 控制面到数据面路由、Ping、SSH | 正常 | 基础管理链路正常 |
-| 数据面公网入口 TCP | `443`、`31098`、`31333`、`31339`、`31340` 可达 | 入口网络正常 |
+| 数据面公网入口 TCP | `443`、`31000`、`31098`、`31333`、`31339`、`31340`、`31341` 可达 | 入口网络正常 |
 | 面板数据面状态 | `reachable=false`，Xray API 连接被拒绝 | 管理面检查失败 |
 | `xray-reality-local` | `Restarting (255)` / `unhealthy` | Xray 进程未稳定运行 |
 | Unix Socket | 7 个残留文件，无活动 `entry-*` 监听 | 确认 Socket 文件残留 |
@@ -34,13 +34,35 @@ failed to listen Unix Domain Socket ... bind: address already in use
 在确认没有活动的 `entry-*` Unix Socket 监听后，仅停止异常容器、删除指定日志目录下的 Socket 类型残留文件，再启动原容器。没有修改 Xray 配置、订阅内容、UUID、REALITY 参数或租户数据。
 
 ```bash
-docker stop --time 10 xray-reality-local
+set -euo pipefail
 
-# 若仍有活动监听，应中止，不要删除文件
-if ss -xlpn | grep -q 'entry-'; then
-  echo 'active entry socket found; abort'
-  exit 1
-fi
+socket_snapshot="$(mktemp)"
+socket_error="$(mktemp)"
+trap 'rm -f "$socket_snapshot" "$socket_error"' EXIT
+
+assert_no_active_entry_sockets() {
+  : >"$socket_snapshot"
+  : >"$socket_error"
+  if ! ss -xlpn >"$socket_snapshot" 2>"$socket_error"; then
+    cat "$socket_error" >&2
+    echo 'unable to query Unix sockets; abort' >&2
+    return 1
+  fi
+  if [ -s "$socket_error" ]; then
+    cat "$socket_error" >&2
+    echo 'Unix socket query emitted an error; abort' >&2
+    return 1
+  fi
+  if grep -Eq 'entry-[^[:space:]]+\.sock' "$socket_snapshot"; then
+    echo 'active entry socket found; abort' >&2
+    return 1
+  fi
+}
+
+# 停止前先检查；停止后再次检查，ss 失败或有活动监听都必须中止。
+assert_no_active_entry_sockets
+docker stop --time 10 xray-reality-local
+assert_no_active_entry_sockets
 
 find /root/xray-routing-panel/app/xray/logs \
   -maxdepth 1 -type s -name 'entry-*.sock' -print -delete
@@ -55,9 +77,15 @@ docker start xray-reality-local
 修复后确认：
 
 1. `xray-reality-local` 为 `running / healthy`，并在连续状态轮询中保持稳定。
-2. `xray run -test -config /etc/xray/config.json` 返回码为 `0`，输出包含 `Configuration OK`。
+2. 在 `xray-reality-local` 容器内执行 `xray run -test -config /etc/xray/config.json` 返回码为 `0`，输出包含 `Configuration OK`：
+
+   ```bash
+   docker exec xray-reality-local \
+     /usr/local/bin/xray run -test -config /etc/xray/config.json
+   ```
+
 3. Xray API `127.0.0.1:10085` 恢复监听，面板数据面状态恢复为 `reachable=true`、`xray_running=true`。
-4. `443`、`31098`、`31333`、`31339`、`31340` 入口均恢复 TCP 可达；对应 HAProxy、legacy forwarder 和 Xray 监听均存在。
+4. `443` 以及配置中全部 `panel-*` legacy alias（本次为 `31000`、`31098`、`31333`、`31339`、`31340`、`31341`）均恢复 TCP 可达；对应 HAProxy 和 legacy forwarder 监听均存在。
 5. 容器本次启动后的新日志中没有新增 `failed to start`、`address already in use`、`panic` 或 `fatal`。
 
 仓库内协议 smoke 脚本在控制面镜像中未能执行，因为该镜像缺少 `curl`；随后发现镜像内的本地 `client-test.json` 与数据面实际使用的测试配置不一致。因此这两项不能作为协议失败或成功的证据，外部客户端仍应按现有门禁完成 VLESS + REALITY 复测。当前验收结论限定为：数据面容器、管理 API、监听端口和配置解析均已恢复。
