@@ -9,30 +9,26 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 ## 当前拓扑
 
 ```text
-控制面 `redacted-ip-004`
-  ├─ Docker: xray-ai-node ──▶ redacted-ip-001:27166
-  │                         ├─▶ redacted-ip-007:31097/debug/vars
-  │                         └─▶ /var/log/xray/ai-{access,error}.log
-  └─ 本机状态检查/重启
+控制面
+  └─ SSH 纳管 → 台湾 AI 节点
+                    ├─▶ :27166（VLESS + REALITY）
+                    └─▶ 独立 AI 日志与监控
 
 主数据面
   └─ VLESS + REALITY
        │
        ▼
-  AI 上游选择器
-    ├─ 主：nat.qq.pw:27166
-    └─ 备：redacted-ip-004:27166
-             │
-             ▼
-       freedom 直出
+  AI 主上游：台湾 AI 节点
+       │
+       ▼
+  freedom 直出
 ```
 
 两个端点职责不同：
 
 | 端点 | 用途 |
 | --- | --- |
-| `redacted-ip-004:27166` | 控制面本机 Docker AI 备用节点，使用独立 REALITY 凭据 |
-| `nat.qq.pw:27166` | AI 业务流量，供主数据面 VLESS outbound 使用 |
+| 台湾 AI 节点 `:27166` | 当前唯一 AI 主节点，使用独立 REALITY 凭据 |
 
 禁止使用已下线的旧 AI 上游 `isif.217777.xyz:42994`。
 
@@ -40,9 +36,9 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 
 主数据面不会同时把 AI 流量发往两个节点，而是由控制面生成的 `ai_proxy` 动态路由选择一个候选：
 
-- `auto`：按主、备顺序探测，选择第一个可达候选；
+- `auto`：按主、备顺序探测，选择第一个可达候选；当前生产只有台湾主候选；
 - `primary`：人工固定主 AI，主节点不可达时报告 `manual_target_unreachable`，不静默改用备用；
-- `backup`：人工固定本机 Docker 备用 AI，备用不可达时同样停用动态 AI 路由；
+- `backup`：人工固定配置的备用 AI，备用不可达时同样停用动态 AI 路由；
 - `forced_fallback`：人工停用动态 AI 路由，AI 域名回到普通数据面 `freedom` 直出。
 
 控制台会展示两个候选的探测状态、当前选中节点和 `manual_mode`。人工切换先触发管理器应用目标模式，
@@ -69,11 +65,11 @@ AI 节点使用 `AI_NODE_*` 独立 UUID、REALITY 私钥、公钥和 Short ID，
 
 | 端点 | 服务 | 指标路径 | 采集目标 | 说明 |
 | --- | --- | --- | --- | --- |
-| Xray 指标 | AI Xray | `/debug/vars` | `redacted-ip-007:31097` | 入站与 `direct` 出站累计字节，仅绑定回环 |
-| 控制面监控端点 | Node Exporter/cAdvisor | `/metrics` | `control-plane` | 控制面主机与 `xray-ai-node` 容器网络指标 |
+| Xray 指标 | AI Xray | `/debug/vars` | 受控 AI 管理地址 | 入站与 `direct` 出站累计字节，仅绑定回环 |
+| 控制面监控端点 | Node Exporter/cAdvisor | `/metrics` | `control-plane` | 控制面主机与本机 AI 容器（如启用）的网络指标 |
 | 面板指标 | Routing Panel | `/metrics` | Prometheus | 汇总 AI Xray 字节指标，需 Bearer X |
 
-当前 AI 节点容器部署为：
+本机 Docker 模式下的 AI 节点容器部署为：
 
 ```text
 xray-ai-node        → host network → :27166（业务端口，不得修改）
@@ -81,9 +77,9 @@ xray-ai-node        → host network → :27166（业务端口，不得修改）
                     → app/xray/logs/ai-access.log、ai-error.log
 ```
 
-部署或变更监控容器时，不得删除或重建 `xray-ai-node` 业务容器。
+部署或变更本机监控容器时，不得删除或重建 `xray-ai-node` 业务容器。
 
-从控制面验证本机 AI 容器：
+本机 Docker 模式下从控制面验证 AI 容器：
 
 ```bash
 docker inspect xray-ai-node --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
@@ -113,13 +109,11 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 仍以 `xray_panel_ai_node_traffic_bytes_total` 和
 `xray_panel_ai_node_egress_bytes_total` 为准。
 
-控制面 cAdvisor 使用 `redacted-ip-007:18081`，Prometheus target 为
-`control-plane-cadvisor`；它提供 `xray-ai-node` 容器的 CPU、内存和网络总量，
+本机 Docker 模式下，控制面 cAdvisor 提供 `xray-ai-node` 容器的 CPU、内存和网络总量，
 不替代 Xray 按入站方向的业务计数。
 
-本机 Docker 模式只要求控制面共享的 Node Exporter/cAdvisor targets 为 `up`；远端 AI 模式在
-`monitoring/prometheus/prometheus.yml` 中为每台节点配置独立 target。夏威夷使用
-`27168/27169`，台湾使用 `9100/18081`。Grafana 的 AI 主机面板按
+远端 AI 模式在 `monitoring/prometheus/prometheus.yml` 中为节点配置独立 target；当前仅保留
+台湾的 `9100/18081`。Grafana 的 AI 主机面板按
 `node_role="ai_data_plane"` 和 `node_id` 区分节点，容器面板按 `host` 和 `name` 区分容器。
 
 ## SSH 认证边界
@@ -128,8 +122,8 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 不挂载或传递私钥：
 
 ```text
-控制面 `100.92.231.104`
-  └─ SSH 直连 → 普通数据面 `100.116.187.106:22`
+控制面 `<control-plane-host>`
+  └─ SSH 直连 → 普通数据面 `<normal-data-plane-host>:22`
 ```
 
 远端 SSH 纳管时强制：
@@ -151,20 +145,20 @@ UserKnownHostsFile=/root/.ssh/known_hosts
 示例只配置 SSH 目标，不保存密码：
 
 ```env
-AI_NODE_SSH_TARGET=
-AI_NODE_CONTAINER_NAME=xray-ai-node
-AI_NODE_PROBE_HOST=redacted-ip-004
-AI_NODE_API_SERVER=redacted-ip-007:27166
-AI_NODE_METRICS_URL=http://redacted-ip-007:31097/debug/vars
-AI_NODE_CONFIG_PATH=
+AI_NODE_SSH_TARGETS=root@<taiwan-ai-host>
+AI_NODE_IDS=taiwan
+AI_NODE_LABELS=AI 台湾
+AI_NODE_CONTAINER_NAMES=xray-ai-node
+AI_NODE_API_SERVERS=127.0.0.1:27166
+AI_NODE_CONFIG_PATHS=
 ```
 
 关键语义：
 
-- `AI_NODE_API_SERVER=redacted-ip-007:27166`：本机 Docker 模式使用的 TCP 业务端口，用于节点存活检查。
+- `AI_NODE_API_SERVERS=127.0.0.1:27166`：远端 AI 节点通过 SSH 执行本机 TCP 业务端口检查。
 - `AI_NODE_METRICS_URL`：面板读取 AI Xray expvar 的地址；默认只允许控制面回环地址，不得改成公网监听。
 - `AI_NODE_CONFIG_PATH=`：显式留空会使 `supports_sync=false`，禁止控制面上传配置。
-- `AI_NODE_CONTAINER_NAME=xray-ai-node` 提供本机容器状态检查和重启能力。
+- `AI_NODE_CONTAINER_NAMES=xray-ai-node` 提供远端容器状态检查和重启能力。
 
 ## 多台远端 AI 节点
 
@@ -172,7 +166,7 @@ AI_NODE_CONFIG_PATH=
 面板会在 Dashboard 和“基础设施”页分别展示每台节点，并允许单独重启：
 
 ```env
-AI_NODE_SSH_TARGETS=root@ai-hawaii.internal,root@ai-taiwan.internal
+AI_NODE_SSH_TARGETS=root@<hawaii-ai-host>,root@<taiwan-ai-host>
 AI_NODE_IDS=hawaii,taiwan
 AI_NODE_LABELS=AI 夏威夷,AI 台湾
 AI_NODE_CONTAINER_NAMES=xray,xray-ai-node
@@ -187,12 +181,15 @@ Xray 的独立凭据和配置仍由各自节点负责。旧的单节点变量仍
 ## `app/xray/.env` 上游配置
 
 ```env
-AI_UPSTREAM_HOST=nat.qq.pw
+AI_UPSTREAM_HOST=<taiwan-ai-host>
 AI_UPSTREAM_PORT=27166
-# 备用候选使用 AI_UPSTREAM_FALLBACK_URL 或 AI_UPSTREAM_FALLBACKS 配置
+# 当前唯一节点沿用带独立 REALITY 凭据的 AI_UPSTREAM_FALLBACK_URL，并提升为主候选
+AI_UPSTREAM_FALLBACK_AS_PRIMARY=1
 ```
 
-`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 定义主候选；生产备用候选为 `redacted-ip-004:27166`，应通过 `AI_UPSTREAM_FALLBACK_URL` 或 `AI_UPSTREAM_FALLBACKS` 加入候选列表。端点变量不能替代 AI 节点独立的 UUID、REALITY 密钥、Short ID 和 SNI。
+`AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT` 定义主候选；当前生产仅保留台湾 AI 节点。带独立凭据的分享链接通过
+`AI_UPSTREAM_FALLBACK_URL` 配合 `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 提升为主候选。端点变量不能替代
+AI 节点独立的 UUID、REALITY 密钥、Short ID 和 SNI。
 
 ## 为什么默认禁用配置上传
 
@@ -204,7 +201,7 @@ AI 节点当前使用独立 REALITY 凭据。控制面生成的 `config-ai-node.
 AI_NODE_CONFIG_PATH=
 ```
 
-本机 AI 容器直接挂载控制面生成的 `config-ai-node.json`；`AI_NODE_CONFIG_PATH` 留空可避免面板把配置误当作远程路径上传。
+远端 AI 节点保留各自独立配置；`AI_NODE_CONFIG_PATHS` 留空可避免面板把控制面配置误当作远程路径上传。
 
 ## 受控配置同步流程
 

@@ -20,7 +20,7 @@
 | `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台「监控」标签使用该同源地址 |
 | `GRAFANA_OBSERVABILITY_UID` | 「监控」标签内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
-| `DATAPLANE_SSH_TARGET` | 远端数据面内网 SSH 目标；默认 `root@100.116.187.106`（Compose） |
+| `DATAPLANE_SSH_TARGET` | 远端数据面内网 SSH 目标；默认 `root@<normal-data-plane-host>`（Compose） |
 | `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；认证固定为密码/键盘交互，禁止注入私钥 |
 | `DATAPLANE_SSH_KNOWN_HOSTS` | 数据面主机密钥文件；默认 `/root/.ssh/known_hosts`，严格校验且不接受未知主机 |
 | `DATAPLANE_REMOTE_COMMAND_TIMEOUT` | 单次远程 SSH/Docker 命令的控制面超时，默认 `8` 秒；避免数据面失联拖住控制面任务 |
@@ -52,7 +52,7 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 - `PROBE_INTERVAL`
 - `PROBE_TEST_LISTEN_PORT`
 - `PANEL_HEALTH_REQUIRES_XRAY`
-- `PANEL_INTERNAL_HOSTS`：免管理员登录和 CSRF 的内网 Host 列表，默认包含 `100.112.13.103`
+- `PANEL_INTERNAL_HOSTS`：免管理员登录和 CSRF 的内网 Host 列表，默认包含控制面内网主机名
 
 Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 `monitoring/loki/.env`，Grafana 使用 `monitoring/.env` 中的 `GRAFANA_LOKI_URL`。三节点生产路径和实际主机角色见 [Fluent Bit 日志采集](logging-fluent-bit.md#当前生产部署)。
 
@@ -87,8 +87,8 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 说明：
 
 - AI 节点使用独立 REALITY 凭据，不能复用或由普通数据面的 `XRAY_*` 参数覆盖
-- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）定义主数据面 VLESS outbound 的目标，生产为 `nat.qq.pw:27166`
-- 当前生产保持 `AI_NODE_CONFIG_PATH=`，由本机 Docker 挂载 `config-ai-node.json`，不通过 SSH 上传
+- `AI_UPSTREAM_HOST` / `AI_UPSTREAM_PORT`（在 `app/xray/.env` 中）定义主数据面 VLESS outbound 的目标；当前生产为台湾 AI 节点，带独立凭据的分享链接通过 `AI_UPSTREAM_FALLBACK_URL` 配合 `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 提升为主候选
+- 当前生产保持 `AI_NODE_CONFIG_PATH=`，由远端台湾节点维护独立配置，不通过 SSH 上传
 - 详见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)和 [AI 节点独立凭据](ai-node-credentials.md)
 
 ## DNS 故障切换变量
@@ -122,7 +122,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 - 当前只支持通过 `CF_DNS_RECORD_ID` 更新单条记录
 - 自动切换只看 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
 - DNS 故障切换运行在独立 worker 中，不依赖数据面日志、Xray API、流量统计或配置同步
-- 数据面远程命令受 `DATAPLANE_REMOTE_COMMAND_TIMEOUT` 限制；SSH 连接参数仍建议通过 `DATAPLANE_SSH_OPTIONS` 配置连接超时和 keepalive。控制面直接连接 `100.116.187.106:22`，不使用私钥。
+- 数据面远程命令受 `DATAPLANE_REMOTE_COMMAND_TIMEOUT` 限制；SSH 连接参数仍建议通过 `DATAPLANE_SSH_OPTIONS` 配置连接超时和 keepalive。控制面直接连接 `<normal-data-plane-host>:22`，不使用私钥。
 - AI 候选故障不触发 DNS 切换：`auto` 模式优先切换到另一候选，全部候选不可达时由 `ai_domain_manager` 回退；数据面故障时 DNS 切到控制面备用，AI 节点健康度决定备用是 relay 还是直出模式
 - 若启用高峰窗口，窗口内会把备用/专用节点视为首选目标；窗口外恢复主节点优先
 - 如果是本地数据面且 `DNS_FAILOVER_PRIMARY_CONTENT` 留空，控制面会自动获取当前数据面的公网 IP；远端数据面必须显式填写，避免数据面失联时 DNS worker 依赖数据面 SSH
@@ -181,6 +181,7 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - `AI_UPSTREAM_HOST`
 - `AI_UPSTREAM_PORT`
 - `AI_UPSTREAM_FALLBACK_URL`
+- `AI_UPSTREAM_FALLBACK_AS_PRIMARY`
 - `AI_UPSTREAM_FALLBACKS`
 - `AI_UPSTREAMS`
 - `AI_UPSTREAM_PROBE_TIMEOUT_SECONDS`
@@ -192,7 +193,8 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - `AI_UPSTREAM_FALLBACKS` 在主上游后追加多个备用上游
 - `AI_UPSTREAMS` 直接覆盖完整优先级列表
 - `AI_UPSTREAM_FALLBACK_URL` 适合备用上游使用不同 UUID / `pbk` / `sid` / `sni`
-- 当前生产候选为主 `nat.qq.pw:27166`、备 `redacted-ip-004:27166`；备用节点使用独立 REALITY 凭据
+- `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 会把 `AI_UPSTREAM_FALLBACK_URL` 提升为候选 0，适合移除原主节点后保留带独立凭据的唯一节点
+- 当前生产仅保留 `redacted-ip-004:27166` 作为主候选；原 `nat.qq.pw:27166` 已移除，台湾节点继续使用独立 REALITY 凭据
 - 主 AI 上游同样可能使用独立凭据；动态 VLESS outbound 必须与 AI inbound 完整匹配，不能从普通数据面 `XRAY_*` 盲目派生
 - 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
 - `AI_NODE_SSH_TARGET` 只启用 SSH 纳管；它不证明节点凭据匹配，也不应自动派生独立 AI 节点的 relay URL

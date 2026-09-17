@@ -81,7 +81,7 @@ docker compose up -d --build
 
 ## AI 节点纳管
 
-当前 AI 备用是控制面本机 Docker `xray-ai-node`；设置 `AI_NODE_SSH_TARGET` 后才切换为远端独立 Xray 的 SSH 纳管。部署与认证方式见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
+当前 AI 主节点通过 `AI_NODE_SSH_TARGETS` 使用远端独立 Xray 的 SSH 纳管；未设置远端目标时才使用本机 Docker `xray-ai-node`。部署与认证方式见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
 
 至少配置：
 

@@ -265,6 +265,37 @@ class AiDomainManagerTest(unittest.TestCase):
             self.assertEqual(repository.read_ai_routing_manual_mode(db_path), "forced_fallback")
             self.assertEqual(repository.read_ai_routing_manual_mode(Path(tmpdir) / "missing.db"), "auto")
 
+    def test_build_ai_upstream_candidates_can_promote_fallback_share_url(self):
+        result = candidates.build_ai_upstream_candidates(
+            "127.0.0.1",
+            27166,
+            fallback_share_url=(
+                "vless://22222222-2222-2222-2222-222222222222@127.0.0.1:27166?"
+                "encryption=none&security=reality&type=tcp&sni=www.amazon.com&fp=chrome&"
+                "pbk=public-key&sid=abcdef0123456789&flow=xtls-rprx-vision"
+            ),
+            promote_fallback=True,
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["candidate_type"], "share_url")
+        self.assertEqual(result[0]["upstream_host"], "127.0.0.1")
+        self.assertEqual(result[0]["upstream_port"], 27166)
+        self.assertIn("proxy_payload_override", result[0])
+
+    def test_build_ai_upstream_candidates_keeps_fallback_order_by_default(self):
+        result = candidates.build_ai_upstream_candidates(
+            "primary.example.com",
+            27166,
+            fallback_share_url=(
+                "vless://22222222-2222-2222-2222-222222222222@127.0.0.1:27166?"
+                "encryption=none&security=reality&type=tcp&sni=www.amazon.com&fp=chrome&"
+                "pbk=public-key&sid=abcdef0123456789"
+            ),
+        )
+
+        self.assertEqual([item["candidate_type"] for item in result], ["template", "share_url"])
+
     def test_build_data_plane_controller_uses_remote_command_timeout(self):
         args = mock.Mock(
             ai_upstream_candidates=[{"upstream_host": "primary.example.com", "upstream_port": 27166}],
@@ -747,7 +778,7 @@ class AiDomainManagerTest(unittest.TestCase):
 
     def test_local_openai_base_url_detection(self):
         self.assertTrue(classifier.is_local_openai_base_url("http://127.0.0.1:11434/v1"))
-        self.assertTrue(classifier.is_local_openai_base_url("http://192.168.1.10:8000"))
+        self.assertTrue(classifier.is_local_openai_base_url("http://127.0.0.1:8000"))
         self.assertFalse(classifier.is_local_openai_base_url("https://api.openai.com/v1/responses"))
 
     @mock.patch("urllib.request.urlopen")
@@ -813,7 +844,7 @@ class AiDomainManagerTest(unittest.TestCase):
 
         result = classifier.classify_domains_via_openai(
             ["openai.com"],
-            api_key="secret-key",
+            api_key="dummy-api-key",
             model="gpt-5.5",
             base_url="https://api.openai.com",
             timeout_seconds=5,
@@ -822,7 +853,7 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(result["openai.com"]["classification"], "ai")
         request = mocked_urlopen.call_args.args[0]
         self.assertEqual(request.full_url, "https://api.openai.com/v1/responses")
-        self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
+        self.assertEqual(request.get_header("Authorization"), "Bearer dummy-api-key")
         payload = json.loads(request.data.decode("utf-8"))
         self.assertIn("input", payload)
 

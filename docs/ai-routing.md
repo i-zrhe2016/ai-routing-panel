@@ -21,7 +21,7 @@ AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过内网
 
 内建强制 AI 域名族覆盖 ChatGPT/OpenAI（`chatgpt.com`、`openai.com`、`oaistatic.com`、`oaiusercontent.com`）、Claude/Anthropic（`claude.ai`、`anthropic.com`、`claude.com`、`claudeusercontent.com`）和 AWS。AWS 规则覆盖服务端点（`amazonaws.com`、`amazonaws.com.cn`、`amazonwebservices.com.cn`、`api.aws`、`on.aws`）、控制台与静态资源（`aws.amazon.com`、`awsstatic.com`、`awsplayer.com`、`awscloud.com`）、Identity Center（`awsapps.com`、`awsapps.cn`）以及 AWS 专用域名族（`aws.dev`、`aws`、`aws.a2z.com`、`aws.a2z.org.cn`）。这些域名的子域名也会匹配；`amazon.com`、`cloudfront.net` 和 `live-video.net` 属于共享范围较大的域名族，未纳入全量规则，以免把非 AWS 流量一并转发；实际观测到的域名才写入数据库聚合表。
 
-AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。非 AI 域名以及尚未完成分类的域名不进入动态规则，继续使用普通 DMIT 数据面的默认 `freedom` outbound 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产候选为主 `nat.qq.pw:27166`、备 `redacted-ip-004:27166`；截至 2026 年 8 月 23 日，主候选不可达，动态路由已选中备用候选。
+AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。非 AI 域名以及尚未完成分类的域名不进入动态规则，继续使用普通 DMIT 数据面的默认 `freedom` outbound 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产仅保留台湾 AI 节点作为主候选 `redacted-ip-004:27166`；原主候选 `nat.qq.pw:27166` 已移除，不再作为备用候选。
 
 ## 输入与输出
 
@@ -59,6 +59,7 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 主 AI 上游也可能使用独立的 UUID、REALITY 公钥、Short ID 和 SNI。主数据面 `ai_proxy` outbound 与 AI inbound 的字段契约见 [AI 节点独立凭据](ai-node-credentials.md)。备用上游使用不同凭据时，应提供完整且受保护的分享链接：
 
 - 使用 `AI_UPSTREAM_FALLBACK_URL`
+- 如果该分享链接对应当前唯一节点，将 `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1`，管理器会把它提升为候选 0，并保留链接中的独立 REALITY 凭据。
 
 配置 `AI_NODE_SSH_TARGET` 只代表控制面能够纳管节点，不证明隧道凭据匹配，也不会安全地产生 relay URL。启用控制面备用 relay 时，必须显式提供与 AI inbound 匹配的 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`；否则保持 relay 能力关闭。
 
@@ -66,7 +67,7 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 选择模式：
 
-- `auto`：按候选顺序探测，优先选择第一个可达节点；当前顺序是主、备。
+- `auto`：按候选顺序探测，优先选择第一个可达节点；当前生产只有一个台湾主候选。
 - `primary`：人工固定主候选；主候选不可达时不自动改选备用，而是停用动态路由并报告 `manual_target_unreachable`。
 - `backup`：人工固定备用候选；备用候选不可达时同样停用动态路由，不静默改回主候选。
 - `forced_fallback`：人工强制删除动态 AI 路由，所有 AI 域名回到数据面 freedom 直出。
@@ -91,7 +92,7 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 人工固定目标即使当前不可达也允许提交，但确认框会显示不可达状态；系统不会静默改选另一候选。所有人工切换完成后，页面会依据接口返回的最新 dashboard 状态更新当前路径和策略。
 
-远端数据面模式通过控制面直接连接内网 SSH 目标 `root@100.116.187.106:22`，不使用或挂载私钥；认证由目标 SSH 服务提供密码/键盘交互方式。主机指纹仍通过受控 `known_hosts` 严格校验。
+远端数据面模式通过控制面直接连接内网 SSH 目标 `root@<normal-data-plane-host>:22`，不使用或挂载私钥；认证由目标 SSH 服务提供密码/键盘交互方式。主机指纹仍通过受控 `known_hosts` 严格校验。
 
 如果自动模式下所有 AI 上游都不可达，或人工固定的目标不可达：
 
