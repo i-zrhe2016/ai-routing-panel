@@ -12,6 +12,10 @@ from ..helpers import (
 from ._constants import XRAY_ACCESS_LOG_LINE_RE
 
 
+def _state_flag(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class TrafficService:
     """Traffic synchronization using explicit storage, node and mutation ports."""
 
@@ -69,13 +73,23 @@ class TrafficService:
     def sync_xray_access_log_in_tx(self, conn):
         current_offset = int(self.repository.get_state(conn, "xray_access_log_offset", "0"))
         recorded_inode = self.repository.get_state(conn, "xray_access_log_inode", "")
+        skip_until_newline = _state_flag(
+            self.repository.get_state(conn, "xray_access_log_skip_until_newline", "0")
+        )
         current_inode = ""
         new_offset = 0
         lines = []
 
         if self.node_controller.supports_logs():
             try:
-                payload = self.node_controller.read_access_log_delta(recorded_inode, current_offset)
+                if skip_until_newline:
+                    payload = self.node_controller.read_access_log_delta(
+                        recorded_inode,
+                        current_offset,
+                        skip_until_newline=True,
+                    )
+                else:
+                    payload = self.node_controller.read_access_log_delta(recorded_inode, current_offset)
             except RuntimeError:
                 return 0
             if not payload["exists"]:
@@ -83,6 +97,7 @@ class TrafficService:
             current_inode = payload["inode"]
             new_offset = int(payload["offset"])
             lines = str(payload["data"]).splitlines()
+            skip_until_newline = _state_flag(payload.get("skip_until_newline"))
         else:
             if not XRAY_ACCESS_LOG_PATH.exists():
                 return 0
@@ -96,6 +111,7 @@ class TrafficService:
                 handle.seek(current_offset)
                 lines = handle.readlines()
                 new_offset = handle.tell()
+            skip_until_newline = False
 
         aggregates = {}
         for line in lines:
@@ -151,6 +167,11 @@ class TrafficService:
 
         self.repository.set_state(conn, "xray_access_log_inode", current_inode)
         self.repository.set_state(conn, "xray_access_log_offset", str(new_offset))
+        self.repository.set_state(
+            conn,
+            "xray_access_log_skip_until_newline",
+            "1" if skip_until_newline else "0",
+        )
         return len(aggregates)
 
     def parse_xray_access_log_line(self, line):

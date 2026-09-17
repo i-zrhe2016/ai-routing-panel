@@ -183,6 +183,50 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(state["log_offset"], 256)
         self.assertEqual(state["events"][0]["domain"], "api.openai.com")
 
+    def test_sync_log_persists_remote_skip_state(self):
+        controller = mock.Mock()
+        controller.supports_logs.return_value = True
+        controller.read_access_log_delta.side_effect = [
+            {
+                "exists": True,
+                "inode": "remote-inode",
+                "offset": 256,
+                "data": "",
+                "skip_until_newline": True,
+            },
+            {
+                "exists": True,
+                "inode": "remote-inode",
+                "offset": 320,
+                "data": "",
+                "skip_until_newline": False,
+            },
+        ]
+        state = {"log_inode": "", "log_offset": 0, "events": []}
+        now = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+
+        observations.sync_log(
+            Path("/does/not/exist"),
+            state,
+            data_plane_controller=controller,
+            lookback_seconds=3600,
+            now=now,
+        )
+        self.assertTrue(state["skip_until_newline"])
+        observations.sync_log(
+            Path("/does/not/exist"),
+            state,
+            data_plane_controller=controller,
+            lookback_seconds=3600,
+            now=now,
+        )
+
+        self.assertEqual(
+            controller.read_access_log_delta.call_args_list[1].kwargs["skip_until_newline"],
+            True,
+        )
+        self.assertFalse(state["skip_until_newline"])
+
     def test_domain_report_records_classifier_and_effective_traffic_route(self):
         observed_at = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
         state = {

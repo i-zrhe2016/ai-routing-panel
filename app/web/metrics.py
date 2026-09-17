@@ -75,6 +75,7 @@ def _new_metrics_state():
             "inode": None,
             "offset": 0,
             "partial": "",
+            "skip_until_newline": False,
             "events": deque(),
         },
         "destination_lock": threading.Lock(),
@@ -320,6 +321,10 @@ def _empty_ai_destination_metrics():
     }
 
 
+def _state_flag(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _read_remote_ai_destination_metrics(controller):
     if not AI_NODE_ACCESS_LOG_PATH or not callable(
         getattr(controller, "read_access_log_delta", None)
@@ -339,16 +344,25 @@ def _read_remote_ai_destination_metrics(controller):
                     "inode": None,
                     "offset": 0,
                     "partial": "",
+                    "skip_until_newline": False,
                     "events": deque(),
                 }
             )
 
         try:
-            result = controller.read_access_log_delta(
-                log_state["inode"],
-                log_state["offset"],
-                since_epoch=now - AI_NODE_DESTINATION_WINDOW_SECONDS,
-            )
+            if log_state["skip_until_newline"]:
+                result = controller.read_access_log_delta(
+                    log_state["inode"],
+                    log_state["offset"],
+                    since_epoch=now - AI_NODE_DESTINATION_WINDOW_SECONDS,
+                    skip_until_newline=True,
+                )
+            else:
+                result = controller.read_access_log_delta(
+                    log_state["inode"],
+                    log_state["offset"],
+                    since_epoch=now - AI_NODE_DESTINATION_WINDOW_SECONDS,
+                )
         except (OSError, RuntimeError, TypeError, ValueError):
             return _empty_ai_destination_metrics()
         if not isinstance(result, dict) or not result.get("exists"):
@@ -361,6 +375,7 @@ def _read_remote_ai_destination_metrics(controller):
             return _empty_ai_destination_metrics()
         previous_inode = log_state["inode"]
         previous_offset = int(log_state["offset"] or 0)
+        result_skip_until_newline = _state_flag(result.get("skip_until_newline"))
         rotated = (
             previous_inode not in {None, ""}
             and result_inode != str(previous_inode)
@@ -370,6 +385,7 @@ def _read_remote_ai_destination_metrics(controller):
             log_state["events"] = deque()
         log_state["inode"] = result_inode
         log_state["offset"] = result_offset
+        log_state["skip_until_newline"] = result_skip_until_newline
         incoming = str(result.get("data") or "")
         if len(incoming) > _AI_DESTINATION_READ_CHUNK_BYTES:
             incoming = incoming[-_AI_DESTINATION_READ_CHUNK_BYTES:]

@@ -757,22 +757,49 @@ class NodeControlTest(unittest.TestCase):
 
     def test_remote_access_log_script_bounds_unterminated_oversized_scan(self):
         log_path = self.root / "access.log"
-        log_path.write_text("header\n" + "x" * (16 * 1024 * 1024), encoding="utf-8")
+        log_path.write_text(
+            "header\n"
+            + "x" * (16 * 1024 * 1024 + 1024)
+            + "\n2026/08/31 11:31:00.000000 accepted tcp:after.example.com:443 [direct]\n",
+            encoding="utf-8",
+        )
         script_path = self.root / "read-access-log.py"
         script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
         recorded_inode = str(log_path.stat().st_ino)
 
-        completed = subprocess.run(
+        first = subprocess.run(
             [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
             capture_output=True,
             text=True,
             check=False,
         )
 
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertEqual(payload["offset"], 7 + 16 * 1024 * 1024)
-        self.assertEqual(payload["data"], "")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertEqual(first_payload["offset"], 7 + 16 * 1024 * 1024)
+        self.assertEqual(first_payload["data"], "")
+        self.assertTrue(first_payload["skip_until_newline"])
+
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(log_path),
+                recorded_inode,
+                str(first_payload["offset"]),
+                "",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertEqual(second_payload["offset"], log_path.stat().st_size)
+        self.assertFalse(second_payload["skip_until_newline"])
+        self.assertIn("after.example.com", second_payload["data"])
 
     def test_remote_access_log_delta_passes_optional_timestamp_cutoff(self):
         controller = DataPlaneController(
@@ -799,6 +826,32 @@ class NodeControlTest(unittest.TestCase):
 
         self.assertTrue(result["exists"])
         self.assertEqual(calls[0][-1], "123.5")
+
+    def test_remote_access_log_delta_passes_skip_state(self):
+        controller = DataPlaneController(
+            DataPlaneConfig(
+                role="data_plane",
+                label="数据面",
+                ssh_target="root@example.com",
+                access_log_path="/var/log/xray/access.log",
+            )
+        )
+        calls = []
+
+        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
+            calls.append(args)
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"exists": true, "inode": "1", "offset": 12, "data": "", "skip_until_newline": true}',
+                stderr="",
+            )
+
+        controller._run_remote = fake_run_remote
+
+        result = controller.read_access_log_delta("1", 8, skip_until_newline=True)
+
+        self.assertTrue(result["skip_until_newline"])
+        self.assertEqual(calls[0][-2:], ["", "1"])
 
     def test_remote_metrics_payload_reads_loopback_endpoint(self):
         controller = DataPlaneController(

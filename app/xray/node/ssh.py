@@ -285,10 +285,20 @@ class SSHBackend(NodeBackend):
         )
         return True
 
-    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None):
+    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None, skip_until_newline=False):
         if not self.supports_logs():
-            return super().read_access_log_delta(recorded_inode, offset, since_epoch)
-        return self.files.read_access_log_delta(recorded_inode, offset, since_epoch)
+            return super().read_access_log_delta(
+                recorded_inode,
+                offset,
+                since_epoch,
+                skip_until_newline,
+            )
+        return self.files.read_access_log_delta(
+            recorded_inode,
+            offset,
+            since_epoch,
+            skip_until_newline,
+        )
 
     def read_metrics_payload(self, metrics_url, timeout_seconds):
         return self.files.read_metrics_payload(metrics_url, timeout_seconds)

@@ -23,6 +23,9 @@ MAX_SCAN_BYTES = 2 * MAX_READ_BYTES
 path = sys.argv[1]
 recorded_inode = sys.argv[2]
 offset = int(sys.argv[3])
+skip_until_newline = False
+if len(sys.argv) > 5 and sys.argv[5]:
+    skip_until_newline = str(sys.argv[5]).strip().lower() not in {"0", "false", "no", "off"}
 since_epoch = None
 if len(sys.argv) > 4 and sys.argv[4]:
     try:
@@ -51,6 +54,7 @@ result = {
     "inode": "",
     "offset": 0,
     "data": "",
+    "skip_until_newline": False,
 }
 try:
     stat = os.stat(path)
@@ -61,24 +65,23 @@ except FileNotFoundError:
 current_inode = str(stat.st_ino)
 if recorded_inode != current_inode or stat.st_size < offset:
     offset = 0
+    skip_until_newline = False
 
-initial_tail = offset == 0 and stat.st_size > MAX_READ_BYTES
+initial_tail = not skip_until_newline and offset == 0 and stat.st_size > MAX_READ_BYTES
 if initial_tail:
     offset = stat.st_size - MAX_READ_BYTES
 
 data_text = ""
-skip_until_newline = initial_tail
+skip_until_newline = bool(skip_until_newline or initial_tail)
 scan_bytes = 0
-preserve_partial_start = None
 with open(path, "rb") as handle:
     handle.seek(offset)
     while True:
         read_offset = handle.tell()
         raw_data = handle.read(MAX_READ_BYTES)
         if not raw_data:
-            offset = preserve_partial_start if preserve_partial_start is not None else (
-                handle.tell() if skip_until_newline else read_offset
-            )
+            offset = handle.tell() if skip_until_newline else read_offset
+            skip_until_newline = False
             break
 
         data_start = read_offset
@@ -90,6 +93,8 @@ with open(path, "rb") as handle:
                 if handle.tell() < stat.st_size and scan_bytes < MAX_SCAN_BYTES:
                     continue
                 offset = handle.tell()
+                if handle.tell() >= stat.st_size:
+                    skip_until_newline = False
                 break
             raw_data = raw_data[first_newline + 1 :]
             data_start = read_offset + first_newline + 1
@@ -101,12 +106,6 @@ with open(path, "rb") as handle:
         if last_newline < 0:
             if discarded_prefix:
                 offset = data_start
-                if not raw_data and handle.tell() < stat.st_size:
-                    preserve_partial_start = data_start
-                    continue
-                break
-            if preserve_partial_start is not None:
-                offset = preserve_partial_start
                 break
             if handle.tell() < stat.st_size:
                 scan_bytes += len(raw_data)
@@ -114,6 +113,7 @@ with open(path, "rb") as handle:
                     skip_until_newline = True
                     continue
                 offset = handle.tell()
+                skip_until_newline = True
                 break
             offset = read_offset
             break
@@ -134,6 +134,7 @@ result = {
     "inode": current_inode,
     "offset": offset,
     "data": data,
+    "skip_until_newline": skip_until_newline,
 }
 print(json.dumps(result, ensure_ascii=True))
 """
@@ -460,7 +461,7 @@ class RemoteFileOperations:
             "ai_domains": [item for item in rows if isinstance(item, dict)],
         }
 
-    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None):
+    def read_access_log_delta(self, recorded_inode, offset, since_epoch=None, skip_until_newline=False):
         command_args = [
             "python3",
             "-c",
@@ -469,8 +470,10 @@ class RemoteFileOperations:
             str(recorded_inode or ""),
             str(int(offset or 0)),
         ]
-        if since_epoch is not None:
-            command_args.append(str(float(since_epoch)))
+        if since_epoch is not None or skip_until_newline:
+            command_args.append("" if since_epoch is None else str(float(since_epoch)))
+        if skip_until_newline:
+            command_args.append("1")
         completed = self._run_remote(
             command_args,
             f"{self.config.label} 访问日志读取失败",
@@ -486,6 +489,7 @@ class RemoteFileOperations:
             "inode": str(payload.get("inode", "")),
             "offset": int(payload.get("offset", 0) or 0),
             "data": str(payload.get("data", "")),
+            "skip_until_newline": bool(payload.get("skip_until_newline")),
         }
 
     def read_metrics_payload(self, metrics_url, timeout_seconds):
