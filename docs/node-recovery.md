@@ -62,6 +62,61 @@ python3 scripts/node_recovery.py validate \
 
 命令会重新读取归档内文件，校验 `size` 和 SHA-256，并检查节点恢复清单引用的每个文件。任何篡改、缺失或路径穿越都会直接失败。
 
+## 完整灾备包恢复脚本
+
+如果需要同时准备控制面、数据库、用户附件和两个节点的配置，使用
+`scripts/restore_backup.py`。它支持本地明文 `tar.gz` 和从 R2 下载的加密
+`.enc` 文件；加密密码只能通过受保护的密码文件或环境变量提供，不要写进命令
+行参数。脚本先完成归档和两层 manifest 校验，再开始写入输出目录。
+
+只校验归档：
+
+```bash
+python3 scripts/restore_backup.py validate \
+  --bundle /backups/xray-routing-panel-disaster-20260829T030000Z.tar.gz \
+  --require-ready
+```
+
+校验并准备隔离恢复树：
+
+```bash
+python3 scripts/restore_backup.py prepare \
+  --bundle /backups/xray-routing-panel-disaster-20260829T030000Z.tar.gz \
+  --output-dir /tmp/xray-panel-restore
+```
+
+加密归档示例：
+
+```bash
+python3 scripts/restore_backup.py prepare \
+  --bundle /backups/xray-routing-panel-disaster-20260829T030000Z.tar.gz.enc \
+  --password-file /run/secrets/xray_restore_password \
+  --output-dir /tmp/xray-panel-restore
+```
+
+准备目录的布局为：
+
+```text
+data/panel.db                 # 必需的面板数据库
+data/xray-ops/ops.db          # 归档中存在时恢复
+data/uploads/                 # 业务附件
+.env                          # 控制面配置
+app/xray/                     # 控制面 Xray 配置和运行产物
+nodes/normal-data-plane/      # 普通数据面配置，独立目录
+nodes/ai-data-plane/          # AI 数据面配置，独立目录
+recovery/                     # 两层 manifest
+restore-report.json           # 非敏感恢复结果和完整性状态
+```
+
+默认要求共享数据库和所有已配置节点的必需文件都完整；当前节点材料不完整时，
+命令会在写入前失败。只有明确要做部分恢复时才使用 `--allow-incomplete`。已有
+非空输出目录默认拒绝，`--force` 只允许替换目标文件，不会删除旧文件。
+
+该脚本不会执行 SSH、Docker、数据库在线替换、服务重启、DNS 切换或流量切换。
+准备完成后仍需人工检查 `restore-report.json`，停止目标服务，按部署环境恢复
+Secret、SSH/known_hosts、防火墙和网络，再进行数据库替换、配置测试、节点健康检查
+和业务验收。
+
 ## 新建节点并恢复
 
 新主机只需要先准备 Docker、网络/防火墙和 Xray 镜像拉取能力。恢复普通数据面：
