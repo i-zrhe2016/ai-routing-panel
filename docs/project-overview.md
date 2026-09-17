@@ -344,7 +344,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 - [../frontend/](../frontend/): 前端源码快照；实际部署使用已生成的 `app/static/{admin,portal,landing}` 发布资源
 - [disaster-backup.md](disaster-backup.md): 配置归档、R2 灾备保留和离线恢复边界
-- [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集普通数据面实际配置；本机 AI 配置随控制面归档
+- [remote-node-backup.md](remote-node-backup.md): 通过严格只读 SSH 采集普通数据面实际配置；控制面 AI 运行时产物随归档，远端 AI 节点维护独立配置
 - [node-recovery.md](node-recovery.md): 节点备份完整性、校验和快速准备替换节点
 - [db-backup-uploader.md](db-backup-uploader.md): 加密和 R2 上传组件
 - [../Dockerfile](../Dockerfile): 复制静态发布资源并安装 Python 依赖

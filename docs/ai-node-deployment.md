@@ -2,7 +2,7 @@
 
 ## 模块职责
 
-AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI 域名流量并通过 `freedom` 直出。本文件说明本机 Docker 备用节点，以及显式启用远端 SSH 节点时的边界。
+AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI 域名流量并通过 `freedom` 直出。本文件说明可选的本机 Docker 节点，以及显式启用远端 SSH 节点时的边界。
 
 凭据匹配规则见 [AI 节点独立凭据](ai-node-credentials.md)，ChatGPT 故障处理见 [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)。
 
@@ -41,12 +41,12 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 - `backup`：人工固定配置的备用 AI，备用不可达时同样停用动态 AI 路由；
 - `forced_fallback`：人工停用动态 AI 路由，AI 域名回到普通数据面 `freedom` 直出。
 
-控制台会展示两个候选的探测状态、当前选中节点和 `manual_mode`。人工切换先触发管理器应用目标模式，
+控制台会展示当前配置的 AI 候选探测状态、当前选中节点和 `manual_mode`。人工切换先触发管理器应用目标模式，
 成功后才写入控制面 `app_state`；失败时保留旧模式。
 
-## 当前本机部署
+## 本机 Docker 模式（可选）
 
-| 项目 | 当前值 |
+| 项目 | 示例值 |
 | --- | --- |
 | 部署方式 | Docker |
 | 容器名 | `xray-ai-node` |
@@ -54,11 +54,13 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 | 容器内配置路径 | `/etc/xray/config.json` |
 | 业务监听端口 | `27166` |
 
+生产切换目标为远端台湾 AI 节点；只有未配置远端目标且需要本机承载 AI 节点时，才启用本节的 Docker 模式。
+
 AI 节点使用 `AI_NODE_*` 独立 UUID、REALITY 私钥、公钥和 Short ID，不能复用普通数据面的 `XRAY_*` 凭据。
 
 ## AI 节点监控采集
 
-本机 AI 容器与控制面共享主机监控；业务端口 `27166` 不承担监控流量。Xray
+启用本机 Docker 模式时，AI 容器与控制面共享主机监控；业务端口 `27166` 不承担监控流量。Xray
 额外开启仅回环可访问的 expvar 指标端点，面板只提取有界的入站/直出字节计数，
 再由受保护的 `/metrics` 暴露给 Prometheus。`ai-access.log` 保留在本机用于域名/端口
 分析，不进入 Loki；`ai-error.log` 可由控制面 Fluent Bit 采集。
@@ -118,7 +120,7 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 
 ## SSH 认证边界
 
-本机 AI 备用不需要 SSH。显式配置远端节点时，控制面直接通过内网 SSH 连接目标主机，
+本机 Docker 节点不需要 SSH。生产切换目标为远端台湾 AI 节点时，控制面直接通过内网 SSH 连接目标主机，
 不挂载或传递私钥：
 
 ```text

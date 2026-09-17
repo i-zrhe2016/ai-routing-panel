@@ -99,7 +99,7 @@
 ### 灾备归档、完整性与节点恢复组件
 
 - 入口代码：`scripts/run_db_backup_cycle.py`、`scripts/collect_remote_backup.py`、`scripts/build_backup_bundle.py`、`scripts/node_recovery.py`、`scripts/upload_backup_r2.py`
-- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件，并通过严格只读 SSH 收集普通数据面的实际配置；本机 AI 配置随控制面运行时目录归档
+- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件，并通过严格只读 SSH 收集普通数据面的实际配置；控制面 AI 运行时产物随目录归档，远端 AI 节点保持独立配置
 - `collect_remote_backup.py` 只负责 SSH、校验和 staging；`build_backup_bundle.py` 负责归档及两个 manifest；`node_recovery.py` 负责归档验证和替换节点目录准备；`upload_backup_r2.py` 只负责加密、R2 上传和记录写入
 - 按配置调用 Cloudflare R2 做加密归档的异地保存，不进入快速恢复或故障切换路径
 
@@ -124,7 +124,7 @@
    - 条件：以上都不满足
    - 能力：面板仍可维护元数据和渲染配置，但不能自动重启或同步节点
 
-AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ssh` 模式。AI 域名同步模式在 UI 中会显示为：
+AI 节点当前目标使用 `ssh` 模式；未设置远端目标时才使用 `docker` 模式。AI 域名同步模式在 UI 中会显示为：
 
 - `远端镜像`：`ssh`
 - `本地运行`：`local` 或 `docker`
@@ -143,8 +143,8 @@ AI 节点当前使用 `docker` 模式；显式设置远端目标后才使用 `ss
 9. 非 AI 域名不进入 `dynamic-routing.json`，由普通数据面的默认 `freedom` 在 DMIT 直出；自动模式下所有候选不可达，或人工固定目标不可达时，管理器删除 `dynamic-routing.json`，AI 流量也回退数据面 freedom 直出。
 10. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
 11. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
-12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；本机 AI 配置来自 `config/`，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
-13. 首页读取三节点状态、双 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
+12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；控制面 AI 运行时产物来自 `config/`，远端 AI 节点保持独立配置，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
+13. 首页读取三节点状态、已配置 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
 
 AI 观测链路：`xray-ai-node` 将 Xray metrics 绑定到 `redacted-ip-007:31097`，面板读取后在
 `/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定 `redacted-ip-007:18081`，

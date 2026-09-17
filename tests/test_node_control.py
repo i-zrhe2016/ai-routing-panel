@@ -347,6 +347,32 @@ class NodeControlTest(unittest.TestCase):
             state.set_ai_routing_manual_mode("auto")
         self.assertEqual(state.ai_routing_manual_state()["mode"], "forced_fallback")
 
+    def test_single_promoted_ai_candidate_is_visible_and_can_be_fixed_primary(self):
+        os.environ["AI_ROUTING_ENABLED"] = "1"
+        env_file = self.root / "xray" / ".env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(
+            "AI_UPSTREAM_HOST=127.0.0.1\n"
+            "AI_UPSTREAM_PORT=27166\n"
+            "AI_UPSTREAM_FALLBACK_AS_PRIMARY=1\n"
+            "AI_UPSTREAM_FALLBACK_URL=vless://22222222-2222-2222-2222-222222222222@"
+            "127.0.0.1:27166?encryption=none&security=reality&type=tcp&"
+            "sni=www.amazon.com&fp=chrome&pbk=public-key&sid=abcdef0123456789\n",
+            encoding="utf-8",
+        )
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        state.ai_routing._trigger_ai_domain_manager = mock.Mock()
+
+        status = state.ai_routing_manual_state()
+        self.assertEqual(status["candidate_count"], 1)
+        self.assertEqual(status["candidates"][0]["candidate_type"], "share_url")
+
+        state.set_ai_routing_manual_mode("primary")
+
+        state.ai_routing._trigger_ai_domain_manager.assert_called_once_with("primary")
+        self.assertEqual(state.ai_routing_manual_state()["mode"], "primary")
+
     def test_manual_manager_can_run_locally_in_a_shared_pod(self):
         os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"
         state = load_state_module(self.root).PanelState()

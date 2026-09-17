@@ -192,6 +192,10 @@ class AiRoutingService:
                 upstreams_raw=values.get("AI_UPSTREAMS", ""),
                 fallbacks_raw=values.get("AI_UPSTREAM_FALLBACKS", ""),
                 fallback_share_url=values.get("AI_UPSTREAM_FALLBACK_URL", ""),
+                promote_fallback=str(values.get("AI_UPSTREAM_FALLBACK_AS_PRIMARY", ""))
+                .strip()
+                .lower()
+                not in {"0", "false", "no", "off", ""},
             )
         except (OSError, ValueError, TypeError):
             return []
@@ -223,10 +227,10 @@ class AiRoutingService:
         if not AI_ROUTING_ENABLED:
             raise ValidationError("AI 路由未启用。")
 
-        if mode in {"primary", "backup"}:
+        if mode == "backup":
             candidate_state = self.ai_routing_manual_state()
             if len(candidate_state["candidates"]) < 2:
-                raise ValidationError("当前只配置了一个 AI 节点，无法执行双节点切换。")
+                raise ValidationError("当前只配置了一个 AI 节点，无法固定备用节点。")
 
         updated_at = utc_iso_now()
 
