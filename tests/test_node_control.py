@@ -434,6 +434,43 @@ class NodeControlTest(unittest.TestCase):
         self.assertEqual(status["mode"], "backup")
         self.assertEqual(status["candidate_count"], 1)
 
+    def test_ai_manual_state_merges_current_report_probe_and_selection(self):
+        os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "docker"
+        state = load_state_module(self.root).PanelState()
+        state.init_db()
+        (self.root / "xray" / ".env").write_text(
+            "AI_UPSTREAM_HOST=reported.example.com\nAI_UPSTREAM_PORT=27166\n",
+            encoding="utf-8",
+        )
+        report_path = self.root / "xray" / "reports" / "hourly-domains" / "latest.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "ai_target": {
+                        "selected_index": 0,
+                        "candidates": [
+                            {
+                                "candidate_type": "template",
+                                "upstream_host": "reported.example.com",
+                                "upstream_port": 27166,
+                                "is_reachable": True,
+                                "checked_at": "2026-09-17T00:00:00+00:00",
+                                "probe_method": "tcp",
+                            }
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        status = state.ai_routing_manual_state()
+
+        self.assertTrue(status["candidates"][0]["selected"])
+        self.assertTrue(status["candidates"][0]["is_reachable"])
+        self.assertEqual(status["candidates"][0]["checked_at"], "2026-09-17T00:00:00+00:00")
+        self.assertEqual(status["candidates"][0]["probe_method"], "tcp")
+
     def test_environment_only_ai_candidate_without_env_file_is_rejected(self):
         os.environ["AI_ROUTING_ENABLED"] = "1"
         os.environ["AI_DOMAIN_MANAGER_EXECUTION_MODE"] = "local"
@@ -630,6 +667,30 @@ class NodeControlTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
         self.assertNotIn("old.example.com", payload["data"])
+        self.assertIn("api.openai.com", payload["data"])
+        self.assertEqual(payload["offset"], log_path.stat().st_size)
+
+    def test_remote_access_log_script_bounds_initial_tail_read(self):
+        log_path = self.root / "access.log"
+        log_path.write_text(
+            "x" * (8 * 1024 * 1024 + 1024)
+            + "\n"
+            + "2026/08/31 11:30:00.000000 recent accepted tcp:api.openai.com:443 [direct]\n",
+            encoding="utf-8",
+        )
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+
+        completed = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), "", "0"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertLessEqual(len(payload["data"].encode("utf-8")), 8 * 1024 * 1024)
         self.assertIn("api.openai.com", payload["data"])
         self.assertEqual(payload["offset"], log_path.stat().st_size)
 

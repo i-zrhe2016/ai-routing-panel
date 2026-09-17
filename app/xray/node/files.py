@@ -17,6 +17,8 @@ import json
 import os
 import sys
 
+MAX_READ_BYTES = 8 * 1024 * 1024
+
 path = sys.argv[1]
 recorded_inode = sys.argv[2]
 offset = int(sys.argv[3])
@@ -33,7 +35,7 @@ def is_after_cutoff(line):
         return True
     parts = line.split(" ", 2)
     if len(parts) < 2:
-        return False
+        return True
     timestamp = f"{parts[0]} {parts[1]}"
     for format_string in ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S"):
         try:
@@ -59,13 +61,25 @@ current_inode = str(stat.st_ino)
 if recorded_inode != current_inode or stat.st_size < offset:
     offset = 0
 
-with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+initial_tail = offset == 0 and stat.st_size > MAX_READ_BYTES
+if initial_tail:
+    offset = stat.st_size - MAX_READ_BYTES
+
+with open(path, "rb") as handle:
     handle.seek(offset)
-    if since_epoch is None:
-        data = handle.read()
-    else:
-        data = "".join(line for line in handle if is_after_cutoff(line))
+    raw_data = handle.read(MAX_READ_BYTES)
     offset = handle.tell()
+
+data_text = raw_data.decode("utf-8", errors="ignore")
+if initial_tail:
+    first_newline = data_text.find("\\n")
+    data_text = data_text[first_newline + 1 :] if first_newline >= 0 else ""
+if since_epoch is None:
+    data = data_text
+else:
+    data = "".join(
+        line for line in data_text.splitlines(keepends=True) if is_after_cutoff(line)
+    )
 
 result = {
     "exists": True,

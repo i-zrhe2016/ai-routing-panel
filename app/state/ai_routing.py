@@ -23,6 +23,20 @@ from ..xray.envfile import load_env_file, read_env_or_file
 from ..xray.operation_lock import LockBusyError, exclusive_file_lock
 
 
+def _ai_candidate_identity(candidate):
+    if not isinstance(candidate, dict):
+        return None
+    host = str(candidate.get("upstream_host", "")).strip().lower()
+    try:
+        port = int(candidate.get("upstream_port"))
+    except (TypeError, ValueError):
+        return None
+    candidate_type = str(candidate.get("candidate_type", "template")).strip() or "template"
+    if not host or port <= 0:
+        return None
+    return candidate_type, host, port
+
+
 class AiRoutingService:
     """AI route state and report orchestration with explicit collaborators."""
 
@@ -150,13 +164,18 @@ class AiRoutingService:
         configuration_known = configured_candidates is not None
         candidates = configured_candidates if configuration_known else report_candidates
         report_selected_index = None
-        if not configuration_known and isinstance(report, dict):
+        if isinstance(report, dict):
             target = report.get("ai_target")
             if isinstance(target, dict):
                 try:
                     report_selected_index = int(target.get("selected_index"))
                 except (TypeError, ValueError):
                     report_selected_index = None
+        report_candidate_by_identity = {}
+        for report_candidate in report_candidates:
+            identity = _ai_candidate_identity(report_candidate)
+            if identity is not None:
+                report_candidate_by_identity[identity] = report_candidate
         with self.repository.connect() as conn:
             mode = str(self.repository.get_state(conn, "ai_routing_manual_mode", "auto") or "auto").strip().lower()
             updated_at = str(self.repository.get_state(conn, "ai_routing_manual_updated_at", "") or "").strip()
@@ -168,8 +187,37 @@ class AiRoutingService:
             if normalized_mode != mode:
                 mode = normalized_mode
                 updated_at = utc_iso_now()
-        selected_index = {"primary": 0, "backup": 1}.get(mode, report_selected_index)
+        selected_index = {"primary": 0, "backup": 1}.get(mode)
+        if selected_index is None and report_selected_index is not None:
+            if configuration_known:
+                try:
+                    report_selected_candidate = report_candidates[report_selected_index]
+                except (IndexError, TypeError):
+                    report_selected_candidate = None
+                selected_identity = _ai_candidate_identity(report_selected_candidate)
+                selected_index = next(
+                    (
+                        index
+                        for index, candidate in enumerate(candidates)
+                        if _ai_candidate_identity(candidate) == selected_identity
+                    ),
+                    None,
+                )
+            else:
+                selected_index = report_selected_index
+        probe_fields = (
+            "is_reachable",
+            "failure_reason",
+            "checked_at",
+            "probe_method",
+            "probe_management_error",
+        )
         for index, candidate in enumerate(candidates):
+            report_candidate = report_candidate_by_identity.get(_ai_candidate_identity(candidate))
+            if report_candidate is not None:
+                for field in probe_fields:
+                    if field in report_candidate:
+                        candidate[field] = report_candidate[field]
             candidate["index"] = index
             candidate["number"] = index + 1
             candidate["selected"] = selected_index == index
