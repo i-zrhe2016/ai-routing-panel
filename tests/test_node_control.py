@@ -755,6 +755,25 @@ class NodeControlTest(unittest.TestCase):
         self.assertNotIn("oversized.example.com", first_payload["data"])
         self.assertIn("after.example.com", first_payload["data"])
 
+    def test_remote_access_log_script_bounds_unterminated_oversized_scan(self):
+        log_path = self.root / "access.log"
+        log_path.write_text("header\n" + "x" * (16 * 1024 * 1024), encoding="utf-8")
+        script_path = self.root / "read-access-log.py"
+        script_path.write_text(REMOTE_FILE_DELTA_SCRIPT, encoding="utf-8")
+        recorded_inode = str(log_path.stat().st_ino)
+
+        completed = subprocess.run(
+            [sys.executable, str(script_path), str(log_path), recorded_inode, "7"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["offset"], 7 + 16 * 1024 * 1024)
+        self.assertEqual(payload["data"], "")
+
     def test_remote_access_log_delta_passes_optional_timestamp_cutoff(self):
         controller = DataPlaneController(
             DataPlaneConfig(

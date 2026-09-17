@@ -18,6 +18,7 @@ import os
 import sys
 
 MAX_READ_BYTES = 8 * 1024 * 1024
+MAX_SCAN_BYTES = 2 * MAX_READ_BYTES
 
 path = sys.argv[1]
 recorded_inode = sys.argv[2]
@@ -67,13 +68,17 @@ if initial_tail:
 
 data_text = ""
 skip_until_newline = initial_tail
+scan_bytes = 0
+preserve_partial_start = None
 with open(path, "rb") as handle:
     handle.seek(offset)
     while True:
         read_offset = handle.tell()
         raw_data = handle.read(MAX_READ_BYTES)
         if not raw_data:
-            offset = handle.tell() if skip_until_newline else read_offset
+            offset = preserve_partial_start if preserve_partial_start is not None else (
+                handle.tell() if skip_until_newline else read_offset
+            )
             break
 
         data_start = read_offset
@@ -81,23 +86,35 @@ with open(path, "rb") as handle:
         if skip_until_newline:
             first_newline = raw_data.find(b"\\n")
             if first_newline < 0:
-                if handle.tell() < stat.st_size:
+                scan_bytes += len(raw_data)
+                if handle.tell() < stat.st_size and scan_bytes < MAX_SCAN_BYTES:
                     continue
                 offset = handle.tell()
                 break
             raw_data = raw_data[first_newline + 1 :]
             data_start = read_offset + first_newline + 1
             skip_until_newline = False
+            scan_bytes = 0
             discarded_prefix = True
 
         last_newline = raw_data.rfind(b"\\n")
         if last_newline < 0:
             if discarded_prefix:
                 offset = data_start
+                if not raw_data and handle.tell() < stat.st_size:
+                    preserve_partial_start = data_start
+                    continue
+                break
+            if preserve_partial_start is not None:
+                offset = preserve_partial_start
                 break
             if handle.tell() < stat.st_size:
-                skip_until_newline = True
-                continue
+                scan_bytes += len(raw_data)
+                if scan_bytes < MAX_SCAN_BYTES:
+                    skip_until_newline = True
+                    continue
+                offset = handle.tell()
+                break
             offset = read_offset
             break
 
