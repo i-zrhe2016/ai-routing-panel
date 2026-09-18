@@ -231,18 +231,18 @@ def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> N
     _, parsed = read_env_file(temp)
     assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == values["DB_BACKUP_R2_ACCESS_KEY_ID"]
     assert parsed["DB_BACKUP_R2_SECRET_ACCESS_KEY"] == values["DB_BACKUP_R2_SECRET_ACCESS_KEY"]
+    assert not validate_values(parsed)
 
     with pytest.raises(ValueError, match="换行"):
         _render_env([], {"DB_BACKUP_R2_SECRET_ACCESS_KEY": "line\nbreak"})
 
 
-def test_variable_references_are_rejected_in_managed_values() -> None:
-    values = valid_values()
-    values["DB_BACKUP_ENCRYPTION_PASSWORD"] = "${ARCHIVE_PASSWORD}"
+def test_variable_references_are_rejected_in_managed_values(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("DB_BACKUP_ENCRYPTION_PASSWORD=${ARCHIVE_PASSWORD}\n", encoding="utf-8")
 
-    issues = validate_values(values)
-
-    assert any("DB_BACKUP_ENCRYPTION_PASSWORD" in issue for issue in issues)
+    with pytest.raises(ValueError, match="变量引用"):
+        read_env_file(env_file)
 
 
 def test_new_parent_directory_is_private(tmp_path: Path) -> None:

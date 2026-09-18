@@ -21,7 +21,9 @@ R2_KEYS = (
     "DB_BACKUP_R2_SECRET_ACCESS_KEY",
 )
 STATUS_KEYS = ("DB_BACKUP_R2_ENABLED", "DB_BACKUP_BUNDLE_ENABLED", "DB_BACKUP_ENCRYPTION_PASSWORD", *R2_KEYS)
-INTERPOLATION_PATTERN = re.compile(r"\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)")
+UNESCAPED_INTERPOLATION_PATTERN = re.compile(
+    r"(?<!\$)\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"
+)
 ENV_ASSIGNMENT = re.compile(
     r"^(?P<indent>\s*)(?:(?P<export>export)\s+)?"
     r"(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*="
@@ -89,11 +91,15 @@ def _parse_env_value(raw: str) -> str:
         if trailing and not trailing.startswith("#"):
             raise ValueError("dotenv 引号值后存在无法解析的内容")
         quoted = value[1:end]
+        if value[0] == '"' and UNESCAPED_INTERPOLATION_PATTERN.search(quoted):
+            raise ValueError("dotenv 值不能使用未转义的变量引用")
         return _decode_double_quoted(quoted) if value[0] == '"' else quoted
 
     comment_start = _inline_comment_start(value)
     if comment_start is not None:
         value = value[:comment_start].rstrip()
+    if UNESCAPED_INTERPOLATION_PATTERN.search(value):
+        raise ValueError("dotenv 值不能使用未转义的变量引用")
     return value
 
 
@@ -192,6 +198,10 @@ def _render_env(lines: list[str], updates: dict[str, str]) -> str:
         if match.group("export"):
             prefix += "export "
         suffix = line_body[match.end() :]
+        if _parse_env_value(suffix) == str(updates[key]):
+            rendered.append(line)
+            replaced.add(key)
+            continue
         comment_start = _inline_comment_start(suffix)
         comment = suffix[comment_start:].rstrip() if comment_start is not None else ""
         newline = "\r\n" if line.endswith("\r\n") else "\r" if line.endswith("\r") else "\n"
@@ -222,15 +232,29 @@ def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
         prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
     )
     temporary = Path(temporary_name)
+    replaced = False
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
             handle.write(content)
-        if target.exists():
-            _preserve_file_metadata(target, temporary)
-        os.chmod(temporary, 0o600)
+            handle.flush()
+            os.fsync(handle.fileno())
+            if target.exists():
+                _preserve_file_metadata(target, temporary)
+            os.chmod(temporary, 0o600)
+            os.fsync(handle.fileno())
         os.replace(temporary, target)
+        replaced = True
+        directory_descriptor = os.open(
+            target.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
     except Exception:
-        temporary.unlink(missing_ok=True)
+        if not replaced:
+            temporary.unlink(missing_ok=True)
         raise
 
 
@@ -275,9 +299,6 @@ def validate_values(values: dict[str, str]) -> list[str]:
     """返回不含配置值的中文诊断。"""
 
     issues: list[str] = []
-    for key in ("DB_BACKUP_ENCRYPTION_PASSWORD", *R2_KEYS):
-        if INTERPOLATION_PATTERN.search(values.get(key, "")):
-            issues.append(f"{key} 不能使用 dotenv 变量引用，请提供实际值")
     for key in ("DB_BACKUP_R2_ENABLED", "DB_BACKUP_BUNDLE_ENABLED"):
         raw = values.get(key, "").strip().lower()
         if raw and raw not in {"0", "1", "true", "false", "yes", "no", "on", "off"}:
@@ -310,8 +331,6 @@ def validate_values(values: dict[str, str]) -> list[str]:
     if (
         endpoint
         and bucket
-        and not INTERPOLATION_PATTERN.search(endpoint)
-        and not INTERPOLATION_PATTERN.search(bucket)
         and not _valid_endpoint(endpoint, bucket)
     ):
         issues.append("DB_BACKUP_R2_ENDPOINT 必须是 HTTPS 基础地址，不能带 query 或 fragment")
