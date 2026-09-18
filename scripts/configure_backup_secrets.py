@@ -173,8 +173,12 @@ def validate_env_file_security(path: str | Path) -> list[str]:
     """检查现有 dotenv 的属主和权限，不读取或返回文件内容。"""
 
     target = Path(path).expanduser()
+    if target.is_symlink():
+        return ["配置文件不能是符号链接"]
     if not target.exists():
         return []
+    if not target.is_file():
+        return ["配置路径不是普通文件"]
     file_stat = target.stat()
     issues: list[str] = []
     effective_uid = os.geteuid() if hasattr(os, "geteuid") else file_stat.st_uid

@@ -199,6 +199,17 @@ def test_symlink_target_is_rejected_without_changing_target(tmp_path: Path) -> N
 
 
 @posix_only
+def test_security_check_rejects_symlink_target(tmp_path: Path) -> None:
+    real_file = tmp_path / "real.env"
+    real_file.write_text("DB_BACKUP_R2_ENABLED=0\n", encoding="utf-8")
+    real_file.chmod(0o600)
+    symlink = tmp_path / ".env"
+    symlink.symlink_to(real_file)
+
+    assert configure_backup_secrets.validate_env_file_security(symlink)
+
+
+@posix_only
 def test_symlinked_parent_is_rejected(tmp_path: Path) -> None:
     real_parent = tmp_path / "real-parent"
     real_parent.mkdir()
