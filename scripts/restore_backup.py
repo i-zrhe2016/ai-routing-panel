@@ -99,6 +99,51 @@ def _resolve_password(
     return value
 
 
+def _recompute_readiness(node_manifest: dict) -> dict:
+    shared_state = node_manifest.get("sharedState", {})
+    shared_required = shared_state.get("requiredArtifacts", [])
+    shared_missing = [
+        item.get("name", item.get("remotePath", "artifact"))
+        for item in shared_required
+        if item.get("status") != "ok" or not item.get("archivePath")
+    ]
+    shared_ready = bool(shared_required) and not shared_missing
+
+    nodes = []
+    configured_roles = []
+    configured_ready = []
+    for node in node_manifest.get("nodes", []):
+        required = node.get("requiredArtifacts", [])
+        missing = [
+            item.get("name", item.get("remotePath", "artifact"))
+            for item in required
+            if item.get("status") != "ok" or not item.get("archivePath")
+        ]
+        configured = bool(node.get("configured"))
+        recovery_ready = configured and not missing
+        role = node.get("role", "")
+        if configured:
+            configured_roles.append(role)
+            configured_ready.append(recovery_ready)
+        nodes.append(
+            {
+                "role": role,
+                "configured": configured,
+                "source": node.get("source", ""),
+                "collectionStatus": node.get("collectionStatus", ""),
+                "recoveryReady": recovery_ready,
+                "missingRequiredArtifacts": missing,
+            }
+        )
+
+    return {
+        "recoveryReady": bool(configured_ready) and shared_ready and all(configured_ready),
+        "sharedReady": shared_ready,
+        "configuredRoles": configured_roles,
+        "nodes": nodes,
+    }
+
+
 def _decrypt_bundle(source: Path, destination: Path, passphrase: str) -> None:
     try:
         from cryptography.exceptions import InvalidTag
@@ -180,6 +225,7 @@ def _open_validated_bundle(
         with tarfile.open(plain_bundle, mode="r:gz") as archive:
             _archive_member_index(archive)
         validated = validate_backup_bundle(plain_bundle)
+        validated["readiness"] = _recompute_readiness(validated["nodeManifest"])
         yield plain_bundle, validated, encrypted
 
 
@@ -240,12 +286,19 @@ def _panel_database_archive(node_manifest: dict) -> str:
     return ""
 
 
-def _database_restore_path(archive_path: str, panel_archive: str) -> str:
+def _database_restore_path(archive_path: str, panel_archive: str, node_manifest: dict) -> str:
     safe_archive = _safe_relative(archive_path, "database archive path")
     if safe_archive == panel_archive:
         return "data/panel.db"
-    if PurePosixPath(safe_archive).name == "ops.db":
-        return "data/xray-ops/ops.db"
+    shared = node_manifest.get("sharedState", {})
+    for group_name in ("requiredArtifacts", "optionalArtifacts"):
+        for artifact in shared.get(group_name, []):
+            artifact_archive = str(artifact.get("archivePath", ""))
+            if artifact_archive and _safe_relative(artifact_archive) == safe_archive:
+                restore_path = str(artifact.get("restorePath", ""))
+                if not restore_path:
+                    raise ValueError(f"database artifact has no restore path: {safe_archive}")
+                return _safe_relative(restore_path, "database restore path")
     return "data/recovered-databases/" + PurePosixPath(safe_archive).name
 
 
@@ -257,7 +310,7 @@ def _add_plan(plans: list[PlannedFile], seen_destinations: set[str], plan: Plann
     plans.append(PlannedFile(plan.archive_path, destination, plan.category))
 
 
-def _build_restore_plan(validated: dict) -> list[PlannedFile]:
+def _build_restore_plan(validated: dict, allow_incomplete: bool) -> list[PlannedFile]:
     manifest = validated["backupManifest"]
     node_manifest = validated["nodeManifest"]
     file_entries = manifest.get("files", [])
@@ -275,7 +328,7 @@ def _build_restore_plan(validated: dict) -> list[PlannedFile]:
                 seen_destinations,
                 PlannedFile(
                     archive_path,
-                    _database_restore_path(archive_path, panel_archive),
+                    _database_restore_path(archive_path, panel_archive, node_manifest),
                     "database",
                 ),
             )
@@ -297,6 +350,11 @@ def _build_restore_plan(validated: dict) -> list[PlannedFile]:
         for group_name in ("requiredArtifacts", "optionalArtifacts"):
             for artifact in node.get(group_name, []):
                 if artifact.get("status") != "ok" or not artifact.get("archivePath"):
+                    if group_name == "requiredArtifacts" and not allow_incomplete:
+                        raise ValueError(
+                            f"required node artifact is incomplete: {role}:"
+                            f"{artifact.get('name', artifact.get('remotePath', 'artifact'))}"
+                        )
                     continue
                 archive_path = _safe_relative(str(artifact["archivePath"]), "node archive path")
                 restore_path = _safe_relative(str(artifact.get("restorePath", "")), "node restore path")
@@ -525,7 +583,7 @@ def prepare_restore(
                 + "; ".join(missing)
             )
 
-        plans = _build_restore_plan(validated)
+        plans = _build_restore_plan(validated, allow_incomplete)
         _validate_output(output, force)
         staging = _new_staging_directory(output)
         try:

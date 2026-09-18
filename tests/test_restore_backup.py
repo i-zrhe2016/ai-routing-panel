@@ -156,6 +156,31 @@ class RestoreBackupTest(unittest.TestCase):
             "etc/xray/config.json",
         )
 
+    def test_readiness_is_recomputed_from_required_artifact_status(self):
+        readiness = self.restore._recompute_readiness(
+            {
+                "sharedState": {
+                    "requiredArtifacts": [
+                        {"name": "panel-database", "archivePath": "database/panel.db", "status": "ok"}
+                    ]
+                },
+                "nodes": [
+                    {
+                        "role": "ai-data-plane",
+                        "configured": True,
+                        "requiredArtifacts": [
+                            {"name": "xray-config", "archivePath": "", "status": "missing"}
+                        ],
+                    }
+                ],
+                "recoveryReady": True,
+            }
+        )
+
+        self.assertFalse(readiness["recoveryReady"])
+        self.assertFalse(readiness["nodes"][0]["recoveryReady"])
+        self.assertEqual(readiness["nodes"][0]["missingRequiredArtifacts"], ["xray-config"])
+
     def test_encrypted_bundle_can_be_validated_and_prepared_from_password_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
