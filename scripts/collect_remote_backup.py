@@ -451,6 +451,8 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
     if transport == "tailscale":
         if node.options:
             raise ValueError("SSH options are not supported with Tailscale SSH transport")
+        if node.ssh_port != "22":
+            raise ValueError("custom SSH ports are not supported with Tailscale SSH transport")
         command = [
             _tailscale_executable(),
             "--socket",

@@ -119,6 +119,23 @@ class RemoteBackupTest(unittest.TestCase):
             os.environ.clear()
             os.environ.update(original)
 
+    def test_tailscale_transport_rejects_custom_ssh_port(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="root@data-plane",
+            paths=("/etc/xray/config.json",),
+            known_hosts="/tmp/known_hosts",
+            ssh_port="2222",
+        )
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_SSH_TRANSPORT"] = "tailscale"
+            with self.assertRaisesRegex(ValueError, "custom SSH ports"):
+                self.module.read_remote(node, 12, 2048)
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
     def test_tailscale_transport_reports_missing_runtime(self):
         node = self.module.RemoteNode(
             role="normal-data-plane",

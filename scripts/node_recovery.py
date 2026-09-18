@@ -187,7 +187,11 @@ def _remote_node_manifest(
 
     required = [item for item in artifacts if item.get("required")]
     optional = [item for item in artifacts if not item.get("required")]
-    configured = bool(str(collection_node.get("target", "")).strip())
+    collection_status = str(collection_node.get("status", "not_collected"))
+    configured = bool(str(collection_node.get("target", "")).strip()) or collection_status in {
+        "failed",
+        "partial",
+    }
     recovery_ready = configured and bool(required) and all(
         item.get("status") == "ok" and item.get("archivePath") for item in required
     )
@@ -197,7 +201,7 @@ def _remote_node_manifest(
         "configured": configured,
         "target": str(collection_node.get("target", "")),
         "sshPort": str(collection_node.get("sshPort", "22")),
-        "collectionStatus": str(collection_node.get("status", "not_collected")),
+        "collectionStatus": collection_status,
         "requiredPaths": required_paths,
         "requiredArtifacts": required,
         "optionalArtifacts": optional,
@@ -331,11 +335,14 @@ def build_node_recovery_manifest(
     """Build the explicit recovery contract for a just-created archive."""
 
     indexed = _file_entry_index(file_entries)
-    remote_nodes = {
-        str(item.get("role")): item
-        for item in (remote_collection or {}).get("nodes", [])
-        if isinstance(item, dict) and item.get("role")
-    }
+    remote_nodes = {}
+    for item in (remote_collection or {}).get("nodes", []):
+        if not isinstance(item, dict) or not item.get("role"):
+            continue
+        role = str(item["role"])
+        if role in remote_nodes:
+            raise ValueError(f"duplicate recovery node role: {role}")
+        remote_nodes[role] = item
     for role in remote_nodes:
         if not is_recoverable_role(role):
             raise ValueError(f"unsupported recovery node role: {role}")
