@@ -615,12 +615,12 @@ def prepare_restore(
                 "nodes": readiness["nodes"],
                 "nextStep": "Review this tree, then perform service-specific recovery manually.",
             }
+            report["report"] = RESTORE_REPORT_NAME
             _write_file(
                 staging / RESTORE_REPORT_NAME,
                 (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
                 False,
             )
-            report["report"] = RESTORE_REPORT_NAME
             result = {**report, "outputDir": str(output.resolve())}
             _publish_staging(staging, output, force)
             return result

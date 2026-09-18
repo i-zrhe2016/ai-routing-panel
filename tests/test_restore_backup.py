@@ -145,7 +145,8 @@ class RestoreBackupTest(unittest.TestCase):
             )
             self.assertEqual((output / "data" / "panel.db").stat().st_mode & 0o777, 0o600)
             self.assertEqual((output / "data").stat().st_mode & 0o777, 0o700)
-            self.assertTrue((output / "restore-report.json").is_file())
+            report = json.loads((output / "restore-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["report"], "restore-report.json")
 
     def test_control_source_without_project_data_or_app_keeps_archive_relative_path(self):
         self.assertEqual(
