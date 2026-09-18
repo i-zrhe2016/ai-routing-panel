@@ -201,6 +201,12 @@ def _tailscale_broker_socket() -> str:
     ).strip() or DEFAULT_TAILSCALE_BROKER_SOCKET
 
 
+def _broker_response_limit(node: RemoteNode, max_bytes: int) -> int:
+    # Base64 expands each file by at most 4/3; leave room for JSON metadata and
+    # paths while keeping the limit tied to the configured per-file bound.
+    return max(16 * 1024 * 1024, max(1, max_bytes) * max(1, len(node.paths)) * 2 + 1024 * 1024)
+
+
 def parse_non_negative_int(value: str, default: int) -> int:
     raw = str(value or "").strip()
     if not raw:
@@ -472,7 +478,7 @@ def _read_broker_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
             if not chunk:
                 break
             response += chunk
-            if len(response) > 128 * 1024 * 1024:
+            if len(response) > _broker_response_limit(node, max_bytes):
                 raise RuntimeError("Tailscale SSH broker response is too large")
     except OSError as exc:
         raise RuntimeError("Tailscale SSH broker is unavailable") from exc

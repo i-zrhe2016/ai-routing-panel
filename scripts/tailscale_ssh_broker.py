@@ -15,6 +15,7 @@ import os
 import signal
 import socketserver
 import stat
+import threading
 from pathlib import Path
 
 from collect_remote_backup import (
@@ -121,7 +122,7 @@ def main() -> int:
     os.chmod(path, 0o660)
 
     def stop(_signum, _frame):
-        server.shutdown()
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)

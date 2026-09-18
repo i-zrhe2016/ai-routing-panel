@@ -127,6 +127,7 @@ services:
       DB_BACKUP_SSH_TRANSPORT: "tailscale"
       DB_BACKUP_TAILSCALE_BIN: "/usr/local/bin/tailscale"
       DB_BACKUP_TAILSCALE_SOCKET: "/var/run/tailscale/tailscaled.sock"
+      DB_BACKUP_TAILSCALE_BROKER_SOCKET: "${DB_BACKUP_TAILSCALE_BROKER_SOCKET:-/var/run/xray-backup/tailscale-ssh.sock}"
       DB_BACKUP_SSH_KNOWN_HOSTS: "${DB_BACKUP_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DB_BACKUP_SSH_OPTIONS: "${DB_BACKUP_SSH_OPTIONS:-}"
       DB_BACKUP_SSH_TIMEOUT_SECONDS: "${DB_BACKUP_SSH_TIMEOUT_SECONDS:-20}"
@@ -157,7 +158,7 @@ services:
       - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-./scripts/tailscale-disabled}:/var/run/tailscale/tailscaled.sock:ro
       - xray-routing-panel-db-backup-tailscale-socket:/var/run/xray-backup
     healthcheck:
-      test: ["CMD", "test", "-S", "/var/run/xray-backup/tailscale-ssh.sock"]
+      test: ["CMD-SHELL", "test -S \"$${DB_BACKUP_TAILSCALE_BROKER_SOCKET:-/var/run/xray-backup/tailscale-ssh.sock}\""]
       interval: 5s
       timeout: 3s
       retries: 12
