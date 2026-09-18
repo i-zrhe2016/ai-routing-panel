@@ -244,7 +244,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 ## 灾备归档与 R2 上传
 
-默认情况下，`xray-routing-panel-db-backup` 每天 `03:00 UTC` 尝试生成本地 SQLite 备份和带节点恢复清单的灾备归档；只有配置 `DB_BACKUP_SSH_COLLECTION_ENABLED=1`、真实的 `DB_BACKUP_DATAPLANE_SSH_TARGET`、`DB_BACKUP_TAILSCALE_BIN_HOST` 和 `DB_BACKUP_TAILSCALE_SOCKET_HOST`，并重建 Compose 服务后，远程节点采集和恢复门禁才会通过；未配置这些条件时，备份容器会停止上传并记录状态，显式关闭采集时不执行远程采集。
+默认情况下（两个完整性门禁保持为 `1`），`xray-routing-panel-db-backup` 每天 `03:00 UTC` 尝试生成本地 SQLite 备份和带节点恢复清单的灾备归档；只有配置 `DB_BACKUP_SSH_COLLECTION_ENABLED=1`、真实的 `DB_BACKUP_DATAPLANE_SSH_TARGET`、`DB_BACKUP_TAILSCALE_BIN_HOST` 和 `DB_BACKUP_TAILSCALE_SOCKET_HOST`，并重建 Compose 服务后，远程节点采集和恢复门禁才会通过；未配置这些条件时，备份容器会停止上传并记录状态，显式关闭采集时不执行远程采集。计划维护且明确接受 control-plane-only 归档时，可同时设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 和 `DB_BACKUP_RECOVERY_REQUIRED=0`，显式允许继续上传，但该归档不具备完整节点恢复材料。
 
 Compose 备份服务默认会在备份完成后自动加密并上传到 Cloudflare R2；首次部署前请在根 `.env` 中填入：
 
