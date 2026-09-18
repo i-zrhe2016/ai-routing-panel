@@ -4,7 +4,6 @@ import os
 import stat
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -99,21 +98,25 @@ def test_temporary_file_is_private_before_replace(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     observed: dict[str, object] = {}
 
-    def inspect_replace(source: str | bytes | os.PathLike[str] | os.PathLike[bytes], target: str | bytes | os.PathLike[str] | os.PathLike[bytes]) -> None:
-        temporary = Path(source)
+    def inspect_replace(source: str, target: str, **_kwargs: object) -> None:
+        temporary = tmp_path / source
         observed["mode"] = stat.S_IMODE(temporary.stat().st_mode)
         observed["content"] = temporary.read_text(encoding="utf-8")
         raise OSError("injected replace failure")
 
-    real_mkstemp = tempfile.mkstemp
+    real_open_private_temp = configure_backup_secrets._open_private_temp
 
-    def permissive_mkstemp(*args: object, **kwargs: object) -> tuple[int, str]:
-        descriptor, temporary_name = real_mkstemp(*args, **kwargs)
-        os.chmod(temporary_name, 0o666)
+    def permissive_open_private_temp(directory_fd: int, basename: str) -> tuple[int, str]:
+        descriptor, temporary_name = real_open_private_temp(directory_fd, basename)
+        os.fchmod(descriptor, 0o666)
         return descriptor, temporary_name
 
     with (
-        mock.patch.object(configure_backup_secrets.tempfile, "mkstemp", side_effect=permissive_mkstemp),
+        mock.patch.object(
+            configure_backup_secrets,
+            "_open_private_temp",
+            side_effect=permissive_open_private_temp,
+        ),
         mock.patch.object(os, "replace", side_effect=inspect_replace),
         pytest.raises(OSError, match="injected replace failure"),
     ):
@@ -206,13 +209,21 @@ def test_symlinked_parent_is_rejected(tmp_path: Path) -> None:
         write_env_file(linked_parent / ".env", valid_values())
 
 
-@posix_only
 def test_check_command_reports_status_only(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     secret_marker = "secret-for-test"
     values = valid_values()
     values["DB_BACKUP_R2_SECRET_ACCESS_KEY"] = secret_marker
-    write_env_file(env_file, values)
+    env_file.write_text(
+        "DB_BACKUP_R2_ENABLED=1\n"
+        "DB_BACKUP_BUNDLE_ENABLED=1\n"
+        'DB_BACKUP_R2_ENDPOINT="https://r2.example.invalid" # endpoint\n'
+        "DB_BACKUP_R2_BUCKET='backup-bucket'\n"
+        'DB_BACKUP_R2_ACCESS_KEY_ID="access-id-for-test"\n'
+        "DB_BACKUP_R2_SECRET_ACCESS_KEY='secret-for-test'\n"
+        f'DB_BACKUP_ENCRYPTION_PASSWORD="{values["DB_BACKUP_ENCRYPTION_PASSWORD"]}"\n',
+        encoding="utf-8",
+    )
 
     completed = subprocess.run(
         [sys.executable, str(SCRIPT), "--env-file", str(env_file), "--check"],
@@ -301,18 +312,35 @@ def test_failed_check_does_not_echo_invalid_secret_values(tmp_path: Path) -> Non
 @posix_only
 def test_interactive_generation_is_persisted_without_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     env_file = tmp_path / ".env"
-    answers = iter(["", "n", ""])
     generated = "generated-password-for-test-0123456789abcdef"
+    prompts: list[str] = []
+
+    def respond(prompt: str) -> str:
+        prompts.append(prompt)
+        if "是否生成灾备归档？" in prompt:
+            return ""
+        if "是否启用 Cloudflare R2 灾备上传？" in prompt:
+            return "n"
+        if "是否自动生成新的灾备归档密码？" in prompt:
+            return ""
+        raise AssertionError(f"unexpected prompt: {prompt}")
 
     with (
         mock.patch.object(configure_backup_secrets, "generate_encryption_password", return_value=generated),
-        mock.patch("builtins.input", side_effect=lambda _prompt: next(answers)),
+        mock.patch("builtins.input", side_effect=respond),
         mock.patch.object(sys, "argv", [str(SCRIPT), "--env-file", str(env_file)]),
     ):
         assert configure_backup_secrets.main() == 0
 
     captured = capsys.readouterr()
     _, values = read_env_file(env_file)
+    assert [prompt.split(" [", 1)[0] for prompt in prompts] == [
+        "是否生成灾备归档？",
+        "是否启用 Cloudflare R2 灾备上传？",
+        "是否自动生成新的灾备归档密码？",
+    ]
+    assert values["DB_BACKUP_BUNDLE_ENABLED"] == "1"
+    assert values["DB_BACKUP_R2_ENABLED"] == "0"
     assert values["DB_BACKUP_ENCRYPTION_PASSWORD"] == generated
     assert generated not in captured.out
     assert generated not in captured.err

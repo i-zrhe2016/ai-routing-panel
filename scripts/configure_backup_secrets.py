@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import getpass
 import os
 import re
 import secrets
+import stat
 import sys
-import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -113,21 +114,7 @@ def _parse_env_value(raw: str, reject_interpolation: bool = True) -> str:
     return value
 
 
-def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
-    """读取 dotenv 文本；不会打印或记录任何值。"""
-
-    target = Path(path).expanduser()
-    if target.is_symlink():
-        raise ValueError(f"配置文件不能是符号链接: {target}")
-    if any(parent.is_symlink() for parent in target.parents):
-        raise ValueError(f"配置路径的父目录不能是符号链接: {target}")
-    if not target.exists():
-        return [], {}
-    if not target.is_file():
-        raise ValueError(f"配置路径不是普通文件: {target}")
-
-    with target.open("r", encoding="utf-8", newline="") as handle:
-        lines = handle.read().splitlines(keepends=True)
+def _parse_env_lines(lines: list[str]) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in lines:
         match = ENV_ASSIGNMENT.match(line.rstrip("\r\n"))
@@ -146,7 +133,25 @@ def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
                 if key in MANAGED_KEYS:
                     raise
                 values[key] = raw_value.strip()
-    return lines, values
+    return values
+
+
+def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
+    """读取 dotenv 文本；不会打印或记录任何值。"""
+
+    target = Path(path).expanduser()
+    if target.is_symlink():
+        raise ValueError(f"配置文件不能是符号链接: {target}")
+    if any(parent.is_symlink() for parent in target.parents):
+        raise ValueError(f"配置路径的父目录不能是符号链接: {target}")
+    if not target.exists():
+        return [], {}
+    if not target.is_file():
+        raise ValueError(f"配置路径不是普通文件: {target}")
+
+    with target.open("r", encoding="utf-8", newline="") as handle:
+        lines = handle.read().splitlines(keepends=True)
+    return lines, _parse_env_lines(lines)
 
 
 def _quote_env_value(value: str) -> str:
@@ -157,48 +162,93 @@ def _quote_env_value(value: str) -> str:
     return f'"{escaped}"'
 
 
-def _preserve_file_metadata(source: Path, destination: Path) -> None:
-    if source.is_symlink():
-        raise ValueError(f"配置文件不能是符号链接: {source}")
-    source_stat = source.stat()
-    destination_stat = destination.stat()
+def _open_trusted_directory(parent: Path) -> int:
+    if os.name != "posix":
+        raise OSError("安全原子更新需要 POSIX 目录 fd 支持")
+    absolute_parent = Path(os.path.abspath(parent))
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    directory_fd = os.open(os.sep, flags)
+    try:
+        for component in absolute_parent.parts[1:]:
+            if component in {"", "."}:
+                continue
+            try:
+                next_fd = os.open(component, flags, dir_fd=directory_fd)
+                created = False
+            except FileNotFoundError:
+                os.mkdir(component, 0o700, dir_fd=directory_fd)
+                next_fd = os.open(component, flags, dir_fd=directory_fd)
+                created = True
+            except OSError as exc:
+                if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                    raise ValueError("配置路径的父目录不能是符号链接或普通文件") from exc
+                raise
+            if created:
+                os.fchmod(next_fd, 0o700)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        return directory_fd
+    except Exception:
+        os.close(directory_fd)
+        raise
+
+
+def _open_existing_file(directory_fd: int, name: str) -> int | None:
+    try:
+        entry_stat = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(entry_stat.st_mode):
+        raise ValueError("配置文件不能是符号链接")
+    if not stat.S_ISREG(entry_stat.st_mode):
+        raise ValueError("配置路径不是普通文件")
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    source_fd = os.open(name, flags, dir_fd=directory_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+            raise ValueError("配置路径不是普通文件")
+        return source_fd
+    except Exception:
+        os.close(source_fd)
+        raise
+
+
+def _open_private_temp(directory_fd: int, basename: str) -> tuple[int, str]:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    for _ in range(32):
+        name = f".{basename}.{secrets.token_hex(12)}.tmp"
+        try:
+            return os.open(name, flags, 0o600, dir_fd=directory_fd), name
+        except FileExistsError:
+            continue
+    raise OSError("无法创建唯一的临时配置文件")
+
+
+def _preserve_file_metadata(source_fd: int, destination_fd: int) -> None:
+    source_stat = os.fstat(source_fd)
+    destination_stat = os.fstat(destination_fd)
     if (source_stat.st_uid, source_stat.st_gid) != (
         destination_stat.st_uid,
         destination_stat.st_gid,
     ):
-        os.chown(destination, source_stat.st_uid, source_stat.st_gid)
+        os.fchown(destination_fd, source_stat.st_uid, source_stat.st_gid)
     os.utime(
-        destination,
+        destination_fd,
         ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-        follow_symlinks=False,
     )
     listxattr = getattr(os, "listxattr", None)
     getxattr = getattr(os, "getxattr", None)
     setxattr = getattr(os, "setxattr", None)
     if listxattr:
-        names = listxattr(source, follow_symlinks=False)
+        names = listxattr(source_fd)
         if names and (not getxattr or not setxattr):
             raise ValueError("当前平台无法安全复制配置文件扩展属性")
         unsupported = [name for name in names if not name.startswith("user.")]
         if unsupported:
             raise ValueError("配置文件含不能安全复制的访问控制或安全扩展属性")
         for name in names:
-            value = getxattr(source, name, follow_symlinks=False)
-            setxattr(destination, name, value, follow_symlinks=False)
-
-
-def _ensure_private_parent(parent: Path) -> None:
-    missing: list[Path] = []
-    current = parent
-    while not current.exists():
-        missing.append(current)
-        next_parent = current.parent
-        if next_parent == current:
-            break
-        current = next_parent
-    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for directory in missing:
-        os.chmod(directory, 0o700)
+            value = getxattr(source_fd, name)
+            setxattr(destination_fd, name, value)
 
 
 def _render_env(lines: list[str], updates: dict[str, str]) -> str:
@@ -248,48 +298,70 @@ def _render_env(lines: list[str], updates: dict[str, str]) -> str:
 def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
     """原子更新 dotenv，并让最终文件权限保持为 0600。"""
 
-    target = Path(path).expanduser()
-    if target.is_symlink():
-        raise ValueError(f"配置文件不能是符号链接: {target}")
-    if any(parent.is_symlink() for parent in target.parents):
-        raise ValueError(f"配置路径的父目录不能是符号链接: {target}")
-    if target.exists() and not target.is_file():
-        raise ValueError(f"配置路径不是普通文件: {target}")
-    _ensure_private_parent(target.parent)
-    lines, _ = read_env_file(target)
-    content = _render_env(lines, updates)
-
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
-    )
-    temporary = Path(temporary_name)
+    target = Path(os.path.abspath(Path(path).expanduser()))
+    directory_fd = _open_trusted_directory(target.parent)
+    source_fd: int | None = None
+    temporary_fd: int | None = None
+    temporary_name: str | None = None
     replaced = False
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+        source_fd = _open_existing_file(directory_fd, target.name)
+        if source_fd is None:
+            lines = []
+            source_stat = None
+        else:
+            with os.fdopen(os.dup(source_fd), "r", encoding="utf-8", newline="") as handle:
+                lines = handle.read().splitlines(keepends=True)
+            _parse_env_lines(lines)
+            source_stat = os.fstat(source_fd)
+        content = _render_env(lines, updates)
+
+        temporary_fd, temporary_name = _open_private_temp(directory_fd, target.name)
+        with os.fdopen(temporary_fd, "w", encoding="utf-8", newline="") as handle:
+            temporary_fd = None
             handle.write(content)
             handle.flush()
+            if source_fd is not None:
+                _preserve_file_metadata(source_fd, handle.fileno())
+            os.fchmod(handle.fileno(), 0o600)
+            handle.flush()
             os.fsync(handle.fileno())
-            if target.exists():
-                _preserve_file_metadata(target, temporary)
-            os.chmod(temporary, 0o600)
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
+        current_stat = None
+        try:
+            current_stat = os.stat(target.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        if source_stat is None:
+            if current_stat is not None:
+                raise OSError("配置文件在更新期间被创建")
+        elif (
+            current_stat is None
+            or current_stat.st_dev != source_stat.st_dev
+            or current_stat.st_ino != source_stat.st_ino
+        ):
+            raise OSError("配置文件在更新期间发生变化")
+        os.replace(
+            temporary_name,
+            target.name,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
         replaced = True
         try:
-            directory_descriptor = os.open(
-                target.parent,
-                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
-            )
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
+            os.fsync(directory_fd)
         except OSError as exc:
             raise DurabilityError("配置已替换，但未能确认目录持久化同步") from exc
-    except Exception:
-        if not replaced:
-            temporary.unlink(missing_ok=True)
-        raise
+    finally:
+        if temporary_fd is not None:
+            os.close(temporary_fd)
+        if not replaced and temporary_name is not None:
+            try:
+                os.unlink(temporary_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        if source_fd is not None:
+            os.close(source_fd)
+        os.close(directory_fd)
 
 
 def generate_encryption_password() -> str:
