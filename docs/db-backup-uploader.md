@@ -28,6 +28,26 @@ DB_BACKUP_R2_RECORD_PATH=/backups/r2-upload-record.json
 
 R2 凭据只能通过部署环境、Docker Secret 或外部 Secret 管理注入，不能提交到 Git、灾备归档或日志。上传记录不保存 secret，只保存 endpoint、bucket、object key、大小、SHA-256 和时间。
 
+## 中文密钥配置脚本
+
+项目提供交互式脚本配置备份归档密码和 R2 凭据。脚本只更新指定的 dotenv 文件，默认是项目根目录 `.env`；不会连接 SSH、访问真实 R2、重启容器或修改 DNS。
+
+先检查现有配置（只显示变量名的“已设置/缺失”状态，不显示值）：
+
+```bash
+python3 scripts/configure_backup_secrets.py --check
+```
+
+首次配置或需要更换密钥时运行：
+
+```bash
+python3 scripts/configure_backup_secrets.py
+```
+
+脚本会用中文提示输入 R2 endpoint、bucket、access key 和 secret key；敏感输入不回显，归档密码也可以自动生成。写入采用临时文件原子替换，并将 `.env` 权限设为 `0600`。完成后请人工检查变更，再在维护窗口重建或重启备份容器，最后重新执行 `--check`。不要把密钥粘贴到聊天、命令行参数或日志中。
+
+该脚本只负责本项目灾备备份所需的密钥材料，不生成或修改 SSH、Xray/REALITY、节点业务凭据。Cloudflare R2 的 access key 和 secret key 仍需先在 Cloudflare 控制台创建，并按最小权限授予目标 bucket。
+
 ## 对象命名与校验
 
 对象 key 格式为：
