@@ -99,7 +99,7 @@ def bundle_enabled():
 
 
 def collect_remote_backup(staging_dir):
-    required = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "1")
+    required = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "0")
     # Keep the node collector's dedicated empty staging directory separate
     # from optional snapshots (for example ops.db) written by this cycle.
     node_staging_dir = Path(staging_dir) / "nodes"
@@ -202,8 +202,8 @@ def enforce_recovery_readiness(bundle_path):
             f"ready={str(node['recoveryReady']).lower()} missing={missing}",
             flush=True,
         )
-    recovery_gate_enabled = env_enabled("DB_BACKUP_RECOVERY_REQUIRED", "1")
-    collection_gate_enabled = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "1")
+    recovery_gate_enabled = env_enabled("DB_BACKUP_RECOVERY_REQUIRED", "0")
+    collection_gate_enabled = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "0")
     remote_collection_incomplete = any(
         node.get("source") == "remote-ssh" and not node.get("recoveryReady", False)
         for node in validated["nodeManifest"].get("nodes", [])

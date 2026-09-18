@@ -148,6 +148,13 @@ def _artifact_from_collection(
     return artifact
 
 
+def _collection_node_is_configured(collection_node: dict | None) -> bool:
+    collection_node = collection_node or {}
+    return bool(str(collection_node.get("target", "")).strip()) or str(
+        collection_node.get("status", "")
+    ) in {"failed", "partial"}
+
+
 def _remote_node_manifest(
     role: str,
     collection_node: dict | None,
@@ -188,10 +195,7 @@ def _remote_node_manifest(
     required = [item for item in artifacts if item.get("required")]
     optional = [item for item in artifacts if not item.get("required")]
     collection_status = str(collection_node.get("status", "not_collected"))
-    configured = bool(str(collection_node.get("target", "")).strip()) or collection_status in {
-        "failed",
-        "partial",
-    }
+    configured = _collection_node_is_configured(collection_node)
     recovery_ready = configured and bool(required) and all(
         item.get("status") == "ok" and item.get("archivePath") for item in required
     )
@@ -292,7 +296,7 @@ def _local_runtime_node_manifest(
 
 
 def _local_ai_node_manifest(file_entries: dict[str, dict], remote_node: dict | None) -> dict:
-    if remote_node and str(remote_node.get("target", "")).strip():
+    if remote_node and _collection_node_is_configured(remote_node):
         return _remote_node_manifest("ai-data-plane", remote_node, file_entries)
 
     result = _local_runtime_node_manifest(
@@ -347,9 +351,8 @@ def build_node_recovery_manifest(
         if not is_recoverable_role(role):
             raise ValueError(f"unsupported recovery node role: {role}")
     remote_normal = remote_nodes.get("normal-data-plane")
-    remote_normal_failed = str((remote_normal or {}).get("status", "")) == "failed"
-    if remote_collection is None or remote_normal is None or (
-        not str(remote_normal.get("target", "")).strip() and not remote_normal_failed
+    if remote_collection is None or remote_normal is None or not _collection_node_is_configured(
+        remote_normal
     ):
         normal = _local_runtime_node_manifest(
             "normal-data-plane", indexed, "/app/xray/runtime/config.json"
@@ -360,7 +363,7 @@ def build_node_recovery_manifest(
         item
         for role, item in remote_nodes.items()
         if role == "ai-data-plane" or role.startswith("ai-data-plane-")
-        if str(item.get("target", "")).strip()
+        if _collection_node_is_configured(item)
     ]
     ai_nodes = [
         _remote_node_manifest(str(item["role"]), item, indexed)

@@ -211,7 +211,7 @@ class NodeRecoveryTest(unittest.TestCase):
         self.assertFalse(self.recovery.is_recoverable_role("evil-node"))
         self.assertFalse(self.recovery.is_recoverable_role("ai-data-plane-"))
 
-    def test_targetless_failed_ai_collection_keeps_local_fallback(self):
+    def test_targetless_ai_collection_status_controls_fallback(self):
         files = [
             {
                 "archivePath": "database/panel.db",
@@ -238,23 +238,31 @@ class NodeRecoveryTest(unittest.TestCase):
                 "sha256": "env-hash",
             },
         ]
-        manifest = self.recovery.build_node_recovery_manifest(
-            files,
-            {
-                "nodes": [
+        for status, expected_source in (
+            ("failed", "remote-ssh"),
+            ("partial", "remote-ssh"),
+            ("skipped_no_target", "control-plane-local"),
+        ):
+            with self.subTest(status=status):
+                manifest = self.recovery.build_node_recovery_manifest(
+                    files,
                     {
-                        "role": "ai-data-plane",
-                        "target": "",
-                        "status": "failed",
-                        "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
-                        "files": [],
-                    }
-                ]
-            },
-        )
+                        "nodes": [
+                            {
+                                "role": "ai-data-plane",
+                                "target": "",
+                                "status": status,
+                                "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
+                                "files": [],
+                            }
+                        ]
+                    },
+                )
 
-        ai_node = next(item for item in manifest["nodes"] if item["role"] == "ai-data-plane")
-        self.assertEqual(ai_node["source"], "control-plane-local")
+                ai_node = next(
+                    item for item in manifest["nodes"] if item["role"] == "ai-data-plane"
+                )
+                self.assertEqual(ai_node["source"], expected_source)
 
     def test_recovery_manifest_rejects_unknown_remote_role(self):
         with self.assertRaisesRegex(ValueError, "unsupported recovery node role"):

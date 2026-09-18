@@ -87,7 +87,7 @@ node-recovery-manifest.json
 | `DB_BACKUP_SSH_OPTIONS` | 空 | 仅 `openssh` 传输使用；Tailscale SSH 不接受 OpenSSH 选项 |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号/换行分隔；配置和 `.env` 是恢复必需文件，其余为可选 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
-| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 兼容字段；Tailscale SSH 使用目标节点的 SSH 服务 |
+| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | Tailscale SSH 必须保持 `22`；只有 `DB_BACKUP_SSH_TRANSPORT=openssh` 时才可使用自定义端口 |
 | `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json,/etc/xray/.env`（远端目标存在时） | 远端 AI 节点只读采集路径；为空时使用该默认值 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
 | `DB_BACKUP_RECOVERY_REQUIRED` | Compose 为 `0` | 不完整节点恢复包阻止后续上传；完整节点模式设为 `1`，控制面-only 归档保持为 `0` |

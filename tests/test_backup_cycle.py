@@ -45,7 +45,7 @@ class BackupCycleTest(unittest.TestCase):
 
             collect.assert_called_once_with(
                 node_staging,
-                required=True,
+                required=False,
                 raise_on_required=False,
             )
             self.assertEqual(result, node_staging)

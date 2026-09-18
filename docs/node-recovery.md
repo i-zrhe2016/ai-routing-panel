@@ -16,7 +16,7 @@
 | 普通数据面 | 远端实际 `config.json`、远端 `.env` | `panel-ports.json`、`dynamic-routing.json`、客户端测试产物、最新 AI 报告 |
 | AI 数据面 | 远端模式：远端 `config.json` + `.env`；本机 Docker 模式：控制面 `config-ai-node.json` + `.env` | — |
 
-普通数据面默认通过宿主机 Tailscale SSH 严格只读采集，AI 节点有远端目标时同样采集；本机 Docker AI 节点直接读取控制面运行时目录。Tailscale 身份、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
+完整节点模式通过宿主机 Tailscale SSH 严格只读采集普通数据面，AI 节点有远端目标时同样采集；Compose 默认关闭远端采集，本机 Docker AI 节点直接读取控制面运行时目录。Tailscale 身份、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
 
 默认远端路径如下；部署目录不同时必须显式设置 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`：
 
@@ -48,7 +48,7 @@ DB_BACKUP_RECOVERY_REQUIRED=0
 DB_BACKUP_SSH_COLLECTION_REQUIRED=0
 ```
 
-默认值均为 `1`，会在生成归档并校验后阻止该不完整版本继续上传；仅在明确接受不完整归档时同时设置为 `0`。节点失联时不要删除此前完整归档。
+Compose 和直接 cron 默认值均为 `0`，用于允许控制面-only 归档；启用完整节点模式时必须将两个变量都设为 `1`，生成归档并校验后会阻止不完整版本继续上传。节点失联时不要删除此前完整归档。
 
 ## 校验归档
 
