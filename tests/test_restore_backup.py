@@ -1,7 +1,11 @@
 import importlib.util
+import io
+import json
 import os
 import sqlite3
+import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +38,7 @@ class RestoreBackupTest(unittest.TestCase):
         cls.restore = load_module("restore_backup_under_test", ROOT / "scripts" / "restore_backup.py")
 
     def _create_bundle(self, root, include_ai_config=True):
+        root.mkdir(parents=True, exist_ok=True)
         database = root / "panel-20260917T030000Z.db"
         with sqlite3.connect(str(database)) as conn:
             conn.execute("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)")
@@ -69,6 +74,18 @@ class RestoreBackupTest(unittest.TestCase):
             "panel-test",
             named_paths=[(ops_db, "database/ops.db")],
         )
+
+    def _add_archive_member(self, bundle, destination, member):
+        with tarfile.open(bundle, "r:gz") as source, tarfile.open(destination, "w:gz") as target:
+            for existing in source.getmembers():
+                if existing.isfile():
+                    target.addfile(existing, source.extractfile(existing))
+                else:
+                    target.addfile(existing)
+            if member.isfile():
+                target.addfile(member, io.BytesIO(b"unsafe"))
+            else:
+                target.addfile(member)
 
     def test_prepare_restores_shared_data_user_files_control_files_and_separate_nodes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -130,6 +147,15 @@ class RestoreBackupTest(unittest.TestCase):
             self.assertEqual((output / "data").stat().st_mode & 0o777, 0o700)
             self.assertTrue((output / "restore-report.json").is_file())
 
+    def test_control_source_without_project_data_or_app_keeps_archive_relative_path(self):
+        self.assertEqual(
+            self.restore._control_restore_path(
+                "config/etc/xray/config.json",
+                {"sourcePath": "/etc/xray/config.json"},
+            ),
+            "etc/xray/config.json",
+        )
+
     def test_encrypted_bundle_can_be_validated_and_prepared_from_password_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -183,6 +209,82 @@ class RestoreBackupTest(unittest.TestCase):
 
             self.assertFalse(output.exists())
             self.assertEqual(list(root.glob(".restore.restore-*")), [])
+
+    def test_archive_path_safety_rejects_traversal_and_links(self):
+        cases = (
+            ("parent", tarfile.TarInfo("../outside.txt")),
+            ("absolute", tarfile.TarInfo("/outside.txt")),
+            ("symlink", tarfile.TarInfo("unsafe-link")),
+            ("hardlink", tarfile.TarInfo("unsafe-hardlink")),
+        )
+        cases[2][1].type = tarfile.SYMTYPE
+        cases[2][1].linkname = "/outside.txt"
+        cases[3][1].type = tarfile.LNKTYPE
+        cases[3][1].linkname = "backup-manifest.json"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle = self._create_bundle(root)
+            for label, member in cases:
+                with self.subTest(label=label):
+                    malicious = root / f"{label}.tar.gz"
+                    output = root / f"restore-{label}"
+                    self._add_archive_member(bundle, malicious, member)
+
+                    with self.assertRaisesRegex(ValueError, "unsafe|links"):
+                        self.restore.prepare_restore(malicious, output)
+                    self.assertFalse(output.exists())
+                    self.assertFalse((root / "outside.txt").exists())
+
+    def test_cli_validate_prepare_and_require_ready_exit_code(self):
+        script = ROOT / "scripts" / "restore_backup.py"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ready_bundle = self._create_bundle(root / "ready")
+            ready_output = root / "ready-restore"
+
+            validate = subprocess.run(
+                [sys.executable, str(script), "validate", "--bundle", str(ready_bundle)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(validate.returncode, 0, validate.stderr)
+            self.assertTrue(json.loads(validate.stdout)["recoveryReady"])
+
+            prepare = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "prepare",
+                    "--bundle",
+                    str(ready_bundle),
+                    "--output-dir",
+                    str(ready_output),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(prepare.returncode, 0, prepare.stderr)
+            self.assertTrue((ready_output / "restore-report.json").is_file())
+
+            incomplete_bundle = self._create_bundle(root / "incomplete", include_ai_config=False)
+            require_ready = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "validate",
+                    "--bundle",
+                    str(incomplete_bundle),
+                    "--require-ready",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(require_ready.returncode, 2)
+            self.assertFalse(json.loads(require_ready.stdout)["recoveryReady"])
 
     def test_incomplete_node_is_rejected_unless_explicitly_allowed(self):
         with tempfile.TemporaryDirectory() as tmpdir:

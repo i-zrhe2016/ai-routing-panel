@@ -229,7 +229,7 @@ def _control_restore_path(archive_path: str, entry: dict) -> str:
             relative = relative_parts[index + 1 :] if marker == "project" else relative_parts[index:]
             if relative:
                 return _safe_relative("/".join(relative), "control restore path")
-    return _safe_relative("config/" + "/".join(relative_parts), "control restore path")
+    return _safe_relative("/".join(relative_parts), "control restore path")
 
 
 def _panel_database_archive(node_manifest: dict) -> str:
