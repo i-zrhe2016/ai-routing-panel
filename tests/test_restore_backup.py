@@ -15,7 +15,10 @@ def load_module(name, path):
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
     return module
 
 
@@ -85,10 +88,21 @@ class RestoreBackupTest(unittest.TestCase):
                 (output / "data" / "uploads" / "payment-proofs" / "proof.txt").read_bytes(),
                 b"attachment",
             )
-            self.assertTrue((output / ".env").is_file())
-            self.assertTrue((output / "app" / "xray" / ".env").is_file())
-            self.assertTrue((output / "app" / "xray" / "runtime" / "config.json").is_file())
-            self.assertTrue(
+            self.assertEqual(
+                (output / ".env").read_text(encoding="utf-8"),
+                "PANEL_CONFIG_MARKER=control\n",
+            )
+            self.assertEqual(
+                (output / "app" / "xray" / ".env").read_text(encoding="utf-8"),
+                "XRAY_LISTEN_PORT=443\n",
+            )
+            self.assertEqual(
+                (output / "app" / "xray" / "runtime" / "config.json").read_text(
+                    encoding="utf-8"
+                ),
+                '{"inbounds": []}\n',
+            )
+            self.assertEqual(
                 (
                     output
                     / "nodes"
@@ -97,9 +111,10 @@ class RestoreBackupTest(unittest.TestCase):
                     / "xray"
                     / "runtime"
                     / "config.json"
-                ).is_file()
+                ).read_text(encoding="utf-8"),
+                '{"inbounds": []}\n',
             )
-            self.assertTrue(
+            self.assertEqual(
                 (
                     output
                     / "nodes"
@@ -108,7 +123,8 @@ class RestoreBackupTest(unittest.TestCase):
                     / "xray"
                     / "runtime"
                     / "config.json"
-                ).is_file()
+                ).read_text(encoding="utf-8"),
+                '{"inbounds": [{"port": 27166}]}\n',
             )
             self.assertEqual((output / "data" / "panel.db").stat().st_mode & 0o777, 0o600)
             self.assertEqual((output / "data").stat().st_mode & 0o777, 0o700)

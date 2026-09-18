@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 try:
     from node_recovery import RECOVERABLE_ROLES, validate_backup_bundle
@@ -325,11 +326,11 @@ def _build_restore_plan(validated: dict) -> list[PlannedFile]:
     return plans
 
 
-def _read_member_bytes(
+def _open_member(
     archive: tarfile.TarFile,
     members: dict[str, tarfile.TarInfo],
     archive_path: str,
-) -> bytes:
+) -> BinaryIO:
     safe_archive = _safe_relative(archive_path, "archive path")
     member = members.get(safe_archive)
     if member is None or not member.isfile():
@@ -337,10 +338,10 @@ def _read_member_bytes(
     handle = archive.extractfile(member)
     if handle is None:
         raise ValueError(f"cannot read {safe_archive} from backup archive")
-    return handle.read()
+    return handle
 
 
-def _write_file(path: Path, data: bytes, force: bool) -> None:
+def _write_file(path: Path, data: bytes | BinaryIO, force: bool) -> None:
     if path.exists() or path.is_symlink():
         if not force:
             raise FileExistsError(f"restore target already exists: {path}")
@@ -352,7 +353,10 @@ def _write_file(path: Path, data: bytes, force: bool) -> None:
             mode="wb", prefix=f".{path.name}.restore-", dir=path.parent, delete=False
         ) as handle:
             temporary = Path(handle.name)
-            handle.write(data)
+            if isinstance(data, bytes):
+                handle.write(data)
+            else:
+                shutil.copyfileobj(data, handle, length=1024 * 1024)
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
     finally:
@@ -533,11 +537,11 @@ def prepare_restore(
                     destination = _restore_destination(output_root, plan.destination)
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     os.chmod(destination.parent, 0o700)
-                    _write_file(
-                        destination,
-                        _read_member_bytes(archive, members, plan.archive_path),
-                        False,
-                    )
+                    member = _open_member(archive, members, plan.archive_path)
+                    try:
+                        _write_file(destination, member, False)
+                    finally:
+                        member.close()
                     restored_files.append(plan.destination)
 
             report = {
