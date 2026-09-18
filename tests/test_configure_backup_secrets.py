@@ -74,6 +74,20 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
     assert not list(tmp_path.glob(".env.*.tmp"))
 
 
+def test_failed_replace_keeps_original_file(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    original = "APP_ENV=production\nDB_BACKUP_R2_ENABLED=0\n"
+    env_file.write_text(original, encoding="utf-8")
+
+    with (
+        mock.patch.object(os, "replace", side_effect=OSError("injected replace failure")),
+        pytest.raises(OSError, match="injected replace failure"),
+    ):
+        write_env_file(env_file, valid_values())
+
+    assert env_file.read_text(encoding="utf-8") == original
+
+
 def test_crlf_line_endings_and_default_env_path_are_preserved(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_bytes(b"APP_ENV=production\r\nDB_BACKUP_R2_ENABLED=0\r\n")
@@ -118,6 +132,7 @@ def test_invalid_endpoint_and_short_password_are_rejected() -> None:
         "https://r2.example.invalid:65536",
         "https://r2.example.invalid host",
         "https://r2.example.invalid#fragment",
+        "https://[r2.example.invalid",
     ],
 )
 def test_endpoint_rejects_credentials_and_malformed_authority(endpoint: str) -> None:
@@ -176,6 +191,8 @@ def test_check_command_reports_status_only(tmp_path: Path) -> None:
     ):
         assert values[key] not in completed.stdout
         assert values[key] not in completed.stderr
+        assert values[key][:8] not in completed.stdout
+        assert values[key][:8] not in completed.stderr
 
 
 def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> None:

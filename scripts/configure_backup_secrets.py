@@ -30,6 +30,10 @@ ENV_ASSIGNMENT = re.compile(
 )
 
 
+class DurabilityError(RuntimeError):
+    """配置已替换，但目录同步未能确认持久化。"""
+
+
 def _quoted_end(value: str, quote: str) -> int:
     escaped = False
     for index, character in enumerate(value[1:], start=1):
@@ -254,14 +258,17 @@ def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
             os.fsync(handle.fileno())
         os.replace(temporary, target)
         replaced = True
-        directory_descriptor = os.open(
-            target.parent,
-            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
-        )
         try:
-            os.fsync(directory_descriptor)
-        finally:
-            os.close(directory_descriptor)
+            directory_descriptor = os.open(
+                target.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        except OSError as exc:
+            raise DurabilityError("配置已替换，但未能确认目录持久化同步") from exc
     except Exception:
         if not replaced:
             temporary.unlink(missing_ok=True)
@@ -281,14 +288,15 @@ def _enabled(value: str | None, default: bool = True) -> bool:
 
 
 def _valid_endpoint(endpoint: str, bucket: str) -> bool:
-    parsed = urlsplit(endpoint)
     try:
+        parsed = urlsplit(endpoint)
         port = parsed.port
+        hostname = parsed.hostname
     except ValueError:
         return False
     if (
         parsed.scheme != "https"
-        or not parsed.hostname
+        or not hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.netloc.endswith(":")
@@ -490,6 +498,9 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         print(f"配置失败：{exc}", file=sys.stderr)
         return 2
+    except DurabilityError as exc:
+        print(f"{exc}，请使用 --check 复核当前文件。", file=sys.stderr)
+        return 3
     except (EOFError, KeyboardInterrupt):
         print("已取消，未写入配置。", file=sys.stderr)
         return 130
