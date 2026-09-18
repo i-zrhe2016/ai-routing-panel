@@ -339,7 +339,7 @@ def build_node_recovery_manifest(
     configured_nodes = [node for node in nodes if node.get("configured")]
     optional_databases = {
         "name": "ops-database",
-        "restorePath": "data/ops.db",
+        "restorePath": "data/xray-ops/ops.db",
         "status": "ok" if "database/ops.db" in indexed else "missing",
         "required": False,
     }
