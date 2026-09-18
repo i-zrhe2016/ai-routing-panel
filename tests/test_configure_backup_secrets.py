@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from scripts.configure_backup_secrets import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "configure_backup_secrets.py"
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="requires POSIX file permissions and symlinks")
 
 
 def valid_values() -> dict[str, str]:
@@ -84,6 +86,17 @@ def test_crlf_line_endings_and_default_env_path_are_preserved(tmp_path: Path) ->
     assert configure_backup_secrets.default_env_file() == ROOT / ".env"
 
 
+def test_main_uses_project_default_path_when_env_file_is_omitted(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    write_env_file(env_file, valid_values())
+
+    with (
+        mock.patch.object(configure_backup_secrets, "default_env_file", return_value=env_file),
+        mock.patch.object(sys, "argv", [str(SCRIPT), "--check"]),
+    ):
+        assert configure_backup_secrets.main() == 0
+
+
 def test_invalid_endpoint_and_short_password_are_rejected() -> None:
     values = valid_values()
     values["DB_BACKUP_R2_ENDPOINT"] = "http://r2.example.invalid"
@@ -126,6 +139,16 @@ def test_symlink_target_is_rejected_without_changing_target(tmp_path: Path) -> N
         write_env_file(symlink, valid_values())
 
     assert real_file.read_text(encoding="utf-8") == "APP_ENV=production\n"
+
+
+def test_symlinked_parent_is_rejected(tmp_path: Path) -> None:
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="父目录"):
+        write_env_file(linked_parent / ".env", valid_values())
 
 
 def test_check_command_reports_status_only(tmp_path: Path) -> None:
@@ -243,6 +266,17 @@ def test_variable_references_are_rejected_in_managed_values(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="变量引用"):
         read_env_file(env_file)
+
+
+def test_r2_requires_encryption_password_even_when_bundle_is_disabled() -> None:
+    values = {
+        "DB_BACKUP_BUNDLE_ENABLED": "0",
+        "DB_BACKUP_R2_ENABLED": "1",
+    }
+
+    issues = validate_values(values)
+
+    assert any("DB_BACKUP_ENCRYPTION_PASSWORD" in issue for issue in issues)
 
 
 def test_new_parent_directory_is_private(tmp_path: Path) -> None:

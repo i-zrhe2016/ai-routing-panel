@@ -109,6 +109,8 @@ def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
     target = Path(path).expanduser()
     if target.is_symlink():
         raise ValueError(f"配置文件不能是符号链接: {target}")
+    if any(parent.is_symlink() for parent in target.parents):
+        raise ValueError(f"配置路径的父目录不能是符号链接: {target}")
     if not target.exists():
         return [], {}
     if not target.is_file():
@@ -152,8 +154,14 @@ def _preserve_file_metadata(source: Path, destination: Path) -> None:
     listxattr = getattr(os, "listxattr", None)
     getxattr = getattr(os, "getxattr", None)
     setxattr = getattr(os, "setxattr", None)
-    if listxattr and getxattr and setxattr:
-        for name in listxattr(source, follow_symlinks=False):
+    if listxattr:
+        names = listxattr(source, follow_symlinks=False)
+        if names and (not getxattr or not setxattr):
+            raise ValueError("当前平台无法安全复制配置文件扩展属性")
+        unsupported = [name for name in names if not name.startswith("user.")]
+        if unsupported:
+            raise ValueError("配置文件含不能安全复制的访问控制或安全扩展属性")
+        for name in names:
             value = getxattr(source, name, follow_symlinks=False)
             setxattr(destination, name, value, follow_symlinks=False)
 
@@ -222,6 +230,8 @@ def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
     target = Path(path).expanduser()
     if target.is_symlink():
         raise ValueError(f"配置文件不能是符号链接: {target}")
+    if any(parent.is_symlink() for parent in target.parents):
+        raise ValueError(f"配置路径的父目录不能是符号链接: {target}")
     if target.exists() and not target.is_file():
         raise ValueError(f"配置路径不是普通文件: {target}")
     _ensure_private_parent(target.parent)
@@ -307,7 +317,7 @@ def validate_values(values: dict[str, str]) -> list[str]:
     bundle_enabled = _enabled(values.get("DB_BACKUP_BUNDLE_ENABLED"))
     r2_enabled = _enabled(values.get("DB_BACKUP_R2_ENABLED"))
     encryption_password = values.get("DB_BACKUP_ENCRYPTION_PASSWORD", "")
-    if bundle_enabled and not encryption_password:
+    if (bundle_enabled or r2_enabled) and not encryption_password:
         issues.append("缺少 DB_BACKUP_ENCRYPTION_PASSWORD")
     elif encryption_password and len(encryption_password) < MIN_ENCRYPTION_PASSWORD_LENGTH:
         issues.append(
