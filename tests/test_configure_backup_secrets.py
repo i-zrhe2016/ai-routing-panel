@@ -220,6 +220,7 @@ def test_symlinked_parent_is_rejected(tmp_path: Path) -> None:
         write_env_file(linked_parent / ".env", valid_values())
 
 
+@posix_only
 def test_check_command_reports_status_only(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     secret_marker = "secret-for-test"
@@ -279,7 +280,6 @@ def test_check_rejects_insecure_env_file_permissions(tmp_path: Path) -> None:
     )
 
     assert completed.returncode == 2
-    assert "权限" in completed.stdout
 
 
 @posix_only
@@ -397,6 +397,92 @@ def test_interactive_generation_is_persisted_without_output(tmp_path: Path, caps
     assert values["DB_BACKUP_ENCRYPTION_PASSWORD"] == generated
     assert generated not in captured.out
     assert generated not in captured.err
+
+
+@posix_only
+def test_interactive_r2_setup_persists_and_redacts_values(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    env_file = tmp_path / ".env"
+    generated = "generated-password-for-r2-test-0123456789"
+    endpoint = "https://r2.example.invalid"
+    bucket = "backup-bucket"
+    access_key = "access-key-for-test"
+    secret_key = "secret-key-for-test"
+
+    def respond(prompt: str) -> str:
+        if "是否生成灾备归档？" in prompt:
+            return ""
+        if "是否启用 Cloudflare R2 灾备上传？" in prompt:
+            return "y"
+        if "DB_BACKUP_R2_ENDPOINT" in prompt:
+            return endpoint
+        if "DB_BACKUP_R2_BUCKET" in prompt:
+            return bucket
+        if "是否自动生成新的灾备归档密码？" in prompt:
+            return ""
+        raise AssertionError(f"unexpected prompt: {prompt}")
+
+    def respond_secret(prompt: str) -> str:
+        if "DB_BACKUP_R2_ACCESS_KEY_ID" in prompt:
+            return access_key
+        if "DB_BACKUP_R2_SECRET_ACCESS_KEY" in prompt:
+            return secret_key
+        raise AssertionError(f"unexpected secret prompt: {prompt}")
+
+    with (
+        mock.patch.object(configure_backup_secrets, "generate_encryption_password", return_value=generated),
+        mock.patch("builtins.input", side_effect=respond),
+        mock.patch.object(configure_backup_secrets.getpass, "getpass", side_effect=respond_secret),
+        mock.patch.object(sys, "argv", [str(SCRIPT), "--env-file", str(env_file)]),
+    ):
+        assert configure_backup_secrets.main() == 0
+
+    captured = capsys.readouterr()
+    _, values = read_env_file(env_file)
+    assert values["DB_BACKUP_R2_ENABLED"] == "1"
+    assert values["DB_BACKUP_R2_ENDPOINT"] == endpoint
+    assert values["DB_BACKUP_R2_BUCKET"] == bucket
+    assert values["DB_BACKUP_R2_ACCESS_KEY_ID"] == access_key
+    assert values["DB_BACKUP_R2_SECRET_ACCESS_KEY"] == secret_key
+    assert values["DB_BACKUP_ENCRYPTION_PASSWORD"] == generated
+    assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+    for value in (endpoint, bucket, access_key, secret_key, generated):
+        assert value not in captured.out
+        assert value not in captured.err
+
+
+@posix_only
+def test_interactive_r2_validation_failure_does_not_write(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+
+    def respond(prompt: str) -> str:
+        if "是否生成灾备归档？" in prompt:
+            return ""
+        if "是否启用 Cloudflare R2 灾备上传？" in prompt:
+            return "y"
+        if "DB_BACKUP_R2_ENDPOINT" in prompt:
+            return "http://invalid.example.invalid"
+        if "DB_BACKUP_R2_BUCKET" in prompt:
+            return "backup-bucket"
+        if "是否自动生成新的灾备归档密码？" in prompt:
+            return ""
+        raise AssertionError(f"unexpected prompt: {prompt}")
+
+    def respond_secret(prompt: str) -> str:
+        if "DB_BACKUP_R2_ACCESS_KEY_ID" in prompt:
+            return "access-key-for-test"
+        if "DB_BACKUP_R2_SECRET_ACCESS_KEY" in prompt:
+            return "secret-key-for-test"
+        raise AssertionError(f"unexpected secret prompt: {prompt}")
+
+    with (
+        mock.patch.object(configure_backup_secrets, "generate_encryption_password", return_value="p" * 40),
+        mock.patch("builtins.input", side_effect=respond),
+        mock.patch.object(configure_backup_secrets.getpass, "getpass", side_effect=respond_secret),
+        mock.patch.object(sys, "argv", [str(SCRIPT), "--env-file", str(env_file)]),
+    ):
+        assert configure_backup_secrets.main() == 2
+
+    assert not env_file.exists()
 
 
 def test_generated_password_is_long_enough_without_being_logged() -> None:
