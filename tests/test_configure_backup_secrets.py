@@ -86,6 +86,32 @@ def test_failed_replace_keeps_original_file(tmp_path: Path) -> None:
         write_env_file(env_file, valid_values())
 
     assert env_file.read_text(encoding="utf-8") == original
+    assert not list(tmp_path.glob(".env.*.tmp"))
+
+
+def test_temporary_file_is_private_before_replace_under_permissive_umask(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    observed: dict[str, object] = {}
+
+    def inspect_replace(source: str | bytes | os.PathLike[str] | os.PathLike[bytes], target: str | bytes | os.PathLike[str] | os.PathLike[bytes]) -> None:
+        temporary = Path(source)
+        observed["mode"] = stat.S_IMODE(temporary.stat().st_mode)
+        observed["content"] = temporary.read_text(encoding="utf-8")
+        raise OSError("injected replace failure")
+
+    previous_umask = os.umask(0)
+    try:
+        with (
+            mock.patch.object(os, "replace", side_effect=inspect_replace),
+            pytest.raises(OSError, match="injected replace failure"),
+        ):
+            write_env_file(env_file, valid_values())
+    finally:
+        os.umask(previous_umask)
+
+    assert observed["mode"] == 0o600
+    assert "secret-for-test" in observed["content"]
+    assert not list(tmp_path.glob(".env.*.tmp"))
 
 
 def test_crlf_line_endings_and_default_env_path_are_preserved(tmp_path: Path) -> None:
