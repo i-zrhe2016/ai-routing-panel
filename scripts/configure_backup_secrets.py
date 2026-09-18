@@ -344,8 +344,12 @@ def validate_values(values: dict[str, str]) -> list[str]:
         and not _valid_endpoint(endpoint, bucket)
     ):
         issues.append("DB_BACKUP_R2_ENDPOINT 必须是 HTTPS 基础地址，不能带 query 或 fragment")
-    if bucket and (any(char.isspace() for char in bucket) or "/" in bucket):
-        issues.append("DB_BACKUP_R2_BUCKET 不能包含空白或斜杠")
+    if bucket and (
+        not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket)
+        or ".." in bucket
+        or re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", bucket)
+    ):
+        issues.append("DB_BACKUP_R2_BUCKET 不是有效的 R2/S3 bucket 名称")
     return issues
 
 
@@ -403,6 +407,11 @@ def _prompt_encryption_password(current: str) -> str:
 
 def interactive_updates(values: dict[str, str]) -> dict[str, str]:
     updates: dict[str, str] = {}
+    bundle_enabled = _ask_yes_no(
+        "是否生成灾备归档？",
+        _enabled(values.get("DB_BACKUP_BUNDLE_ENABLED")),
+    )
+    updates["DB_BACKUP_BUNDLE_ENABLED"] = "1" if bundle_enabled else "0"
     r2_enabled = _ask_yes_no(
         "是否启用 Cloudflare R2 灾备上传？",
         _enabled(values.get("DB_BACKUP_R2_ENABLED")),
@@ -422,9 +431,10 @@ def interactive_updates(values: dict[str, str]) -> dict[str, str]:
             "DB_BACKUP_R2_SECRET_ACCESS_KEY",
             values.get("DB_BACKUP_R2_SECRET_ACCESS_KEY", ""),
         )
-    updates["DB_BACKUP_ENCRYPTION_PASSWORD"] = _prompt_encryption_password(
-        values.get("DB_BACKUP_ENCRYPTION_PASSWORD", "")
-    )
+    if bundle_enabled or r2_enabled:
+        updates["DB_BACKUP_ENCRYPTION_PASSWORD"] = _prompt_encryption_password(
+            values.get("DB_BACKUP_ENCRYPTION_PASSWORD", "")
+        )
     return updates
 
 

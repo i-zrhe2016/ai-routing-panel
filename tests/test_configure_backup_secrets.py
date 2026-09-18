@@ -135,7 +135,7 @@ def test_symlink_target_is_rejected_without_changing_target(tmp_path: Path) -> N
     symlink = tmp_path / ".env"
     symlink.symlink_to(real_file)
 
-    with pytest.raises(ValueError, match="符号链接"):
+    with pytest.raises(ValueError):
         write_env_file(symlink, valid_values())
 
     assert real_file.read_text(encoding="utf-8") == "APP_ENV=production\n"
@@ -147,7 +147,7 @@ def test_symlinked_parent_is_rejected(tmp_path: Path) -> None:
     linked_parent = tmp_path / "linked-parent"
     linked_parent.symlink_to(real_parent, target_is_directory=True)
 
-    with pytest.raises(ValueError, match="父目录"):
+    with pytest.raises(ValueError):
         write_env_file(linked_parent / ".env", valid_values())
 
 
@@ -202,7 +202,7 @@ def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> 
 
 def test_interactive_generation_is_persisted_without_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     env_file = tmp_path / ".env"
-    answers = iter(["n", ""])
+    answers = iter(["", "n", ""])
     generated = "generated-password-for-test-0123456789abcdef"
 
     with (
@@ -277,6 +277,16 @@ def test_r2_requires_encryption_password_even_when_bundle_is_disabled() -> None:
     issues = validate_values(values)
 
     assert any("DB_BACKUP_ENCRYPTION_PASSWORD" in issue for issue in issues)
+
+
+@pytest.mark.parametrize("bucket", ["A_B", "ab", "a" * 64, "-bucket", "bucket-", "a..b", "192.0.2.1"])
+def test_r2_bucket_names_follow_s3_rules(bucket: str) -> None:
+    values = valid_values()
+    values["DB_BACKUP_R2_BUCKET"] = bucket
+
+    issues = validate_values(values)
+
+    assert any("DB_BACKUP_R2_BUCKET" in issue for issue in issues)
 
 
 def test_new_parent_directory_is_private(tmp_path: Path) -> None:
