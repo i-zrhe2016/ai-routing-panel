@@ -16,6 +16,8 @@ import json
 import os
 import re
 import shlex
+import shutil
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -114,7 +116,7 @@ DEFAULT_DATAPLANE_DEPLOY_ROOT = "/root/xray-routing-panel"
 DEFAULT_AI_CONFIG_PATH = "/etc/xray/config.json"
 DEFAULT_AI_ENV_PATH = "/etc/xray/.env"
 DEFAULT_AI_DEPLOY_ROOT = "/root/xray-routing-panel"
-DEFAULT_NORMAL_TARGET = "root@100.116.187.106"
+DEFAULT_NORMAL_TARGET = ""
 DEFAULT_AI_TARGET = ""
 DEFAULT_AI_SSH_PORT = "22"
 DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -128,10 +130,57 @@ DEFAULT_NORMAL_REMOTE_PATHS = (
     "/root/xray-routing-panel/app/xray/reports/hourly-domains/latest.json",
 )
 DEFAULT_AI_REMOTE_PATHS = (DEFAULT_AI_CONFIG_PATH, DEFAULT_AI_ENV_PATH)
+DEFAULT_TAILSCALE_SOCKET = "/var/run/tailscale/tailscaled.sock"
+DEFAULT_TAILSCALE_BIN = "tailscale"
+SUPPORTED_SSH_TRANSPORTS = {"openssh", "tailscale"}
 
 
 def env_enabled(name: str, default: str = "0") -> bool:
     return str(os.environ.get(name, default)).strip().lower() in TRUE_VALUES
+
+
+def ssh_transport() -> str:
+    transport = str(os.environ.get("DB_BACKUP_SSH_TRANSPORT", "openssh")).strip().lower()
+    if transport not in SUPPORTED_SSH_TRANSPORTS:
+        raise ValueError(f"unsupported backup SSH transport: {transport}")
+    return transport
+
+
+def _split_targets(value: str) -> tuple[str, ...]:
+    targets = []
+    for raw in re.split(r"[,\n]+", str(value or "")):
+        target = raw.strip()
+        if not target or "<" in target or ">" in target:
+            continue
+        targets.append(target)
+    return tuple(targets)
+
+
+def _configured_target(*names: str) -> str:
+    for name in names:
+        targets = _split_targets(os.environ.get(name, ""))
+        if targets:
+            return targets[0]
+    return ""
+
+
+def _tailscale_executable() -> str:
+    configured = str(
+        os.environ.get("DB_BACKUP_TAILSCALE_BIN", DEFAULT_TAILSCALE_BIN)
+    ).strip() or DEFAULT_TAILSCALE_BIN
+    resolved = configured if "/" in configured else shutil.which(configured)
+    if not resolved or not os.access(resolved, os.X_OK):
+        raise RuntimeError("Tailscale SSH CLI is unavailable in the backup container")
+    return resolved
+
+
+def _tailscale_socket() -> str:
+    socket_path = str(
+        os.environ.get("DB_BACKUP_TAILSCALE_SOCKET", DEFAULT_TAILSCALE_SOCKET)
+    ).strip() or DEFAULT_TAILSCALE_SOCKET
+    if not stat.S_ISSOCK(os.stat(socket_path).st_mode):
+        raise RuntimeError("Tailscale daemon socket is unavailable in the backup container")
+    return socket_path
 
 
 def parse_non_negative_int(value: str, default: int) -> int:
@@ -193,12 +242,12 @@ def validate_options(options: tuple[str, ...]) -> None:
     }
     index = 0
     while index < len(options):
-        token = options[index]
-        if token in allowed_flags:
+        option_value = options[index]
+        if option_value in allowed_flags:
             index += 1
             continue
-        if token != "-o" or index + 1 >= len(options):
-            raise ValueError(f"unsupported remote backup SSH option: {token}")
+        if option_value != "-o" or index + 1 >= len(options):
+            raise ValueError(f"unsupported remote backup SSH option: {option_value}")
         key = options[index + 1].split("=", 1)[0].strip().lower()
         if key in dangerous_keys or key not in allowed_keys:
             raise ValueError(f"unsupported remote backup SSH option: {options[index + 1]}")
@@ -267,18 +316,15 @@ class RemoteNode:
 
 
 def build_nodes() -> tuple[RemoteNode, ...]:
-    normal_target = str(
-        os.environ.get(
-            "DB_BACKUP_DATAPLANE_SSH_TARGET",
-            os.environ.get("DATAPLANE_SSH_TARGET", DEFAULT_NORMAL_TARGET),
-        )
-    ).strip()
-    ai_target = str(
-        os.environ.get(
-            "DB_BACKUP_AI_NODE_SSH_TARGET",
-            os.environ.get("AI_NODE_SSH_TARGET", DEFAULT_AI_TARGET),
-        )
-    ).strip()
+    normal_target = (
+        _configured_target("DB_BACKUP_DATAPLANE_SSH_TARGET", "DATAPLANE_SSH_TARGET")
+        or DEFAULT_NORMAL_TARGET
+    )
+    ai_target = _configured_target(
+        "DB_BACKUP_AI_NODE_SSH_TARGET",
+        "AI_NODE_SSH_TARGET",
+        "AI_NODE_SSH_TARGETS",
+    )
     normal_config = str(
         os.environ.get("DB_BACKUP_DATAPLANE_CONFIG_PATH", os.environ.get("DATAPLANE_CONFIG_PATH", ""))
     ).strip()
@@ -365,34 +411,6 @@ def build_nodes() -> tuple[RemoteNode, ...]:
 
 
 def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
-    validate_options(node.options)
-    options = (
-        *node.options,
-        "-o",
-        "BatchMode=no",
-        "-o",
-        "PubkeyAuthentication=no",
-        "-o",
-        "PreferredAuthentications=password,keyboard-interactive",
-        "-o",
-        "PasswordAuthentication=yes",
-        "-o",
-        "KbdInteractiveAuthentication=yes",
-        "-o",
-        "ChallengeResponseAuthentication=yes",
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        f"UserKnownHostsFile={node.known_hosts}",
-        "-o",
-        f"ConnectTimeout={max(1, timeout)}",
-        "-o",
-        "ServerAliveInterval=5",
-        "-o",
-        "ServerAliveCountMax=1",
-        "-p",
-        node.ssh_port,
-    )
     remote_command = " ".join(
         shlex.quote(value)
         for value in (
@@ -405,15 +423,65 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
             *node.paths,
         )
     )
+    transport = ssh_transport()
+    if transport == "tailscale":
+        if node.options:
+            raise ValueError("SSH options are not supported with Tailscale SSH transport")
+        command = [
+            _tailscale_executable(),
+            "--socket",
+            _tailscale_socket(),
+            "ssh",
+            node.target,
+            remote_command,
+        ]
+    else:
+        validate_options(node.options)
+        options = (
+            *node.options,
+            "-o",
+            "BatchMode=no",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-o",
+            "PasswordAuthentication=yes",
+            "-o",
+            "KbdInteractiveAuthentication=yes",
+            "-o",
+            "ChallengeResponseAuthentication=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={node.known_hosts}",
+            "-o",
+            f"ConnectTimeout={max(1, timeout)}",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=1",
+            "-p",
+            node.ssh_port,
+        )
+        command = [
+            os.environ.get("DB_BACKUP_SSH_BIN", "ssh"),
+            *options,
+            node.target,
+            remote_command,
+        ]
     try:
         completed = subprocess.run(
-            [os.environ.get("DB_BACKUP_SSH_BIN", "ssh"), *options, node.target, remote_command],
+            command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             text=True,
             timeout=max(1, timeout + 5),
             check=False,
         )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"{transport} SSH executable is unavailable") from exc
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"SSH timeout for {node.role}") from exc
     if completed.returncode != 0:

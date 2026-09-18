@@ -99,7 +99,7 @@ def bundle_enabled():
 
 
 def collect_remote_backup(staging_dir):
-    required = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "0")
+    required = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "1")
     # Keep the node collector's dedicated empty staging directory separate
     # from optional snapshots (for example ops.db) written by this cycle.
     node_staging_dir = Path(staging_dir) / "nodes"
@@ -198,7 +198,7 @@ def enforce_recovery_readiness(bundle_path):
             f"ready={str(node['recoveryReady']).lower()} missing={missing}",
             flush=True,
         )
-    if env_enabled("DB_BACKUP_RECOVERY_REQUIRED", "0") and not readiness["recoveryReady"]:
+    if env_enabled("DB_BACKUP_RECOVERY_REQUIRED", "1") and not readiness["recoveryReady"]:
         raise RuntimeError("node recovery artifacts are incomplete; see node-recovery-status.json")
     return validated
 

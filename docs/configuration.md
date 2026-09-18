@@ -37,7 +37,7 @@
 | `AI_DOMAIN_MANAGER_MANUAL_LOCK_PATH` | 常驻任务与面板手动切换共享的互斥锁路径；默认与 `XRAY_CONFIG_OUT` 同目录的 `.ai-domain-manager-manual.lock` |
 | `AI_DOMAIN_MANAGER_EXECUTION_MODE` | 面板触发管理器的方式：`docker`（默认）或同一运行环境内 `local` |
 | `DATAPLANE_PROBE_HOST` | TCP 探针连接目标；远端模式下应指向远端入口 IP 或域名 |
-| `DB_BACKUP_RECOVERY_REQUIRED` | 节点恢复材料不完整时是否阻止灾备归档继续上传；默认 `0`，完整性状态仍会写入报告 |
+| `DB_BACKUP_RECOVERY_REQUIRED` | 节点恢复材料不完整时是否阻止灾备归档继续上传；默认 `1`，计划维护时才显式设为 `0` |
 | `DB_BACKUP_RECOVERY_STATUS_PATH` | 最近一次节点恢复完整性报告路径 |
 
 AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链接包含 REALITY SNI，管理器会执行 REALITY 握手；否则回退到 TCP 探测。可通过 `AI_UPSTREAM_PROBE_SERVER_NAME` 为模板显式指定 SNI。

@@ -16,7 +16,7 @@
 | 普通数据面 | 远端实际 `config.json`、远端 `.env` | `panel-ports.json`、`dynamic-routing.json`、客户端测试产物、最新 AI 报告 |
 | AI 数据面 | 远端模式：远端 `config.json` + `.env`；本机 Docker 模式：控制面 `config-ai-node.json` + `.env` | — |
 
-普通数据面默认通过内网直连的严格只读 SSH 采集，AI 节点有远端目标时同样采集；本机 Docker AI 节点直接读取控制面运行时目录。SSH 登录私钥、known_hosts、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
+普通数据面默认通过宿主机 Tailscale SSH 严格只读采集，AI 节点有远端目标时同样采集；本机 Docker AI 节点直接读取控制面运行时目录。Tailscale 身份、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
 
 默认远端路径如下；部署目录不同时必须显式设置 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`：
 
@@ -41,13 +41,13 @@
 
 备份任务完成后会在本地写出 `node-recovery-status.json`。`recoveryReady=true` 的含义是：共享 `panel.db` 存在，且当前已配置节点的必需配置和 `.env` 都已采集并通过哈希校验。
 
-节点暂时失联时，默认仍保留控制面数据库备份，但状态会明确显示该版本不能作为完整节点恢复包。可用最近一个 `recoveryReady=true` 的归档恢复；需要把完整性作为备份门禁时设置：
+节点暂时失联时，默认阻止该不完整归档继续上传，但状态会明确显示缺失原因；可用最近一个 `recoveryReady=true` 的归档恢复。若计划中的节点维护需要保留控制面-only 归档，可显式关闭门禁：
 
 ```dotenv
-DB_BACKUP_RECOVERY_REQUIRED=1
+DB_BACKUP_RECOVERY_REQUIRED=0
 ```
 
-这会在生成归档并校验后阻止该不完整版本继续上传。节点失联时不要删除此前完整归档。
+默认值为 `1`，会在生成归档并校验后阻止该不完整版本继续上传；仅在明确接受不完整归档时设置为 `0`。节点失联时不要删除此前完整归档。
 
 ## 校验归档
 
