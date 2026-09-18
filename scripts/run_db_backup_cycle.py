@@ -208,11 +208,31 @@ def enforce_recovery_readiness(bundle_path):
         node.get("source") == "remote-ssh" and not node.get("recoveryReady", False)
         for node in validated["nodeManifest"].get("nodes", [])
     )
+    collection = validated.get("remoteCollection")
+    collection_manifest_incomplete = any(
+        _remote_collection_node_incomplete(node)
+        for node in (collection or {}).get("nodes", [])
+        if isinstance(node, dict)
+    )
+    remote_collection_incomplete = remote_collection_incomplete or collection_manifest_incomplete
     if collection_gate_enabled and remote_collection_incomplete:
+        raise RuntimeError("required remote node collection is incomplete; see node-recovery-status.json")
+    if collection_gate_enabled and (
+        not env_enabled("DB_BACKUP_SSH_COLLECTION_ENABLED", "0") or collection is None
+    ):
         raise RuntimeError("required remote node collection is incomplete; see node-recovery-status.json")
     if recovery_gate_enabled and (not readiness["recoveryReady"] or remote_collection_incomplete):
         raise RuntimeError("node recovery artifacts are incomplete; see node-recovery-status.json")
     return validated
+
+
+def _remote_collection_node_incomplete(node):
+    status = str(node.get("status", ""))
+    if status in {"failed", "partial"}:
+        return True
+    if status == "skipped_no_target":
+        return str(node.get("role", "")) == "normal-data-plane"
+    return bool(str(node.get("target", "")).strip()) and not node.get("recoveryReady", False)
 
 
 def main():

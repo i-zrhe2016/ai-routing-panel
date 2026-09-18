@@ -534,10 +534,22 @@ def validate_backup_bundle(bundle_path: str | Path) -> dict:
         if NODE_RECOVERY_MANIFEST_NAME not in file_index:
             raise ValueError("backup manifest does not cover node-recovery-manifest.json")
         _validate_node_artifacts(node_manifest, file_index)
+        remote_collection = None
+        if "nodes/remote-node-collection.json" in members:
+            remote_collection = _read_json_member(
+                archive, members, "nodes/remote-node-collection.json"
+            )
+            if (
+                remote_collection.get("version") != 1
+                or remote_collection.get("purpose") != "remote-node-config-collection"
+                or not isinstance(remote_collection.get("nodes"), list)
+            ):
+                raise ValueError("unsupported or malformed remote-node-collection.json")
         return {
             "bundle": bundle.resolve(),
             "backupManifest": backup_manifest,
             "nodeManifest": node_manifest,
+            "remoteCollection": remote_collection,
             "readiness": readiness_summary(node_manifest),
         }
 
