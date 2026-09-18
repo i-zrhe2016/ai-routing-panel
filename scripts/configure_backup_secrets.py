@@ -154,6 +154,22 @@ def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
     return lines, _parse_env_lines(lines)
 
 
+def validate_env_file_security(path: str | Path) -> list[str]:
+    """检查现有 dotenv 的属主和权限，不读取或返回文件内容。"""
+
+    target = Path(path).expanduser()
+    if not target.exists():
+        return []
+    file_stat = target.stat()
+    issues: list[str] = []
+    effective_uid = os.geteuid() if hasattr(os, "geteuid") else file_stat.st_uid
+    if file_stat.st_uid not in {0, effective_uid}:
+        issues.append("配置文件属主不受信任")
+    if stat.S_IMODE(file_stat.st_mode) & 0o077:
+        issues.append("配置文件权限必须禁止 group/other 访问（建议 0600）")
+    return issues
+
+
 def _quote_env_value(value: str) -> str:
     text = str(value)
     if "\n" in text or "\r" in text:
@@ -169,6 +185,7 @@ def _open_trusted_directory(parent: Path) -> int:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     directory_fd = os.open(os.sep, flags)
     try:
+        _verify_directory_fd(directory_fd)
         for component in absolute_parent.parts[1:]:
             if component in {"", "."}:
                 continue
@@ -185,12 +202,24 @@ def _open_trusted_directory(parent: Path) -> int:
                 raise
             if created:
                 os.fchmod(next_fd, 0o700)
+            _verify_directory_fd(next_fd)
             os.close(directory_fd)
             directory_fd = next_fd
         return directory_fd
     except Exception:
         os.close(directory_fd)
         raise
+
+
+def _verify_directory_fd(directory_fd: int) -> None:
+    directory_stat = os.fstat(directory_fd)
+    if not stat.S_ISDIR(directory_stat.st_mode):
+        raise ValueError("配置路径父级不是目录")
+    if directory_stat.st_uid not in {0, os.geteuid()}:
+        raise ValueError("配置路径父目录属主不受信任")
+    mode = stat.S_IMODE(directory_stat.st_mode)
+    if mode & 0o022 and not mode & stat.S_ISVTX:
+        raise ValueError("配置路径父目录可被其他用户写入")
 
 
 def _open_existing_file(directory_fd: int, name: str) -> int | None:
@@ -562,7 +591,7 @@ def main() -> int:
         if args.check:
             print(f"检查文件: {target}")
             _print_status(values)
-            issues = validate_values(values)
+            issues = [*validate_env_file_security(target), *validate_values(values)]
             if issues:
                 print("检查失败：")
                 for issue in issues:

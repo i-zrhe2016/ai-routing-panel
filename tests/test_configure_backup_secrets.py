@@ -224,6 +224,7 @@ def test_check_command_reports_status_only(tmp_path: Path) -> None:
         f'DB_BACKUP_ENCRYPTION_PASSWORD="{values["DB_BACKUP_ENCRYPTION_PASSWORD"]}"\n',
         encoding="utf-8",
     )
+    env_file.chmod(0o600)
 
     completed = subprocess.run(
         [sys.executable, str(SCRIPT), "--env-file", str(env_file), "--check"],
@@ -249,6 +250,25 @@ def test_check_command_reports_status_only(tmp_path: Path) -> None:
         assert values[key][2:10] not in completed.stderr
         assert values[key][-8:] not in completed.stdout
         assert values[key][-8:] not in completed.stderr
+
+
+@posix_only
+def test_check_rejects_insecure_env_file_permissions(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    values = valid_values()
+    env_file.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+    env_file.chmod(0o640)
+
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--env-file", str(env_file), "--check"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "权限" in completed.stdout
 
 
 @posix_only
