@@ -144,8 +144,15 @@ def test_check_command_reports_status_only(tmp_path: Path) -> None:
     )
 
     assert completed.returncode == 0
-    assert secret_marker not in completed.stdout
-    assert secret_marker not in completed.stderr
+    for key in (
+        "DB_BACKUP_R2_ENDPOINT",
+        "DB_BACKUP_R2_BUCKET",
+        "DB_BACKUP_R2_ACCESS_KEY_ID",
+        "DB_BACKUP_R2_SECRET_ACCESS_KEY",
+        "DB_BACKUP_ENCRYPTION_PASSWORD",
+    ):
+        assert values[key] not in completed.stdout
+        assert values[key] not in completed.stderr
 
 
 def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> None:
@@ -206,12 +213,16 @@ def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> N
     assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == "access#id\\suffix"
     assert parsed["DB_BACKUP_R2_SECRET_ACCESS_KEY"] == "secret#value\\suffix"
 
+    temp.write_text("DB_BACKUP_R2_ACCESS_KEY_ID='ends-with-backslash\\'\n", encoding="utf-8")
+    _, parsed = read_env_file(temp)
+    assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == "ends-with-backslash\\"
+
     values = {
         "DB_BACKUP_R2_ENABLED": "1",
         "DB_BACKUP_R2_ENDPOINT": "https://r2.example.invalid",
         "DB_BACKUP_R2_BUCKET": "backup-bucket",
-        "DB_BACKUP_R2_ACCESS_KEY_ID": "access#id\\suffix",
-        "DB_BACKUP_R2_SECRET_ACCESS_KEY": "secret#value\\suffix",
+        "DB_BACKUP_R2_ACCESS_KEY_ID": 'access"quote$piece',
+        "DB_BACKUP_R2_SECRET_ACCESS_KEY": "secret$piece\\suffix",
         "DB_BACKUP_ENCRYPTION_PASSWORD": "p" * MIN_ENCRYPTION_PASSWORD_LENGTH,
     }
 
@@ -220,3 +231,30 @@ def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> N
     _, parsed = read_env_file(temp)
     assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == values["DB_BACKUP_R2_ACCESS_KEY_ID"]
     assert parsed["DB_BACKUP_R2_SECRET_ACCESS_KEY"] == values["DB_BACKUP_R2_SECRET_ACCESS_KEY"]
+
+    with pytest.raises(ValueError, match="换行"):
+        _render_env([], {"DB_BACKUP_R2_SECRET_ACCESS_KEY": "line\nbreak"})
+
+
+def test_variable_references_are_rejected_in_managed_values() -> None:
+    values = valid_values()
+    values["DB_BACKUP_ENCRYPTION_PASSWORD"] = "${ARCHIVE_PASSWORD}"
+
+    issues = validate_values(values)
+
+    assert any("DB_BACKUP_ENCRYPTION_PASSWORD" in issue for issue in issues)
+
+
+def test_new_parent_directory_is_private(tmp_path: Path) -> None:
+    env_file = tmp_path / "private" / "nested" / ".env"
+
+    write_env_file(
+        env_file,
+        {
+            "DB_BACKUP_R2_ENABLED": "0",
+            "DB_BACKUP_ENCRYPTION_PASSWORD": "p" * MIN_ENCRYPTION_PASSWORD_LENGTH,
+        },
+    )
+
+    assert stat.S_IMODE(env_file.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(env_file.parent.parent.stat().st_mode) == 0o700

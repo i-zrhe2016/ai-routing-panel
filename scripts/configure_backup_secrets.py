@@ -21,6 +21,7 @@ R2_KEYS = (
     "DB_BACKUP_R2_SECRET_ACCESS_KEY",
 )
 STATUS_KEYS = ("DB_BACKUP_R2_ENABLED", "DB_BACKUP_BUNDLE_ENABLED", "DB_BACKUP_ENCRYPTION_PASSWORD", *R2_KEYS)
+INTERPOLATION_PATTERN = re.compile(r"\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)")
 ENV_ASSIGNMENT = re.compile(
     r"^(?P<indent>\s*)(?:(?P<export>export)\s+)?"
     r"(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*="
@@ -32,7 +33,7 @@ def _quoted_end(value: str, quote: str) -> int:
     for index, character in enumerate(value[1:], start=1):
         if escaped:
             escaped = False
-        elif character == "\\":
+        elif quote == '"' and character == "\\":
             escaped = True
         elif character == quote:
             return index
@@ -151,6 +152,20 @@ def _preserve_file_metadata(source: Path, destination: Path) -> None:
             setxattr(destination, name, value, follow_symlinks=False)
 
 
+def _ensure_private_parent(parent: Path) -> None:
+    missing: list[Path] = []
+    current = parent
+    while not current.exists():
+        missing.append(current)
+        next_parent = current.parent
+        if next_parent == current:
+            break
+        current = next_parent
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for directory in missing:
+        os.chmod(directory, 0o700)
+
+
 def _render_env(lines: list[str], updates: dict[str, str]) -> str:
     rendered: list[str] = []
     replaced: set[str] = set()
@@ -199,7 +214,7 @@ def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
         raise ValueError(f"配置文件不能是符号链接: {target}")
     if target.exists() and not target.is_file():
         raise ValueError(f"配置路径不是普通文件: {target}")
-    target.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_private_parent(target.parent)
     lines, _ = read_env_file(target)
     content = _render_env(lines, updates)
 
@@ -260,6 +275,9 @@ def validate_values(values: dict[str, str]) -> list[str]:
     """返回不含配置值的中文诊断。"""
 
     issues: list[str] = []
+    for key in ("DB_BACKUP_ENCRYPTION_PASSWORD", *R2_KEYS):
+        if INTERPOLATION_PATTERN.search(values.get(key, "")):
+            issues.append(f"{key} 不能使用 dotenv 变量引用，请提供实际值")
     for key in ("DB_BACKUP_R2_ENABLED", "DB_BACKUP_BUNDLE_ENABLED"):
         raw = values.get(key, "").strip().lower()
         if raw and raw not in {"0", "1", "true", "false", "yes", "no", "on", "off"}:
@@ -274,7 +292,7 @@ def validate_values(values: dict[str, str]) -> list[str]:
         issues.append(
             f"DB_BACKUP_ENCRYPTION_PASSWORD 至少需要 {MIN_ENCRYPTION_PASSWORD_LENGTH} 个字符"
         )
-    if "\n" in encryption_password or "\r" in encryption_password:
+    if any(ord(character) < 32 or ord(character) == 127 for character in encryption_password):
         issues.append("DB_BACKUP_ENCRYPTION_PASSWORD 不能包含换行")
 
     if not r2_enabled:
@@ -283,9 +301,19 @@ def validate_values(values: dict[str, str]) -> list[str]:
     for key in R2_KEYS:
         if not values.get(key, "").strip():
             issues.append(f"缺少 {key}")
+    for key in ("DB_BACKUP_R2_ACCESS_KEY_ID", "DB_BACKUP_R2_SECRET_ACCESS_KEY"):
+        value = values.get(key, "")
+        if any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value):
+            issues.append(f"{key} 不能包含空白或控制字符")
     endpoint = values.get("DB_BACKUP_R2_ENDPOINT", "").strip()
     bucket = values.get("DB_BACKUP_R2_BUCKET", "").strip()
-    if endpoint and bucket and not _valid_endpoint(endpoint, bucket):
+    if (
+        endpoint
+        and bucket
+        and not INTERPOLATION_PATTERN.search(endpoint)
+        and not INTERPOLATION_PATTERN.search(bucket)
+        and not _valid_endpoint(endpoint, bucket)
+    ):
         issues.append("DB_BACKUP_R2_ENDPOINT 必须是 HTTPS 基础地址，不能带 query 或 fragment")
     if bucket and (any(char.isspace() for char in bucket) or "/" in bucket):
         issues.append("DB_BACKUP_R2_BUCKET 不能包含空白或斜杠")
