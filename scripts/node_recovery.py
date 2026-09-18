@@ -32,7 +32,10 @@ RECOVERABLE_ROLES = ("normal-data-plane", "ai-data-plane")
 def is_recoverable_role(role: str) -> bool:
     if role in {"normal-data-plane", "ai-data-plane"}:
         return True
-    suffix = role.removeprefix("ai-data-plane-")
+    prefix = "ai-data-plane-"
+    if not role.startswith(prefix):
+        return False
+    suffix = role[len(prefix):]
     return bool(suffix) and re.fullmatch(r"[A-Za-z0-9._-]+", suffix) is not None
 
 

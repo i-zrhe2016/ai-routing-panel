@@ -206,6 +206,11 @@ class NodeRecoveryTest(unittest.TestCase):
             {"remote-ssh"},
         )
 
+    def test_recovery_role_validation_rejects_arbitrary_and_empty_ai_roles(self):
+        self.assertTrue(self.recovery.is_recoverable_role("ai-data-plane-hawaii"))
+        self.assertFalse(self.recovery.is_recoverable_role("evil-node"))
+        self.assertFalse(self.recovery.is_recoverable_role("ai-data-plane-"))
+
     def test_prepare_node_creates_ready_standalone_compose_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

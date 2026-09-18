@@ -190,12 +190,13 @@ services:
       - /srv/xray-ops:/ops-data:ro
       - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
-      # Set the *_HOST values when Tailscale SSH is enabled. /dev/null keeps
-      # OpenSSH/local-only compatibility starts independent of host Tailscale.
+      # Set the *_HOST values when Tailscale SSH is enabled. The regular
+      # placeholder keeps OpenSSH/local-only compatibility starts independent
+      # of host Tailscale.
       # The socket bind is read-only, but Tailscale LocalAPI access remains a
       # host-identity trust boundary for this root-owned backup service.
-      - ${DB_BACKUP_TAILSCALE_BIN_HOST:-/dev/null}:/usr/local/bin/tailscale:ro
-      - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-/dev/null}:/var/run/tailscale/tailscaled.sock:ro
+      - ${DB_BACKUP_TAILSCALE_BIN_HOST:-./scripts/tailscale-disabled}:/usr/local/bin/tailscale:ro
+      - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-./scripts/tailscale-disabled}:/var/run/tailscale/tailscaled.sock:ro
       - ./logs:/var/log
   xray-reality:
     profiles: ["xray"]

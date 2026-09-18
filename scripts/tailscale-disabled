@@ -1,0 +1,3 @@
+This placeholder is mounted only when the host-side Tailscale paths are not configured.
+Set DB_BACKUP_TAILSCALE_BIN_HOST and DB_BACKUP_TAILSCALE_SOCKET_HOST to the real
+host paths before enabling Tailscale SSH collection.

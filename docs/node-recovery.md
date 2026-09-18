@@ -141,7 +141,7 @@ docker compose -f docker-compose.node.yml ps
 恢复完成后按顺序执行：
 
 1. 用 `docker compose -f docker-compose.node.yml logs` 和 Xray 配置测试确认服务健康。
-2. 将新主机加入内网，确认 SSH 密码/键盘交互认证可用，并人工核对后更新 known_hosts。
+2. 将新主机加入 Tailscale，确认 Tailscale SSH/ACL 允许控制面身份以目标用户登录，并确认目标主机的 SSH 服务已启用。
 3. 在控制面更新对应的 `DATAPLANE_SSH_TARGET` 或 `AI_NODE_SSH_TARGET`、远端配置路径和探测地址；AI 节点还要确认公网地址/端口与 `AI_UPSTREAM_*` 一致。
 4. 先做配置同步/探针/业务连接验证，再切换 DNS 或恢复流量。
 
