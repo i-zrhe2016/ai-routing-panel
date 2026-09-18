@@ -237,19 +237,19 @@ class RestoreBackupTest(unittest.TestCase):
             self.assertEqual(list(root.glob(".restore.restore-*")), [])
 
     def test_archive_path_safety_rejects_traversal_and_links(self):
-        cases = (
-            ("parent", tarfile.TarInfo("../outside.txt")),
-            ("absolute", tarfile.TarInfo("/outside.txt")),
-            ("symlink", tarfile.TarInfo("unsafe-link")),
-            ("hardlink", tarfile.TarInfo("unsafe-hardlink")),
-        )
-        cases[2][1].type = tarfile.SYMTYPE
-        cases[2][1].linkname = "/outside.txt"
-        cases[3][1].type = tarfile.LNKTYPE
-        cases[3][1].linkname = "backup-manifest.json"
-
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
+            absolute_target = root / "outside.txt"
+            cases = (
+                ("parent", tarfile.TarInfo("../outside.txt")),
+                ("absolute", tarfile.TarInfo(str(absolute_target))),
+                ("symlink", tarfile.TarInfo("unsafe-link")),
+                ("hardlink", tarfile.TarInfo("unsafe-hardlink")),
+            )
+            cases[2][1].type = tarfile.SYMTYPE
+            cases[2][1].linkname = str(absolute_target)
+            cases[3][1].type = tarfile.LNKTYPE
+            cases[3][1].linkname = "backup-manifest.json"
             bundle = self._create_bundle(root)
             for label, member in cases:
                 with self.subTest(label=label):
@@ -260,7 +260,7 @@ class RestoreBackupTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "unsafe|links"):
                         self.restore.prepare_restore(malicious, output)
                     self.assertFalse(output.exists())
-                    self.assertFalse((root / "outside.txt").exists())
+                    self.assertFalse(absolute_target.exists())
 
     def test_cli_validate_prepare_and_require_ready_exit_code(self):
         script = ROOT / "scripts" / "restore_backup.py"
@@ -296,6 +296,12 @@ class RestoreBackupTest(unittest.TestCase):
             self.assertTrue((ready_output / "restore-report.json").is_file())
 
             incomplete_bundle = self._create_bundle(root / "incomplete", include_ai_config=False)
+            incomplete_summary = self.restore.validate_restore_bundle(incomplete_bundle)
+            ai_node = next(
+                node for node in incomplete_summary["nodes"] if node["role"] == "ai-data-plane"
+            )
+            self.assertTrue(ai_node["configured"])
+            self.assertFalse(ai_node["recoveryReady"])
             require_ready = subprocess.run(
                 [
                     sys.executable,

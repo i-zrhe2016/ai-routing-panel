@@ -505,8 +505,8 @@ def _merge_staging(staging: Path, output: Path) -> None:
             for directory in reversed(missing_directories):
                 os.chmod(directory, 0o700)
                 created_directories.append(directory)
-            os.replace(staged_file, target)
             applied.append((target, backup))
+            os.replace(staged_file, target)
             os.chmod(target, 0o600)
         os.chmod(output, 0o700)
     except Exception:
