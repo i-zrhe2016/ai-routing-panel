@@ -54,7 +54,8 @@ def test_validation_lists_missing_names_without_exposing_values() -> None:
 def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "# 不相关配置\nAPP_ENV=production\nDB_BACKUP_R2_ENABLED=0 # 保持此说明\n",
+        "# 不相关配置\nAPP_ENV=production\nOTHER_SETTING=${SHARED_VALUE}\n"
+        "DB_BACKUP_R2_ENABLED=0 # 保持此说明\n",
         encoding="utf-8",
     )
     original_stat = env_file.stat()
@@ -65,6 +66,7 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
     lines, parsed = read_env_file(env_file)
 
     assert "# 不相关配置\n" in lines
+    assert parsed["OTHER_SETTING"] == "${SHARED_VALUE}"
     assert "DB_BACKUP_R2_ENABLED=\"1\" # 保持此说明\n" in lines
     assert {key: parsed[key] for key in values} == values
     assert parsed["APP_ENV"] == "production"
@@ -219,6 +221,10 @@ def test_check_command_reports_status_only(tmp_path: Path) -> None:
         assert values[key] not in completed.stderr
         assert values[key][:8] not in completed.stdout
         assert values[key][:8] not in completed.stderr
+        assert values[key][2:10] not in completed.stdout
+        assert values[key][2:10] not in completed.stderr
+        assert values[key][-8:] not in completed.stdout
+        assert values[key][-8:] not in completed.stderr
 
 
 def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> None:

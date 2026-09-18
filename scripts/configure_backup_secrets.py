@@ -20,7 +20,13 @@ R2_KEYS = (
     "DB_BACKUP_R2_ACCESS_KEY_ID",
     "DB_BACKUP_R2_SECRET_ACCESS_KEY",
 )
-STATUS_KEYS = ("DB_BACKUP_R2_ENABLED", "DB_BACKUP_BUNDLE_ENABLED", "DB_BACKUP_ENCRYPTION_PASSWORD", *R2_KEYS)
+MANAGED_KEYS = (
+    "DB_BACKUP_R2_ENABLED",
+    "DB_BACKUP_BUNDLE_ENABLED",
+    "DB_BACKUP_ENCRYPTION_PASSWORD",
+    *R2_KEYS,
+)
+STATUS_KEYS = MANAGED_KEYS
 UNESCAPED_INTERPOLATION_PATTERN = re.compile(
     r"(?<!\$)\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"
 )
@@ -85,7 +91,7 @@ def _inline_comment_start(value: str) -> int | None:
     return None
 
 
-def _parse_env_value(raw: str) -> str:
+def _parse_env_value(raw: str, reject_interpolation: bool = True) -> str:
     value = raw.strip()
     if not value:
         return ""
@@ -95,14 +101,14 @@ def _parse_env_value(raw: str) -> str:
         if trailing and not trailing.startswith("#"):
             raise ValueError("dotenv 引号值后存在无法解析的内容")
         quoted = value[1:end]
-        if value[0] == '"' and UNESCAPED_INTERPOLATION_PATTERN.search(quoted):
+        if value[0] == '"' and reject_interpolation and UNESCAPED_INTERPOLATION_PATTERN.search(quoted):
             raise ValueError("dotenv 值不能使用未转义的变量引用")
         return _decode_double_quoted(quoted) if value[0] == '"' else quoted
 
     comment_start = _inline_comment_start(value)
     if comment_start is not None:
         value = value[:comment_start].rstrip()
-    if UNESCAPED_INTERPOLATION_PATTERN.search(value):
+    if reject_interpolation and UNESCAPED_INTERPOLATION_PATTERN.search(value):
         raise ValueError("dotenv 值不能使用未转义的变量引用")
     return value
 
@@ -126,9 +132,14 @@ def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
     for line in lines:
         match = ENV_ASSIGNMENT.match(line.rstrip("\r\n"))
         if match:
-            values[match.group("key")] = _parse_env_value(
-                line.rstrip("\r\n")[match.end() :]
-            )
+            key = match.group("key")
+            raw_value = line.rstrip("\r\n")[match.end() :]
+            try:
+                values[key] = _parse_env_value(raw_value, reject_interpolation=key in MANAGED_KEYS)
+            except ValueError:
+                if key in MANAGED_KEYS:
+                    raise
+                values[key] = raw_value.strip()
     return lines, values
 
 
