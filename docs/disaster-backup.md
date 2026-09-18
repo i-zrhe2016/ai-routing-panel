@@ -77,7 +77,7 @@ node-recovery-manifest.json
 | `DB_BACKUP_BUNDLE_KEEP_DAYS` | `DB_BACKUP_KEEP_DAYS` | 本地灾备归档保留天数，`0` 表示不清理 |
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过远端 SSH 读取节点配置 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `1` | 所有已配置远端节点的必需恢复文件必须成功；设为 `0` 才允许记录失败并继续保留控制面归档 |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `1` | 所有已配置远端节点的必需恢复文件必须成功；设为 `0` 允许记录失败，但若要继续上传控制面归档还必须将 `DB_BACKUP_RECOVERY_REQUIRED` 设为 `0` |
 | `DB_BACKUP_SSH_TRANSPORT` | `tailscale`（Compose/采集器） | 远端采集传输；默认使用 `tailscale ssh`，兼容旧环境时可显式设为 `openssh` |
 | `DB_BACKUP_TAILSCALE_BIN` | `/usr/local/bin/tailscale` | 备份容器内映射的宿主机 Tailscale CLI |
 | `DB_BACKUP_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | 备份容器内映射的宿主机 Tailscale daemon socket |

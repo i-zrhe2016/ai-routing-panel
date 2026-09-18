@@ -329,9 +329,10 @@ def build_nodes() -> tuple[RemoteNode, ...]:
         or DEFAULT_NORMAL_TARGET
     )
     ai_targets = _configured_targets(
+        "DB_BACKUP_AI_NODE_SSH_TARGETS",
+        "AI_NODE_SSH_TARGETS",
         "DB_BACKUP_AI_NODE_SSH_TARGET",
         "AI_NODE_SSH_TARGET",
-        "AI_NODE_SSH_TARGETS",
     )
     normal_config = str(
         os.environ.get("DB_BACKUP_DATAPLANE_CONFIG_PATH", os.environ.get("DATAPLANE_CONFIG_PATH", ""))
@@ -638,7 +639,7 @@ def collect_nodes(
             payload = read_remote(node, timeout, max_bytes)
             node_result = write_collection(output_dir, node, payload)
             results.append(node_result)
-            if required and not node_result.get("recoveryReady", False):
+            if required and not node_result.get("recoveryReady", False) and raise_on_required:
                 raise RuntimeError(f"remote recovery artifacts are incomplete for {node.role}")
         except Exception as exc:
             results.append(

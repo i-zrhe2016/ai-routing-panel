@@ -303,11 +303,11 @@ class RemoteBackupTest(unittest.TestCase):
             ),
         )
 
-    def test_build_nodes_uses_plural_ai_target_when_singular_override_is_empty(self):
+    def test_build_nodes_prefers_plural_ai_targets_over_singular_aliases(self):
         original = os.environ.copy()
         try:
-            os.environ["DB_BACKUP_AI_NODE_SSH_TARGET"] = ""
-            os.environ["AI_NODE_SSH_TARGET"] = ""
+            os.environ["DB_BACKUP_AI_NODE_SSH_TARGET"] = "root@legacy-ai"
+            os.environ["AI_NODE_SSH_TARGET"] = "root@legacy-ai-2"
             os.environ["AI_NODE_SSH_TARGETS"] = "root@first-ai,root@second-ai"
             nodes = self.module.build_nodes()
         finally:

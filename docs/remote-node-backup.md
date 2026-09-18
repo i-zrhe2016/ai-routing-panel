@@ -37,7 +37,7 @@ node-recovery-manifest.json
 | 节点 | SSH 目标 | 主配置路径 | 配置环境文件 |
 | --- | --- | --- | --- |
 | 普通数据面 | `root@<normal-data-plane-host>` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
-| 远端 AI 节点 | `AI_NODE_SSH_TARGETS` 中的目标 | `/root/xray-routing-panel/app/xray/runtime/config.json`（可覆盖） | `.env` 及显式配置路径 |
+| 远端 AI 节点 | `AI_NODE_SSH_TARGETS` 中的目标 | `/etc/xray/config.json` | `/etc/xray/.env`；可用 `DB_BACKUP_AI_NODE_CONFIG_PATH` 或 `DB_BACKUP_AI_NODE_REMOTE_PATHS` 覆盖 |
 | 本机 AI 备用 | 本机 Docker `xray-ai-node` | `config/` 下的 `app/xray/runtime/config-ai-node.json` | `config/` 下的 `app/xray/.env` |
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
@@ -47,7 +47,8 @@ node-recovery-manifest.json
 ## 认证与主机校验
 
 - 默认传输是 `DB_BACKUP_SSH_TRANSPORT=tailscale`，采集器执行 `tailscale --socket /var/run/tailscale/tailscaled.sock ssh <target> <read-only-command>`。
-- Compose 将宿主机的 Tailscale CLI 映射为 `/usr/local/bin/tailscale`，并将 `/var/run/tailscale/tailscaled.sock` 映射到备份容器；身份、节点授权和主机校验由 Tailscale SSH/ACL 负责。
+- Compose 将宿主机的 Tailscale CLI 映射为 `/usr/local/bin/tailscale`，并以 `:ro` 方式映射 `/var/run/tailscale/tailscaled.sock`；身份、节点授权和主机校验由 Tailscale SSH/ACL 负责。
+- `:ro` 只保护容器内的 socket 路径不被替换，不能把 Tailscale LocalAPI 变成只读接口；该 root 备份容器因此属于受信任的主机管理工作负载，不应与不受信任的代码或用户可执行任务共用。
 - Tailscale 传输不读取 `known_hosts`、不使用 `-i`/`IdentityFile`，也不接受 OpenSSH options；远端命令固定为读取受限文件的 Python 脚本。
 - `DB_BACKUP_SSH_TRANSPORT=openssh` 仅用于受控兼容环境；此时才使用 `known_hosts`、严格主机校验和受限 OpenSSH options。
 - `AI_NODE_SSH_TARGETS` 中的多个目标会分别生成 `ai-data-plane-<node-id>` 恢复角色；`AI_NODE_IDS` 存在时用于角色后缀，否则按顺序编号。恢复时使用清单中的精确角色名。

@@ -104,7 +104,8 @@ data/uploads/                 # 业务附件
 .env                          # 控制面配置
 app/xray/                     # 控制面 Xray 配置和运行产物
 nodes/normal-data-plane/      # 普通数据面配置，独立目录
-nodes/ai-data-plane/          # AI 数据面配置，独立目录
+nodes/ai-data-plane/          # 单个兼容旧配置的 AI 数据面
+nodes/ai-data-plane-<node-id>/ # 多个远端 AI 节点按 node-id 分目录
 recovery/                     # 两层 manifest
 restore-report.json           # 非敏感恢复结果和完整性状态
 ```
@@ -135,7 +136,7 @@ docker compose -f docker-compose.node.yml up -d
 docker compose -f docker-compose.node.yml ps
 ```
 
-恢复 AI 数据面使用 `--node ai-data-plane` 和一个新的空目录。`prepare` 会生成标准目录、权限为 `0600` 的配置/`.env`、独立的 `docker-compose.node.yml` 和 `node-recovery.json`；默认拒绝向非空目录写入。只有明确确认目标内容后才使用 `--force`。
+恢复 AI 数据面使用清单中对应的 `--node` 值（单节点通常是 `ai-data-plane`，多节点是 `ai-data-plane-<node-id>`）和一个新的空目录。`prepare` 会生成标准目录、权限为 `0600` 的配置/`.env`、独立的 `docker-compose.node.yml` 和 `node-recovery.json`；默认拒绝向非空目录写入。只有明确确认目标内容后才使用 `--force`。
 
 恢复完成后按顺序执行：
 

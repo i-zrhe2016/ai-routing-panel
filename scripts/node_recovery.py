@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tarfile
 from datetime import datetime, timezone
@@ -29,7 +30,10 @@ RECOVERABLE_ROLES = ("normal-data-plane", "ai-data-plane")
 
 
 def is_recoverable_role(role: str) -> bool:
-    return role == "normal-data-plane" or role == "ai-data-plane" or role.startswith("ai-data-plane-")
+    if role in {"normal-data-plane", "ai-data-plane"}:
+        return True
+    suffix = role.removeprefix("ai-data-plane-")
+    return bool(suffix) and re.fullmatch(r"[A-Za-z0-9._-]+", suffix) is not None
 
 
 def _now() -> str:
@@ -344,6 +348,7 @@ def build_node_recovery_manifest(
         for role, item in remote_nodes.items()
         if role == "ai-data-plane" or role.startswith("ai-data-plane-")
         if str(item.get("target", "")).strip()
+        or str(item.get("status", "")) not in {"", "skipped_no_target"}
     ]
     ai_nodes = [
         _remote_node_manifest(str(item["role"]), item, indexed)

@@ -168,6 +168,7 @@ services:
       DB_BACKUP_DATAPLANE_REMOTE_PATHS: "${DB_BACKUP_DATAPLANE_REMOTE_PATHS:-/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json,/root/xray-routing-panel/app/xray/runtime/client-test.json,/root/xray-routing-panel/app/xray/runtime/client-share.txt,/root/xray-routing-panel/app/xray/reports/hourly-domains/latest.json}"
       DB_BACKUP_DATAPLANE_DEPLOY_ROOT: "${DB_BACKUP_DATAPLANE_DEPLOY_ROOT:-/root/xray-routing-panel}"
       DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET-}"
+      DB_BACKUP_AI_NODE_SSH_TARGETS: "${DB_BACKUP_AI_NODE_SSH_TARGETS:-}"
       AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
       AI_NODE_SSH_TARGETS: "${AI_NODE_SSH_TARGETS:-}"
       AI_NODE_IDS: "${AI_NODE_IDS:-}"
@@ -191,8 +192,10 @@ services:
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       # Set the *_HOST values when Tailscale SSH is enabled. /dev/null keeps
       # OpenSSH/local-only compatibility starts independent of host Tailscale.
+      # The socket bind is read-only, but Tailscale LocalAPI access remains a
+      # host-identity trust boundary for this root-owned backup service.
       - ${DB_BACKUP_TAILSCALE_BIN_HOST:-/dev/null}:/usr/local/bin/tailscale:ro
-      - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-/dev/null}:/var/run/tailscale/tailscaled.sock
+      - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-/dev/null}:/var/run/tailscale/tailscaled.sock:ro
       - ./logs:/var/log
   xray-reality:
     profiles: ["xray"]
