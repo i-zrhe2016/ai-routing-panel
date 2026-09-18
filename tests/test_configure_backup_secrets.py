@@ -52,7 +52,7 @@ def test_validation_lists_missing_names_without_exposing_values() -> None:
 def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "# 不相关配置\nAPP_ENV=production\nDB_BACKUP_R2_ENABLED=0\n",
+        "# 不相关配置\nAPP_ENV=production\nDB_BACKUP_R2_ENABLED=0 # 保持此说明\n",
         encoding="utf-8",
     )
     original_stat = env_file.stat()
@@ -63,6 +63,7 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
     lines, parsed = read_env_file(env_file)
 
     assert "# 不相关配置\n" in lines
+    assert "DB_BACKUP_R2_ENABLED=\"1\" # 保持此说明\n" in lines
     assert {key: parsed[key] for key in values} == values
     assert parsed["APP_ENV"] == "production"
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
@@ -81,6 +82,26 @@ def test_invalid_endpoint_and_short_password_are_rejected() -> None:
     assert any("DB_BACKUP_R2_ENDPOINT" in issue for issue in issues)
     assert any("DB_BACKUP_ENCRYPTION_PASSWORD" in issue for issue in issues)
     assert all("r2.example.invalid" not in issue for issue in issues)
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://user:password" + "@" + "r2.example.invalid",
+        "https://:443",
+        "https://r2.example.invalid:bad",
+        "https://r2.example.invalid:65536",
+        "https://r2.example.invalid host",
+        "https://r2.example.invalid#fragment",
+    ],
+)
+def test_endpoint_rejects_credentials_and_malformed_authority(endpoint: str) -> None:
+    values = valid_values()
+    values["DB_BACKUP_R2_ENDPOINT"] = endpoint
+
+    issues = validate_values(values)
+
+    assert any("DB_BACKUP_R2_ENDPOINT" in issue for issue in issues)
 
 
 def test_symlink_target_is_rejected_without_changing_target(tmp_path: Path) -> None:
@@ -163,6 +184,16 @@ def test_generated_password_is_long_enough_without_being_logged() -> None:
 
 
 def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> None:
+    temp = tmp_path / ".env"
+    temp.write_text(
+        "DB_BACKUP_R2_ACCESS_KEY_ID=access#id\\suffix\n"
+        "DB_BACKUP_R2_SECRET_ACCESS_KEY=secret#value\\suffix # operator note\n",
+        encoding="utf-8",
+    )
+    _, parsed = read_env_file(temp)
+    assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == "access#id\\suffix"
+    assert parsed["DB_BACKUP_R2_SECRET_ACCESS_KEY"] == "secret#value\\suffix"
+
     values = {
         "DB_BACKUP_R2_ENABLED": "1",
         "DB_BACKUP_R2_ENDPOINT": "https://r2.example.invalid",
@@ -173,7 +204,6 @@ def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> N
     }
 
     rendered = _render_env([], values)
-    temp = tmp_path / ".env"
     temp.write_text(rendered, encoding="utf-8")
     _, parsed = read_env_file(temp)
     assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == values["DB_BACKUP_R2_ACCESS_KEY_ID"]

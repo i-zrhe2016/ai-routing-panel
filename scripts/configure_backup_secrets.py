@@ -60,6 +60,25 @@ def _decode_double_quoted(value: str) -> str:
     return "".join(decoded)
 
 
+def _inline_comment_start(value: str) -> int | None:
+    quote: str | None = None
+    escaped = False
+    for index, character in enumerate(value):
+        if quote:
+            if escaped:
+                escaped = False
+            elif character == "\\" and quote == '"':
+                escaped = True
+            elif character == quote:
+                quote = None
+            continue
+        if character in {"'", '"'}:
+            quote = character
+        elif character == "#" and index > 0 and value[index - 1].isspace():
+            return index - 1
+    return None
+
+
 def _parse_env_value(raw: str) -> str:
     value = raw.strip()
     if not value:
@@ -72,9 +91,9 @@ def _parse_env_value(raw: str) -> str:
         quoted = value[1:end]
         return _decode_double_quoted(quoted) if value[0] == '"' else quoted
 
-    comment = re.search(r"\s+#", value)
-    if comment:
-        value = value[: comment.start()].rstrip()
+    comment_start = _inline_comment_start(value)
+    if comment_start is not None:
+        value = value[:comment_start].rstrip()
     return value
 
 
@@ -132,7 +151,10 @@ def _render_env(lines: list[str], updates: dict[str, str]) -> str:
         prefix = match.group("indent")
         if match.group("export"):
             prefix += "export "
-        rendered.append(f"{prefix}{key}={_quote_env_value(updates[key])}\n")
+        suffix = line_body[match.end() :]
+        comment_start = _inline_comment_start(suffix)
+        comment = suffix[comment_start:].rstrip() if comment_start is not None else ""
+        rendered.append(f"{prefix}{key}={_quote_env_value(updates[key])}{comment}\n")
         replaced.add(key)
 
     if rendered and not rendered[-1].endswith(("\n", "\r")):
@@ -185,7 +207,24 @@ def _enabled(value: str | None, default: bool = True) -> bool:
 
 def _valid_endpoint(endpoint: str, bucket: str) -> bool:
     parsed = urlsplit(endpoint)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.netloc.endswith(":")
+        or parsed.query
+        or parsed.fragment
+        or "?" in endpoint
+        or "#" in endpoint
+        or any(character.isspace() for character in endpoint)
+    ):
+        return False
+    if port is not None and not 1 <= port <= 65535:
         return False
     path = parsed.path.rstrip("/")
     return path in {"", f"/{bucket}"}
