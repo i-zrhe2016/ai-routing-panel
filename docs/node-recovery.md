@@ -41,7 +41,7 @@
 
 备份任务完成后会在本地写出 `node-recovery-status.json`。`recoveryReady=true` 的含义是：共享 `panel.db` 存在，且当前已配置节点的必需配置和 `.env` 都已采集并通过哈希校验。
 
-节点暂时失联时，默认阻止该不完整归档继续上传，但状态会明确显示缺失原因；可用最近一个 `recoveryReady=true` 的归档恢复。若计划中的节点维护需要保留控制面-only 归档，可显式关闭门禁：
+完整节点模式下节点暂时失联会阻止该不完整归档继续上传，状态会明确显示缺失原因；可用最近一个 `recoveryReady=true` 的归档恢复。控制面-only 默认允许归档；若计划中的节点维护需要保留不完整归档，可显式关闭门禁：
 
 ```dotenv
 DB_BACKUP_RECOVERY_REQUIRED=0

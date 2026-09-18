@@ -102,6 +102,23 @@ class RemoteBackupTest(unittest.TestCase):
         self.assertNotIn("known_hosts", command)
         self.assertIs(run.call_args.kwargs["stdin"], self.module.subprocess.DEVNULL)
 
+    def test_broker_transport_uses_scoped_broker_instead_of_localapi(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="root@data-plane",
+            paths=("/etc/xray/config.json",),
+            known_hosts="/tmp/known_hosts",
+        )
+        response = {"version": 1, "role": node.role, "files": []}
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "tailscale-broker"}, clear=False):
+            with patch.object(
+                self.module, "_read_broker_remote", return_value=response
+            ) as broker:
+                result = self.module.read_remote(node, 12, 2048)
+
+        self.assertEqual(result, response)
+        broker.assert_called_once_with(node, 12, 2048)
+
     def test_tailscale_transport_rejects_openssh_options(self):
         node = self.module.RemoteNode(
             role="normal-data-plane",

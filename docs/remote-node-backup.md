@@ -46,9 +46,9 @@ node-recovery-manifest.json
 
 ## 认证与主机校验
 
-- 默认传输是 `DB_BACKUP_SSH_TRANSPORT=tailscale`，采集器执行 `tailscale --socket /var/run/tailscale/tailscaled.sock ssh <target> <read-only-command>`。
-- Compose 将宿主机的 Tailscale CLI 映射为 `/usr/local/bin/tailscale`，并以 `:ro` 方式映射 `/var/run/tailscale/tailscaled.sock`；身份、节点授权和主机校验由 Tailscale SSH/ACL 负责。
-- `:ro` 只保护容器内的 socket 路径不被替换，不能把 Tailscale LocalAPI 变成只读接口；该 root 备份容器因此属于受信任的主机管理工作负载，不应与不受信任的代码或用户可执行任务共用。
+- Compose 默认是 `DB_BACKUP_SSH_TRANSPORT=tailscale-broker`：隔离的 `xray-routing-panel-db-backup-tailscale` 服务执行 `tailscale --socket /var/run/tailscale/tailscaled.sock ssh <target> <read-only-command>`，备份容器只连接 `/var/run/xray-backup/tailscale-ssh.sock`。
+- broker 不接收任意目标或远端命令，只接受恢复角色和文件大小上限；它从自己的配置选择目标与路径，并固定调用只读采集脚本。broker 不挂载项目、数据库、归档或 R2 凭据，宿主机 Tailscale LocalAPI 只暴露给该受限中间层。
+- broker socket 的 `:ro` 绑定只保护备份容器内的路径；Tailscale 身份、节点授权和主机校验仍由 broker 所在服务的 Tailscale SSH/ACL 负责。若直接在受信任控制面主机运行采集器，可使用 `DB_BACKUP_SSH_TRANSPORT=tailscale`。
 - Tailscale 传输不读取 `known_hosts`、不使用 `-i`/`IdentityFile`，也不接受 OpenSSH options；远端命令固定为读取受限文件的 Python 脚本。
 - `DB_BACKUP_SSH_TRANSPORT=openssh` 仅用于受控兼容环境；此时才使用 `known_hosts`、严格主机校验和受限 OpenSSH options。
 - `AI_NODE_SSH_TARGETS` 中的多个目标会分别生成 `ai-data-plane-<node-id>` 恢复角色；`AI_NODE_IDS` 存在时用于角色后缀，否则按顺序编号。恢复时使用清单中的精确角色名。
@@ -61,9 +61,10 @@ node-recovery-manifest.json
 | --- | --- | --- |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | `0`（Compose） | 是否采集普通数据面；完整节点模式设为 `1`，关闭时仍生成控制面本地灾备归档 |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0`（Compose） | 完整节点模式设为 `1`，所有已配置远端节点的必需恢复文件必须成功采集；`0`：失联只写入 manifest 并继续控制面归档 |
-| `DB_BACKUP_SSH_TRANSPORT` | `tailscale` | 远端采集传输；默认执行 `tailscale ssh` |
-| `DB_BACKUP_TAILSCALE_BIN` | `/usr/local/bin/tailscale` | 备份容器内 Tailscale CLI 路径 |
-| `DB_BACKUP_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | 宿主机 Tailscale daemon socket 的容器路径 |
+| `DB_BACKUP_SSH_TRANSPORT` | `tailscale-broker`（Compose） | 远端采集传输；broker 默认执行 `tailscale ssh` |
+| `DB_BACKUP_TAILSCALE_BROKER_SOCKET` | `/var/run/xray-backup/tailscale-ssh.sock` | 备份容器到隔离 broker 的 Unix socket |
+| `DB_BACKUP_TAILSCALE_BIN` | `/usr/local/bin/tailscale`（broker） | 隔离 broker 内 Tailscale CLI 路径 |
+| `DB_BACKUP_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock`（broker） | 隔离 broker 使用的宿主机 Tailscale daemon socket |
 | `DB_BACKUP_SSH_TIMEOUT_SECONDS` | `20` | 单节点连接/远端读取超时上限 |
 | `DB_BACKUP_SSH_MAX_FILE_BYTES` | `5242880` | 单个远端文件大小上限，默认 5 MiB |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号或换行分隔；配置和 `.env` 是恢复必需文件 |

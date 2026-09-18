@@ -244,7 +244,7 @@ DNS_FAILOVER_BACKUP_LABEL=控制面备用Xray
 
 ## 灾备归档与 R2 上传
 
-`xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 生成本地 SQLite 备份和控制面灾备归档；Compose 默认关闭远端采集与完整性门禁（`DB_BACKUP_SSH_COLLECTION_ENABLED=0`、`DB_BACKUP_SSH_COLLECTION_REQUIRED=0`、`DB_BACKUP_RECOVERY_REQUIRED=0`），因此未配置远端目标时不会因占位值阻断新部署。要启用完整节点备份，设置这三个变量为 `1`，填写真实的 `DB_BACKUP_DATAPLANE_SSH_TARGET`、`DB_BACKUP_TAILSCALE_BIN_HOST` 和 `DB_BACKUP_TAILSCALE_SOCKET_HOST`，并重建 Compose 服务。默认 Tailscale 传输要求目标使用 `user@tailscale-host`；若显式使用 `DB_BACKUP_SSH_TRANSPORT=openssh`，改为配置受控的 OpenSSH/known_hosts 认证，不需要 Tailscale host 源路径。未配置对应条件时，归档仍可上传，但不具备完整远端节点恢复材料。
+`xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 生成本地 SQLite 备份和控制面灾备归档；Compose 默认关闭远端采集与完整性门禁（`DB_BACKUP_SSH_COLLECTION_ENABLED=0`、`DB_BACKUP_SSH_COLLECTION_REQUIRED=0`、`DB_BACKUP_RECOVERY_REQUIRED=0`），因此未配置远端目标时不会因占位值阻断新部署。要启用完整节点备份，设置这三个变量为 `1`，填写真实的 `DB_BACKUP_DATAPLANE_SSH_TARGET`、`DB_BACKUP_TAILSCALE_BIN_HOST` 和 `DB_BACKUP_TAILSCALE_SOCKET_HOST`，并重建 Compose 服务。Compose 默认通过隔离 broker 执行 Tailscale SSH，目标使用 `user@tailscale-host`；直接运行采集器时才使用 `DB_BACKUP_SSH_TRANSPORT=tailscale`。若显式使用 `DB_BACKUP_SSH_TRANSPORT=openssh`，改为配置受控的 OpenSSH/known_hosts 认证，不需要 Tailscale host 源路径。未配置对应条件时，归档仍可上传，但不具备完整远端节点恢复材料。
 
 Compose 备份服务默认会在备份完成后自动加密并上传到 Cloudflare R2；首次部署前请在根 `.env` 中填入：
 

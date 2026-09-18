@@ -17,6 +17,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import tempfile
@@ -132,7 +133,8 @@ DEFAULT_NORMAL_REMOTE_PATHS = (
 DEFAULT_AI_REMOTE_PATHS = (DEFAULT_AI_CONFIG_PATH, DEFAULT_AI_ENV_PATH)
 DEFAULT_TAILSCALE_SOCKET = "/var/run/tailscale/tailscaled.sock"
 DEFAULT_TAILSCALE_BIN = "tailscale"
-SUPPORTED_SSH_TRANSPORTS = {"openssh", "tailscale"}
+DEFAULT_TAILSCALE_BROKER_SOCKET = "/var/run/xray-backup/tailscale-ssh.sock"
+SUPPORTED_SSH_TRANSPORTS = {"openssh", "tailscale", "tailscale-broker"}
 
 
 def env_enabled(name: str, default: str = "0") -> bool:
@@ -191,6 +193,14 @@ def _tailscale_socket() -> str:
     return socket_path
 
 
+def _tailscale_broker_socket() -> str:
+    return str(
+        os.environ.get(
+            "DB_BACKUP_TAILSCALE_BROKER_SOCKET", DEFAULT_TAILSCALE_BROKER_SOCKET
+        )
+    ).strip() or DEFAULT_TAILSCALE_BROKER_SOCKET
+
+
 def parse_non_negative_int(value: str, default: int) -> int:
     raw = str(value or "").strip()
     if not raw:
@@ -202,6 +212,17 @@ def parse_non_negative_int(value: str, default: int) -> int:
     if parsed < 0:
         raise ValueError(f"invalid non-negative integer: {value!r}")
     return parsed
+
+
+def _validate_remote_payload(payload: object, role: str) -> dict:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != 1
+        or payload.get("role") != role
+        or not isinstance(payload.get("files"), list)
+    ):
+        raise RuntimeError(f"invalid SSH collection response for {role}")
+    return payload
 
 
 def parse_paths(value: str, defaults: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -434,6 +455,40 @@ def build_nodes() -> tuple[RemoteNode, ...]:
     return (normal_node, *ai_nodes)
 
 
+def _read_broker_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
+    request = {
+        "version": 1,
+        "role": node.role,
+        "maxBytes": max_bytes,
+    }
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(max(1, timeout + 5))
+    try:
+        client.connect(_tailscale_broker_socket())
+        client.sendall((json.dumps(request, separators=(",", ":")) + "\n").encode("utf-8"))
+        response = b""
+        while not response.endswith(b"\n"):
+            chunk = client.recv(65536)
+            if not chunk:
+                break
+            response += chunk
+            if len(response) > 128 * 1024 * 1024:
+                raise RuntimeError("Tailscale SSH broker response is too large")
+    except OSError as exc:
+        raise RuntimeError("Tailscale SSH broker is unavailable") from exc
+    finally:
+        client.close()
+    try:
+        envelope = json.loads(response.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("invalid Tailscale SSH broker response") from exc
+    if not isinstance(envelope, dict) or envelope.get("version") != 1:
+        raise RuntimeError("invalid Tailscale SSH broker response")
+    if not envelope.get("ok"):
+        raise RuntimeError(f"Tailscale SSH broker rejected {node.role}")
+    return _validate_remote_payload(envelope.get("payload"), node.role)
+
+
 def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
     remote_command = " ".join(
         shlex.quote(value)
@@ -448,6 +503,8 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
         )
     )
     transport = ssh_transport()
+    if transport == "tailscale-broker":
+        return _read_broker_remote(node, timeout, max_bytes)
     if transport == "tailscale":
         if node.options:
             raise ValueError("SSH options are not supported with Tailscale SSH transport")
@@ -517,14 +574,7 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"invalid SSH collection response for {node.role}") from exc
-    if (
-        not isinstance(payload, dict)
-        or payload.get("version") != 1
-        or payload.get("role") != node.role
-        or not isinstance(payload.get("files"), list)
-    ):
-        raise RuntimeError(f"invalid SSH collection response for {node.role}")
-    return payload
+    return _validate_remote_payload(payload, node.role)
 
 
 def write_collection(output_dir: Path, node: RemoteNode, payload: dict) -> dict:

@@ -295,12 +295,14 @@ def _local_runtime_node_manifest(
     }
 
 
-def _local_ai_node_manifest(file_entries: dict[str, dict], remote_node: dict | None) -> dict:
+def _local_ai_node_manifest(
+    file_entries: dict[str, dict], remote_node: dict | None, role: str = "ai-data-plane"
+) -> dict:
     if remote_node and _collection_node_is_configured(remote_node):
-        return _remote_node_manifest("ai-data-plane", remote_node, file_entries)
+        return _remote_node_manifest(role, remote_node, file_entries)
 
     result = _local_runtime_node_manifest(
-        "ai-data-plane", file_entries, "/app/xray/runtime/config-ai-node.json"
+        role, file_entries, "/app/xray/runtime/config-ai-node.json"
     )
     result["source"] = "control-plane-local"
     result["target"] = "local Docker xray-ai-node" if result["configured"] else ""
@@ -363,12 +365,14 @@ def build_node_recovery_manifest(
         item
         for role, item in remote_nodes.items()
         if role == "ai-data-plane" or role.startswith("ai-data-plane-")
-        if _collection_node_is_configured(item)
     ]
-    ai_nodes = [
-        _remote_node_manifest(str(item["role"]), item, indexed)
-        for item in remote_ai_nodes
-    ]
+    ai_nodes = []
+    for item in remote_ai_nodes:
+        role = str(item["role"])
+        if _collection_node_is_configured(item):
+            ai_nodes.append(_remote_node_manifest(role, item, indexed))
+        else:
+            ai_nodes.append(_local_ai_node_manifest(indexed, item, role))
     if not ai_nodes:
         ai_nodes = [_local_ai_node_manifest(indexed, remote_nodes.get("ai-data-plane"))]
     database = _database_artifact(indexed)

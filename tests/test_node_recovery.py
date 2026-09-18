@@ -264,6 +264,40 @@ class NodeRecoveryTest(unittest.TestCase):
                 )
                 self.assertEqual(ai_node["source"], expected_source)
 
+    def test_skipped_ai_inventory_is_retained_with_other_remote_ai_nodes(self):
+        manifest = self.recovery.build_node_recovery_manifest(
+            [
+                {
+                    "archivePath": "database/panel.db",
+                    "sourcePath": "/data/panel.db",
+                    "size": 1,
+                    "sha256": "database-hash",
+                }
+            ],
+            {
+                "nodes": [
+                    {
+                        "role": "ai-data-plane",
+                        "target": "",
+                        "status": "skipped_no_target",
+                        "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
+                        "files": [],
+                    },
+                    {
+                        "role": "ai-data-plane-hawaii",
+                        "target": "root@hawaii-host",
+                        "status": "failed",
+                        "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
+                        "files": [],
+                    },
+                ]
+            },
+        )
+
+        nodes = {item["role"]: item for item in manifest["nodes"]}
+        self.assertEqual(nodes["ai-data-plane"]["source"], "control-plane-local")
+        self.assertEqual(nodes["ai-data-plane-hawaii"]["source"], "remote-ssh")
+
     def test_recovery_manifest_rejects_unknown_remote_role(self):
         with self.assertRaisesRegex(ValueError, "unsupported recovery node role"):
             self.recovery.build_node_recovery_manifest(
