@@ -148,6 +148,9 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `DB_BACKUP_BUNDLE_DIR` / `DB_BACKUP_BUNDLE_KEEP_DAYS` | 本地归档目录和保留天数 |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否通过只读 SSH 采集普通数据面；控制面 AI 运行时产物随目录归档 |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | 远端必需恢复文件是否作为上传门禁；Compose 默认 `1` |
+| `DB_BACKUP_DATAPLANE_SSH_TARGET` | 普通数据面 Tailscale SSH 目标；未设置时回退 `DATAPLANE_SSH_TARGET`，格式为受控的 `user@tailscale-host` |
+| `DB_BACKUP_AI_NODE_SSH_TARGETS` | 远端 AI 节点 Tailscale SSH 目标，按逗号或换行分隔；未设置时回退 `AI_NODE_SSH_TARGETS`，每个目标生成独立恢复角色 |
+| `AI_NODE_IDS` | 远端 AI 节点稳定 ID，按顺序对应目标并用于恢复角色后缀；没有远端 AI 目标时使用控制面本地 AI 备用 |
 | `DB_BACKUP_SSH_TRANSPORT` | 远端采集传输；默认 `tailscale`，兼容环境可显式使用 `openssh` |
 | `DB_BACKUP_TAILSCALE_BIN_HOST` | Compose Tailscale 模式的宿主机 CLI 源路径；直接运行采集器时使用 `DB_BACKUP_TAILSCALE_BIN` |
 | `DB_BACKUP_TAILSCALE_SOCKET_HOST` | Compose Tailscale 模式的宿主机 daemon socket 源路径；直接运行采集器时使用 `DB_BACKUP_TAILSCALE_SOCKET` |

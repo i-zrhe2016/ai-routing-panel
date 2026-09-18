@@ -211,6 +211,51 @@ class NodeRecoveryTest(unittest.TestCase):
         self.assertFalse(self.recovery.is_recoverable_role("evil-node"))
         self.assertFalse(self.recovery.is_recoverable_role("ai-data-plane-"))
 
+    def test_targetless_failed_ai_collection_keeps_local_fallback(self):
+        files = [
+            {
+                "archivePath": "database/panel.db",
+                "sourcePath": "/data/panel.db",
+                "size": 1,
+                "sha256": "database-hash",
+            },
+            {
+                "archivePath": "config/app/xray/runtime/config.json",
+                "sourcePath": "/app/xray/runtime/config.json",
+                "size": 1,
+                "sha256": "normal-config-hash",
+            },
+            {
+                "archivePath": "config/app/xray/runtime/config-ai-node.json",
+                "sourcePath": "/app/xray/runtime/config-ai-node.json",
+                "size": 1,
+                "sha256": "ai-config-hash",
+            },
+            {
+                "archivePath": "config/app/xray/.env",
+                "sourcePath": "/app/xray/.env",
+                "size": 1,
+                "sha256": "env-hash",
+            },
+        ]
+        manifest = self.recovery.build_node_recovery_manifest(
+            files,
+            {
+                "nodes": [
+                    {
+                        "role": "ai-data-plane",
+                        "target": "",
+                        "status": "failed",
+                        "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
+                        "files": [],
+                    }
+                ]
+            },
+        )
+
+        ai_node = next(item for item in manifest["nodes"] if item["role"] == "ai-data-plane")
+        self.assertEqual(ai_node["source"], "control-plane-local")
+
     def test_recovery_manifest_rejects_unknown_remote_role(self):
         with self.assertRaisesRegex(ValueError, "unsupported recovery node role"):
             self.recovery.build_node_recovery_manifest(

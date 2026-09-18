@@ -361,7 +361,6 @@ def build_node_recovery_manifest(
         for role, item in remote_nodes.items()
         if role == "ai-data-plane" or role.startswith("ai-data-plane-")
         if str(item.get("target", "")).strip()
-        or str(item.get("status", "")) not in {"", "skipped_no_target"}
     ]
     ai_nodes = [
         _remote_node_manifest(str(item["role"]), item, indexed)
