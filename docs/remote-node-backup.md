@@ -69,7 +69,7 @@ node-recovery-manifest.json
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号或换行分隔；配置和 `.env` 是恢复必需文件 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
 | `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 仅显式启用远端 AI 节点 SSH 采集时使用 |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | 空 | 当前本机 AI 备用不使用远端采集 |
+| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json,/etc/xray/.env` | 配置远端 AI 目标时的默认只读采集路径；为空时使用该默认值 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
 
 默认采用恢复完整性门禁：已配置的远端节点无法通过 Tailscale SSH 提供必需文件时，本次灾备上传失败，并保留 manifest/状态用于排障。只有计划中的节点维护、且明确接受控制面-only 归档时，才设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 和 `DB_BACKUP_RECOVERY_REQUIRED=0`。

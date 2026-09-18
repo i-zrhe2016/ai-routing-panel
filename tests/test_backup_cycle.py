@@ -159,6 +159,38 @@ class BackupCycleTest(unittest.TestCase):
             self.assertTrue(status_path.is_file())
             self.assertFalse(json.loads(status_path.read_text(encoding="utf-8"))["recoveryReady"])
 
+    def test_required_remote_collection_rejects_before_upload_even_when_recovery_gate_is_off(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = self.create_source_db(root)
+            backup_dir = root / "backups"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "DB_PATH": str(db_path),
+                    "DB_BACKUP_DIR": str(backup_dir),
+                    "DB_BACKUP_PREFIX": "panel-test",
+                    "DB_BACKUP_BUNDLE_DIR": str(backup_dir),
+                    "DB_BACKUP_EXTRA_PATHS": "",
+                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "1",
+                    "DB_BACKUP_SSH_COLLECTION_REQUIRED": "1",
+                    "DB_BACKUP_RECOVERY_REQUIRED": "0",
+                    "DB_BACKUP_R2_ENABLED": "0",
+                }
+            )
+
+            completed = subprocess.run(
+                [sys.executable, str(RUN_CYCLE_SCRIPT)],
+                cwd=str(ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("required remote node collection is incomplete", completed.stderr)
+
     def test_run_db_backup_cycle_skips_cleanly_when_database_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -203,14 +203,14 @@ def enforce_recovery_readiness(bundle_path):
             flush=True,
         )
     recovery_gate_enabled = env_enabled("DB_BACKUP_RECOVERY_REQUIRED", "1")
-    collection_enabled = env_enabled("DB_BACKUP_SSH_COLLECTION_ENABLED", "0")
+    collection_gate_enabled = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "1")
     remote_collection_incomplete = any(
         node.get("source") == "remote-ssh" and not node.get("recoveryReady", False)
         for node in validated["nodeManifest"].get("nodes", [])
     )
-    if recovery_gate_enabled and (
-        not readiness["recoveryReady"] or remote_collection_incomplete
-    ):
+    if collection_gate_enabled and remote_collection_incomplete:
+        raise RuntimeError("required remote node collection is incomplete; see node-recovery-status.json")
+    if recovery_gate_enabled and (not readiness["recoveryReady"] or remote_collection_incomplete):
         raise RuntimeError("node recovery artifacts are incomplete; see node-recovery-status.json")
     return validated
 

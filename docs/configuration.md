@@ -147,6 +147,10 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `DB_BACKUP_EXTRA_PATHS` | 逗号/换行分隔的额外文件、目录或 glob |
 | `DB_BACKUP_BUNDLE_DIR` / `DB_BACKUP_BUNDLE_KEEP_DAYS` | 本地归档目录和保留天数 |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否通过只读 SSH 采集普通数据面；控制面 AI 运行时产物随目录归档 |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | 远端必需恢复文件是否作为上传门禁；Compose 默认 `1` |
+| `DB_BACKUP_SSH_TRANSPORT` | 远端采集传输；默认 `tailscale`，兼容环境可显式使用 `openssh` |
+| `DB_BACKUP_TAILSCALE_BIN_HOST` | 宿主机 Tailscale CLI 源路径；启用 Tailscale 采集时必须配置实际可执行文件 |
+| `DB_BACKUP_TAILSCALE_SOCKET_HOST` | 宿主机 Tailscale daemon socket 源路径；启用 Tailscale 采集时必须配置实际 socket |
 
 R2 对象不会由备份任务删除；生命周期规则在 Cloudflare 侧配置。恢复时人工下载、解密、校验 manifest，再恢复数据库和配置。
 
