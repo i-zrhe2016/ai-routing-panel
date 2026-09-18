@@ -50,6 +50,7 @@ node-recovery-manifest.json
 - Compose 将宿主机的 Tailscale CLI 映射为 `/usr/local/bin/tailscale`，并将 `/var/run/tailscale/tailscaled.sock` 映射到备份容器；身份、节点授权和主机校验由 Tailscale SSH/ACL 负责。
 - Tailscale 传输不读取 `known_hosts`、不使用 `-i`/`IdentityFile`，也不接受 OpenSSH options；远端命令固定为读取受限文件的 Python 脚本。
 - `DB_BACKUP_SSH_TRANSPORT=openssh` 仅用于受控兼容环境；此时才使用 `known_hosts`、严格主机校验和受限 OpenSSH options。
+- `AI_NODE_SSH_TARGETS` 中的多个目标会分别生成 `ai-data-plane-<node-id>` 恢复角色；`AI_NODE_IDS` 存在时用于角色后缀，否则按顺序编号。恢复时使用清单中的精确角色名。
 
 不要把 root 密码、Tailscale auth key 或 SSH 私钥放在环境变量、日志、Markdown 或归档中。定时任务使用宿主机现有 Tailscale daemon 的授权状态，不在备份容器内保存登录凭据。
 
@@ -91,9 +92,9 @@ node-recovery-manifest.json
 
 ```bash
 DB_BACKUP_SSH_TRANSPORT=tailscale \
-DB_BACKUP_TAILSCALE_BIN=/usr/local/bin/tailscale \
+DB_BACKUP_TAILSCALE_BIN=/usr/bin/tailscale \
 DB_BACKUP_TAILSCALE_SOCKET=/var/run/tailscale/tailscaled.sock \
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@<normal-data-plane-host> \
+DB_BACKUP_DATAPLANE_SSH_TARGET='root@<normal-data-plane-host>' \
 DB_BACKUP_DATAPLANE_SSH_PORT=22 \
 DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json \
 python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-staging --required

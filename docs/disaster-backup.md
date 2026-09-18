@@ -78,9 +78,11 @@ node-recovery-manifest.json
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过远端 SSH 读取节点配置 |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `1` | 所有已配置远端节点的必需恢复文件必须成功；设为 `0` 才允许记录失败并继续保留控制面归档 |
-| `DB_BACKUP_SSH_TRANSPORT` | `tailscale` | 远端采集传输；默认使用 `tailscale ssh`，兼容旧环境时可显式设为 `openssh` |
+| `DB_BACKUP_SSH_TRANSPORT` | `tailscale`（Compose/采集器） | 远端采集传输；默认使用 `tailscale ssh`，兼容旧环境时可显式设为 `openssh` |
 | `DB_BACKUP_TAILSCALE_BIN` | `/usr/local/bin/tailscale` | 备份容器内映射的宿主机 Tailscale CLI |
 | `DB_BACKUP_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | 备份容器内映射的宿主机 Tailscale daemon socket |
+| `DB_BACKUP_TAILSCALE_BIN_HOST` | `/dev/null`（未配置时） | 宿主机 Tailscale CLI 源路径；启用 Tailscale 采集时必须改为实际路径 |
+| `DB_BACKUP_TAILSCALE_SOCKET_HOST` | `/dev/null`（未配置时） | 宿主机 Tailscale daemon socket 源路径；启用 Tailscale 采集时必须改为实际路径 |
 | `DB_BACKUP_DATAPLANE_SSH_TARGET` | 部署环境提供的 `root@<normal-data-plane-host>` | 普通数据面 Tailscale SSH 目标；不填写密码或私钥 |
 | `DB_BACKUP_SSH_OPTIONS` | 空 | 仅 `openssh` 传输使用；Tailscale SSH 不接受 OpenSSH 选项 |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号/换行分隔；配置和 `.env` 是恢复必需文件，其余为可选 |
@@ -105,6 +107,8 @@ DB_BACKUP_EXTRA_PATHS=/app/xray/.env,/app/xray/runtime,/app/xray/reports,/data/u
 ```
 
 `DB_BACKUP_EXTRA_PATHS` 路径会被写入归档的 `config/` 前缀下，远端 SSH staging 则写入 `nodes/`，避免恢复时覆盖宿主机绝对路径。归档内的 `backup-manifest.json` 记录每个文件的来源、大小和 SHA-256；`remote-node-collection.json` 记录 SSH 目标和逐路径状态；`node-recovery-manifest.json` 再声明哪些文件足以快速恢复每类节点。
+
+启用默认的 Tailscale 采集前，必须在控制面 `.env` 中配置普通数据面目标、`DB_BACKUP_TAILSCALE_BIN_HOST` 和 `DB_BACKUP_TAILSCALE_SOCKET_HOST`；Compose 的 `/dev/null` 回退只用于让 OpenSSH 或本地-only 模式在未安装 Tailscale 的主机上能够启动，不能用于实际 Tailscale 采集。
 
 `DB_BACKUP_EXTRA_PATHS` 可以包含业务敏感配置，但不要把 R2 密钥、SSH 私钥或其他不需要迁移的凭据目录加入列表；数据库快照和灾备归档在本地生成时仍是明文，文件权限统一为 `0600`，备份目录也必须限制为备份服务可读。Tailscale SSH 的身份由宿主机 daemon 管理，备份容器只读映射 CLI 和 socket，不保存登录密码或私钥。R2 凭据只通过部署环境、Docker Secret 或外部 Secret 管理注入，灾备加密密码必须与 R2 Secret Access Key 分离保存。任何出现在聊天、日志或 shell 历史中的 token 都应立即撤销。
 

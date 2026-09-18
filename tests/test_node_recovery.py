@@ -59,7 +59,7 @@ class NodeRecoveryTest(unittest.TestCase):
             )
         normal_node = self.collector.RemoteNode(
             role="normal-data-plane",
-            target="root@normal.example",
+            target="root@normal-host",
             paths=tuple(normal_paths),
             known_hosts="/tmp/known_hosts",
             required_paths=(
@@ -140,6 +140,71 @@ class NodeRecoveryTest(unittest.TestCase):
             sources = {node["role"]: node["source"] for node in validated["nodeManifest"]["nodes"]}
             self.assertEqual(sources["normal-data-plane"], "local-runtime")
             self.assertEqual(sources["ai-data-plane"], "control-plane-local")
+
+    def test_multiple_remote_ai_nodes_keep_distinct_recovery_roles(self):
+        paths = (
+            "/root/xray-routing-panel/app/xray/runtime/config.json",
+            "/root/xray-routing-panel/app/xray/.env",
+        )
+        files = [
+            {
+                "archivePath": "database/panel.db",
+                "sourcePath": "/data/panel.db",
+                "size": 1,
+                "sha256": "database-hash",
+            }
+        ]
+        nodes = []
+        for role, target in (
+            ("normal-data-plane", "root@normal-host"),
+            ("ai-data-plane-hawaii", "root@hawaii-host"),
+            ("ai-data-plane-taiwan", "root@taiwan-host"),
+        ):
+            node_files = []
+            for path, restore_path in (
+                (paths[0], "app/xray/runtime/config.json"),
+                (paths[1], "app/xray/.env"),
+            ):
+                staged = f"{role}/root/xray-routing-panel/app/xray/{'runtime/config.json' if path.endswith('config.json') else '.env'}"
+                files.append(
+                    {
+                        "archivePath": f"nodes/{staged}",
+                        "sourcePath": path,
+                        "size": 1,
+                        "sha256": f"{role}-{restore_path}",
+                    }
+                )
+                node_files.append(
+                    {
+                        "path": path,
+                        "status": "ok",
+                        "stagedPath": staged,
+                        "restorePath": restore_path,
+                    }
+                )
+            nodes.append(
+                {
+                    "role": role,
+                    "target": target,
+                    "status": "ok",
+                    "requestedPaths": list(paths),
+                    "requiredPaths": list(paths),
+                    "files": node_files,
+                }
+            )
+
+        manifest = self.recovery.build_node_recovery_manifest(files, {"nodes": nodes})
+
+        self.assertTrue(manifest["recoveryReady"])
+        roles = {node["role"] for node in manifest["nodes"]}
+        self.assertEqual(
+            roles,
+            {"normal-data-plane", "ai-data-plane-hawaii", "ai-data-plane-taiwan"},
+        )
+        self.assertEqual(
+            {node["source"] for node in manifest["nodes"]},
+            {"remote-ssh"},
+        )
 
     def test_prepare_node_creates_ready_standalone_compose_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:

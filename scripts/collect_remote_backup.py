@@ -140,7 +140,7 @@ def env_enabled(name: str, default: str = "0") -> bool:
 
 
 def ssh_transport() -> str:
-    transport = str(os.environ.get("DB_BACKUP_SSH_TRANSPORT", "openssh")).strip().lower()
+    transport = str(os.environ.get("DB_BACKUP_SSH_TRANSPORT", "tailscale")).strip().lower()
     if transport not in SUPPORTED_SSH_TRANSPORTS:
         raise ValueError(f"unsupported backup SSH transport: {transport}")
     return transport
@@ -156,12 +156,16 @@ def _split_targets(value: str) -> tuple[str, ...]:
     return tuple(targets)
 
 
-def _configured_target(*names: str) -> str:
+def _configured_targets(*names: str) -> tuple[str, ...]:
     for name in names:
         targets = _split_targets(os.environ.get(name, ""))
         if targets:
-            return targets[0]
-    return ""
+            return targets
+    return ()
+
+
+def _configured_target(*names: str) -> str:
+    return (_configured_targets(*names) or ("",))[0]
 
 
 def _tailscale_executable() -> str:
@@ -178,7 +182,11 @@ def _tailscale_socket() -> str:
     socket_path = str(
         os.environ.get("DB_BACKUP_TAILSCALE_SOCKET", DEFAULT_TAILSCALE_SOCKET)
     ).strip() or DEFAULT_TAILSCALE_SOCKET
-    if not stat.S_ISSOCK(os.stat(socket_path).st_mode):
+    try:
+        socket_mode = os.stat(socket_path).st_mode
+    except OSError as exc:
+        raise RuntimeError("Tailscale daemon socket is unavailable in the backup container") from exc
+    if not stat.S_ISSOCK(socket_mode):
         raise RuntimeError("Tailscale daemon socket is unavailable in the backup container")
     return socket_path
 
@@ -320,7 +328,7 @@ def build_nodes() -> tuple[RemoteNode, ...]:
         _configured_target("DB_BACKUP_DATAPLANE_SSH_TARGET", "DATAPLANE_SSH_TARGET")
         or DEFAULT_NORMAL_TARGET
     )
-    ai_target = _configured_target(
+    ai_targets = _configured_targets(
         "DB_BACKUP_AI_NODE_SSH_TARGET",
         "AI_NODE_SSH_TARGET",
         "AI_NODE_SSH_TARGETS",
@@ -373,27 +381,40 @@ def build_nodes() -> tuple[RemoteNode, ...]:
     default_known_hosts = str(
         os.environ.get("DB_BACKUP_SSH_KNOWN_HOSTS", DEFAULT_KNOWN_HOSTS)
     ).strip() or DEFAULT_KNOWN_HOSTS
-    return (
-        RemoteNode(
-            role="normal-data-plane",
-            target=normal_target,
-            paths=normal_paths,
-            known_hosts=str(
-                os.environ.get("DB_BACKUP_DATAPLANE_KNOWN_HOSTS", default_known_hosts)
-            ).strip()
-            or default_known_hosts,
-            ssh_port=str(os.environ.get("DB_BACKUP_DATAPLANE_SSH_PORT", "22")).strip() or "22",
-            options=normal_options,
-            required_paths=required_paths(
-                normal_paths,
-                normal_config,
-                DEFAULT_DATAPLANE_ENV_PATH,
-            ),
-            restore_root=normal_restore_root,
+    normal_node = RemoteNode(
+        role="normal-data-plane",
+        target=normal_target,
+        paths=normal_paths,
+        known_hosts=str(
+            os.environ.get("DB_BACKUP_DATAPLANE_KNOWN_HOSTS", default_known_hosts)
+        ).strip()
+        or default_known_hosts,
+        ssh_port=str(os.environ.get("DB_BACKUP_DATAPLANE_SSH_PORT", "22")).strip() or "22",
+        options=normal_options,
+        required_paths=required_paths(
+            normal_paths,
+            normal_config,
+            DEFAULT_DATAPLANE_ENV_PATH,
         ),
+        restore_root=normal_restore_root,
+    )
+    if not ai_targets:
+        ai_targets = ("",)
+    ai_ids = _split_targets(os.environ.get("AI_NODE_IDS", ""))
+    ai_roles = []
+    for index, _ in enumerate(ai_targets):
+        if len(ai_targets) == 1:
+            role = "ai-data-plane"
+        else:
+            suffix = ai_ids[index] if index < len(ai_ids) else str(index + 1)
+            role = f"ai-data-plane-{safe_component(suffix)}"
+            if role in ai_roles:
+                role = f"{role}-{index + 1}"
+        ai_roles.append(role)
+    ai_nodes = tuple(
         RemoteNode(
-            role="ai-data-plane",
-            target=ai_target,
+            role=role,
+            target=target,
             paths=ai_paths,
             known_hosts=str(
                 os.environ.get("DB_BACKUP_AI_NODE_KNOWN_HOSTS", DEFAULT_AI_KNOWN_HOSTS)
@@ -406,8 +427,10 @@ def build_nodes() -> tuple[RemoteNode, ...]:
             options=ai_options,
             required_paths=required_paths(ai_paths, ai_config, DEFAULT_AI_ENV_PATH),
             restore_root=ai_restore_root,
-        ),
+        )
+        for role, target in zip(ai_roles, ai_targets)
     )
+    return (normal_node, *ai_nodes)
 
 
 def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
@@ -475,7 +498,7 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
+            stdin=None if transport == "openssh" else subprocess.DEVNULL,
             text=True,
             timeout=max(1, timeout + 5),
             check=False,
@@ -580,6 +603,7 @@ def collect_nodes(
     output_dir: Path,
     nodes: tuple[RemoteNode, ...],
     required: bool,
+    raise_on_required: bool = True,
 ) -> list[dict]:
     results = []
     timeout = parse_non_negative_int(os.environ.get("DB_BACKUP_SSH_TIMEOUT_SECONDS", "20"), 20)
@@ -592,19 +616,21 @@ def collect_nodes(
             # The AI data plane may intentionally run as a local Docker
             # service.  Strict collection must gate configured SSH nodes, not
             # fail because that optional remote target is unset.
-            if required and node.role != "ai-data-plane":
+            if required and node.role == "normal-data-plane" and raise_on_required:
                 raise RuntimeError(f"missing SSH target for {node.role}")
+            missing_target = required and node.role == "normal-data-plane"
             results.append(
                 {
                     "role": node.role,
                     "target": node.target,
                     "sshPort": node.ssh_port,
                     "knownHosts": node.known_hosts,
-                    "status": "skipped_no_target",
+                    "status": "failed" if missing_target else "skipped_no_target",
                     "requestedPaths": list(node.paths),
                     "requiredPaths": list(node.required_paths or node.paths[:1]),
                     "restoreRoot": node.restore_root,
                     "recoveryReady": False,
+                    **({"error": f"missing SSH target for {node.role}"} if missing_target else {}),
                 }
             )
             continue
@@ -629,12 +655,16 @@ def collect_nodes(
                     "error": str(exc)[:500],
                 }
             )
-            if required:
+            if required and raise_on_required:
                 raise RuntimeError(str(exc)) from exc
     return results
 
 
-def collect_remote_configs(output_dir: Path, required: bool = False) -> dict:
+def collect_remote_configs(
+    output_dir: Path,
+    required: bool = False,
+    raise_on_required: bool = True,
+) -> dict:
     output_dir = Path(output_dir)
     if output_dir.exists():
         if not output_dir.is_dir():
@@ -654,10 +684,25 @@ def collect_remote_configs(output_dir: Path, required: bool = False) -> dict:
         output_dir,
         nodes,
         required,
+        raise_on_required=False,
     )
     manifest_path = output_dir / "remote-node-collection.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.chmod(manifest_path, 0o600)
+    if required and raise_on_required:
+        failure = next(
+            (
+                node
+                for node in manifest["nodes"]
+                if node.get("status") == "failed"
+                or (node.get("target") and not node.get("recoveryReady", False))
+            ),
+            None,
+        )
+        if failure:
+            raise RuntimeError(
+                str(failure.get("error") or f"remote recovery artifacts are incomplete for {failure.get('role', 'node')}")
+            )
     return {"output_dir": output_dir, "manifest_path": manifest_path, "manifest": manifest}
 
 

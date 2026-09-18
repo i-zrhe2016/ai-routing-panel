@@ -43,7 +43,11 @@ class BackupCycleTest(unittest.TestCase):
             with mock.patch.object(module, "collect_remote_configs", return_value=mocked_result) as collect:
                 result = module.collect_remote_backup(staging)
 
-            collect.assert_called_once_with(node_staging, required=True)
+            collect.assert_called_once_with(
+                node_staging,
+                required=True,
+                raise_on_required=False,
+            )
             self.assertEqual(result, node_staging)
 
     def create_source_db(self, root):
@@ -133,7 +137,8 @@ class BackupCycleTest(unittest.TestCase):
                     "DB_BACKUP_PREFIX": "panel-test",
                     "DB_BACKUP_BUNDLE_DIR": str(backup_dir),
                     "DB_BACKUP_EXTRA_PATHS": "",
-                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "0",
+                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "1",
+                    "DB_BACKUP_SSH_COLLECTION_REQUIRED": "0",
                     "DB_BACKUP_RECOVERY_REQUIRED": "1",
                     "DB_BACKUP_R2_ENABLED": "0",
                 }

@@ -170,6 +170,7 @@ services:
       DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET-}"
       AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
       AI_NODE_SSH_TARGETS: "${AI_NODE_SSH_TARGETS:-}"
+      AI_NODE_IDS: "${AI_NODE_IDS:-}"
       DB_BACKUP_AI_NODE_SSH_PORT: "${DB_BACKUP_AI_NODE_SSH_PORT:-22}"
       DB_BACKUP_AI_NODE_KNOWN_HOSTS: "${DB_BACKUP_AI_NODE_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
       DB_BACKUP_AI_NODE_SSH_OPTIONS: "${DB_BACKUP_AI_NODE_SSH_OPTIONS:-}"
@@ -188,8 +189,10 @@ services:
       - /srv/xray-ops:/ops-data:ro
       - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
-      - /usr/bin/tailscale:/usr/local/bin/tailscale:ro
-      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+      # Set the *_HOST values when Tailscale SSH is enabled. /dev/null keeps
+      # OpenSSH/local-only compatibility starts independent of host Tailscale.
+      - ${DB_BACKUP_TAILSCALE_BIN_HOST:-/dev/null}:/usr/local/bin/tailscale:ro
+      - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-/dev/null}:/var/run/tailscale/tailscaled.sock
       - ./logs:/var/log
   xray-reality:
     profiles: ["xray"]

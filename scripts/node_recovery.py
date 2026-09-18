@@ -28,6 +28,10 @@ DEFAULT_XRAY_IMAGE = "ghcr.io/xtls/xray-core:26.5.3"
 RECOVERABLE_ROLES = ("normal-data-plane", "ai-data-plane")
 
 
+def is_recoverable_role(role: str) -> bool:
+    return role == "normal-data-plane" or role == "ai-data-plane" or role.startswith("ai-data-plane-")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -326,16 +330,30 @@ def build_node_recovery_manifest(
         if isinstance(item, dict) and item.get("role")
     }
     remote_normal = remote_nodes.get("normal-data-plane")
-    if remote_collection is None or not str((remote_normal or {}).get("target", "")).strip():
+    remote_normal_failed = str((remote_normal or {}).get("status", "")) == "failed"
+    if remote_collection is None or remote_normal is None or (
+        not str(remote_normal.get("target", "")).strip() and not remote_normal_failed
+    ):
         normal = _local_runtime_node_manifest(
             "normal-data-plane", indexed, "/app/xray/runtime/config.json"
         )
     else:
         normal = _remote_node_manifest("normal-data-plane", remote_normal, indexed)
-    ai = _local_ai_node_manifest(indexed, remote_nodes.get("ai-data-plane"))
+    remote_ai_nodes = [
+        item
+        for role, item in remote_nodes.items()
+        if role == "ai-data-plane" or role.startswith("ai-data-plane-")
+        if str(item.get("target", "")).strip()
+    ]
+    ai_nodes = [
+        _remote_node_manifest(str(item["role"]), item, indexed)
+        for item in remote_ai_nodes
+    ]
+    if not ai_nodes:
+        ai_nodes = [_local_ai_node_manifest(indexed, remote_nodes.get("ai-data-plane"))]
     database = _database_artifact(indexed)
     shared_ready = database.get("status") == "ok"
-    nodes = [normal, ai]
+    nodes = [normal, *ai_nodes]
     configured_nodes = [node for node in nodes if node.get("configured")]
     optional_databases = {
         "name": "ops-database",
@@ -567,7 +585,7 @@ def prepare_node(
 ) -> dict:
     """Validate a bundle and create an isolated, ready-to-start node folder."""
 
-    if role not in RECOVERABLE_ROLES:
+    if not is_recoverable_role(role):
         raise ValueError(f"unsupported recoverable node role: {role}")
     validated = validate_backup_bundle(bundle_path)
     node = _node_for_role(validated["nodeManifest"], role)
@@ -648,7 +666,11 @@ def _parse_args() -> argparse.Namespace:
 
     prepare = subparsers.add_parser("prepare", help="create an isolated replacement-node directory")
     prepare.add_argument("--bundle", required=True)
-    prepare.add_argument("--node", choices=RECOVERABLE_ROLES, required=True)
+    prepare.add_argument(
+        "--node",
+        required=True,
+        help="normal-data-plane, ai-data-plane, or an ai-data-plane-<node-id> role from the recovery manifest",
+    )
     prepare.add_argument("--output-dir", required=True)
     prepare.add_argument("--force", action="store_true")
     prepare.add_argument("--allow-incomplete", action="store_true")

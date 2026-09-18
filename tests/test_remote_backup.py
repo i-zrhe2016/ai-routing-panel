@@ -38,8 +38,9 @@ class RemoteBackupTest(unittest.TestCase):
         )
         response = {"version": 1, "role": node.role, "files": []}
         completed = SimpleNamespace(returncode=0, stdout=json.dumps(response), stderr="")
-        with patch.object(self.module.subprocess, "run", return_value=completed) as run:
-            result = self.module.read_remote(node, 12, 2048)
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "openssh"}, clear=False):
+            with patch.object(self.module.subprocess, "run", return_value=completed) as run:
+                result = self.module.read_remote(node, 12, 2048)
 
         self.assertEqual(result, response)
         command = run.call_args.args[0]
@@ -158,9 +159,10 @@ class RemoteBackupTest(unittest.TestCase):
             stdout=json.dumps({"version": 1, "role": "wrong", "files": []}),
             stderr="",
         )
-        with patch.object(self.module.subprocess, "run", return_value=completed):
-            with self.assertRaisesRegex(RuntimeError, "invalid SSH collection response"):
-                self.module.read_remote(node, 12, 2048)
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "openssh"}, clear=False):
+            with patch.object(self.module.subprocess, "run", return_value=completed):
+                with self.assertRaisesRegex(RuntimeError, "invalid SSH collection response"):
+                    self.module.read_remote(node, 12, 2048)
 
     def test_write_collection_verifies_checksum_and_preserves_node_path(self):
         data = b'{"inbounds": []}\n'
@@ -307,12 +309,16 @@ class RemoteBackupTest(unittest.TestCase):
             os.environ["DB_BACKUP_AI_NODE_SSH_TARGET"] = ""
             os.environ["AI_NODE_SSH_TARGET"] = ""
             os.environ["AI_NODE_SSH_TARGETS"] = "root@first-ai,root@second-ai"
-            _, ai = self.module.build_nodes()
+            nodes = self.module.build_nodes()
         finally:
             os.environ.clear()
             os.environ.update(original)
 
-        self.assertEqual(ai.target, "root@first-ai")
+        self.assertEqual(len(nodes), 3)
+        self.assertEqual(nodes[1].target, "root@first-ai")
+        self.assertEqual(nodes[1].role, "ai-data-plane-1")
+        self.assertEqual(nodes[2].target, "root@second-ai")
+        self.assertEqual(nodes[2].role, "ai-data-plane-2")
 
     def test_build_nodes_ignores_compose_placeholder_before_dataplane_fallback(self):
         original = os.environ.copy()
