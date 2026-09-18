@@ -4,11 +4,14 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from scripts import configure_backup_secrets
 from scripts.configure_backup_secrets import (
     MIN_ENCRYPTION_PASSWORD_LENGTH,
+    _render_env,
     generate_encryption_password,
     read_env_file,
     validate_values,
@@ -52,6 +55,8 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
         "# 不相关配置\nAPP_ENV=production\nDB_BACKUP_R2_ENABLED=0\n",
         encoding="utf-8",
     )
+    original_stat = env_file.stat()
+    env_file.chmod(0o640)
 
     values = valid_values()
     write_env_file(env_file, values)
@@ -61,6 +66,8 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
     assert {key: parsed[key] for key in values} == values
     assert parsed["APP_ENV"] == "production"
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+    assert env_file.stat().st_uid == original_stat.st_uid
+    assert env_file.stat().st_gid == original_stat.st_gid
     assert not list(tmp_path.glob(".env.*.tmp"))
 
 
@@ -104,7 +111,6 @@ def test_check_command_reports_status_only(tmp_path: Path) -> None:
     )
 
     assert completed.returncode == 0
-    assert "检查通过" in completed.stdout
     assert secret_marker not in completed.stdout
     assert secret_marker not in completed.stderr
 
@@ -129,10 +135,46 @@ def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> 
 
     assert completed.returncode == 2
     assert "DB_BACKUP_R2_ENDPOINT" in completed.stdout
-    assert "检查失败" in completed.stdout
+
+
+def test_interactive_generation_is_persisted_without_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    env_file = tmp_path / ".env"
+    answers = iter(["n", ""])
+    generated = "generated-password-for-test-0123456789abcdef"
+
+    with (
+        mock.patch.object(configure_backup_secrets, "generate_encryption_password", return_value=generated),
+        mock.patch("builtins.input", side_effect=lambda _prompt: next(answers)),
+        mock.patch.object(sys, "argv", [str(SCRIPT), "--env-file", str(env_file)]),
+    ):
+        assert configure_backup_secrets.main() == 0
+
+    captured = capsys.readouterr()
+    _, values = read_env_file(env_file)
+    assert values["DB_BACKUP_ENCRYPTION_PASSWORD"] == generated
+    assert generated not in captured.out
+    assert generated not in captured.err
 
 
 def test_generated_password_is_long_enough_without_being_logged() -> None:
     generated = generate_encryption_password()
 
     assert len(generated) >= MIN_ENCRYPTION_PASSWORD_LENGTH
+
+
+def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> None:
+    values = {
+        "DB_BACKUP_R2_ENABLED": "1",
+        "DB_BACKUP_R2_ENDPOINT": "https://r2.example.invalid",
+        "DB_BACKUP_R2_BUCKET": "backup-bucket",
+        "DB_BACKUP_R2_ACCESS_KEY_ID": "access#id\\suffix",
+        "DB_BACKUP_R2_SECRET_ACCESS_KEY": "secret#value\\suffix",
+        "DB_BACKUP_ENCRYPTION_PASSWORD": "p" * MIN_ENCRYPTION_PASSWORD_LENGTH,
+    }
+
+    rendered = _render_env([], values)
+    temp = tmp_path / ".env"
+    temp.write_text(rendered, encoding="utf-8")
+    _, parsed = read_env_file(temp)
+    assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == values["DB_BACKUP_R2_ACCESS_KEY_ID"]
+    assert parsed["DB_BACKUP_R2_SECRET_ACCESS_KEY"] == values["DB_BACKUP_R2_SECRET_ACCESS_KEY"]

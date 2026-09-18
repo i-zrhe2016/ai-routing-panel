@@ -8,7 +8,7 @@ import getpass
 import os
 import re
 import secrets
-import shlex
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -28,15 +28,54 @@ ENV_ASSIGNMENT = re.compile(
 )
 
 
+def _quoted_end(value: str, quote: str) -> int:
+    escaped = False
+    for index, character in enumerate(value[1:], start=1):
+        if escaped:
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == quote:
+            return index
+    raise ValueError("dotenv 值的引号未闭合")
+
+
+def _decode_double_quoted(value: str) -> str:
+    decoded: list[str] = []
+    index = 0
+    escapes = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\", '"': '"'}
+    while index < len(value):
+        character = value[index]
+        if character == "\\" and index + 1 < len(value):
+            next_character = value[index + 1]
+            decoded.append(escapes.get(next_character, f"\\{next_character}"))
+            index += 2
+            continue
+        if character == "$" and index + 1 < len(value) and value[index + 1] == "$":
+            decoded.append("$")
+            index += 2
+            continue
+        decoded.append(character)
+        index += 1
+    return "".join(decoded)
+
+
 def _parse_env_value(raw: str) -> str:
     value = raw.strip()
     if not value:
         return ""
-    try:
-        parts = shlex.split(value, comments=True, posix=True)
-    except ValueError:
-        return value.strip("\"'")
-    return " ".join(parts)
+    if value[0] in {"'", '"'}:
+        end = _quoted_end(value, value[0])
+        trailing = value[end + 1 :].strip()
+        if trailing and not trailing.startswith("#"):
+            raise ValueError("dotenv 引号值后存在无法解析的内容")
+        quoted = value[1:end]
+        return _decode_double_quoted(quoted) if value[0] == '"' else quoted
+
+    comment = re.search(r"\s+#", value)
+    if comment:
+        value = value[: comment.start()].rstrip()
+    return value
 
 
 def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
@@ -62,7 +101,22 @@ def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
 
 
 def _quote_env_value(value: str) -> str:
-    return shlex.quote(str(value))
+    text = str(value)
+    if "\n" in text or "\r" in text:
+        raise ValueError("dotenv 值不能包含换行")
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$")
+    return f'"{escaped}"'
+
+
+def _preserve_file_metadata(source: Path, destination: Path) -> None:
+    source_stat = source.stat()
+    destination_stat = destination.stat()
+    if (source_stat.st_uid, source_stat.st_gid) != (
+        destination_stat.st_uid,
+        destination_stat.st_gid,
+    ):
+        os.chown(destination, source_stat.st_uid, source_stat.st_gid)
+    shutil.copystat(source, destination, follow_symlinks=False)
 
 
 def _render_env(lines: list[str], updates: dict[str, str]) -> str:
@@ -108,6 +162,8 @@ def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
             handle.write(content)
+        if target.exists():
+            _preserve_file_metadata(target, temporary)
         os.chmod(temporary, 0o600)
         os.replace(temporary, target)
     except Exception:
