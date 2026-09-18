@@ -51,7 +51,7 @@ Docker Compose 的备份容器默认收集：
 - Compose、ops-reporting Compose、`.env`/`.env.ops-reporting`
 - Xray `.env`、渲染运行配置、报告、备份脚本和 `data/uploads`
 
-项目目录和 `/srv/xray-ops` 均只读挂载到备份容器；缺失的可选文件会记录在 manifest 中，不阻断 `panel.db` 备份。启用 SSH 采集后，归档还会加入：
+项目目录和 `/srv/xray-ops` 均只读挂载到备份容器；缺失的可选文件会记录在 manifest 中，不阻断 `panel.db` 备份。远端节点采集默认关闭；启用完整节点模式后，归档还会加入：
 
 ```text
 database/
@@ -76,8 +76,8 @@ node-recovery-manifest.json
 | `DB_BACKUP_BUNDLE_DIR` | `DB_BACKUP_DIR` | 灾备归档本地目录 |
 | `DB_BACKUP_BUNDLE_KEEP_DAYS` | `DB_BACKUP_KEEP_DAYS` | 本地灾备归档保留天数，`0` 表示不清理 |
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过远端 SSH 读取节点配置 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `1` | 所有已配置远端节点的必需恢复文件必须成功；设为 `0` 允许记录失败，但若要继续上传控制面归档还必须将 `DB_BACKUP_RECOVERY_REQUIRED` 设为 `0` |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `0`，脚本默认 `0` | 是否在打包前通过远端 SSH 读取节点配置；完整节点模式设为 `1` |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | Compose 为 `0` | 所有已配置远端节点的必需恢复文件必须成功；完整节点模式设为 `1`，计划维护时才保持为 `0` |
 | `DB_BACKUP_SSH_TRANSPORT` | `tailscale`（Compose/采集器） | 远端采集传输；默认使用 `tailscale ssh`，兼容旧环境时可显式设为 `openssh` |
 | `DB_BACKUP_TAILSCALE_BIN` | `/usr/local/bin/tailscale` | 备份容器内映射的宿主机 Tailscale CLI |
 | `DB_BACKUP_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | 备份容器内映射的宿主机 Tailscale daemon socket |
@@ -90,7 +90,7 @@ node-recovery-manifest.json
 | `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 兼容字段；Tailscale SSH 使用目标节点的 SSH 服务 |
 | `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json,/etc/xray/.env`（远端目标存在时） | 远端 AI 节点只读采集路径；为空时使用该默认值 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
-| `DB_BACKUP_RECOVERY_REQUIRED` | `1` | 不完整节点恢复包阻止后续上传；设为 `0` 才允许保留控制面归档并记录状态 |
+| `DB_BACKUP_RECOVERY_REQUIRED` | Compose 为 `0` | 不完整节点恢复包阻止后续上传；完整节点模式设为 `1`，控制面-only 归档保持为 `0` |
 | `DB_BACKUP_RECOVERY_STATUS_PATH` | 归档目录下的 `node-recovery-status.json` | 最近一次节点恢复完整性报告 |
 | `DB_BACKUP_R2_ENABLED` | `1`（Compose） | 是否将加密灾备归档上传到 R2；直接执行脚本时需显式设置并注入凭据 |
 | `DB_BACKUP_R2_ENDPOINT` | 空 | Cloudflare R2 S3 endpoint |

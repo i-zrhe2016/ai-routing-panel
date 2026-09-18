@@ -143,15 +143,16 @@ services:
       DB_BACKUP_BUNDLE_DIR: "${DB_BACKUP_BUNDLE_DIR:-/backups}"
       DB_BACKUP_BUNDLE_KEEP_DAYS: "${DB_BACKUP_BUNDLE_KEEP_DAYS:-7}"
       DB_BACKUP_BUNDLE_PREFIX: "${DB_BACKUP_BUNDLE_PREFIX:-xray-routing-panel}"
-      DB_BACKUP_RECOVERY_REQUIRED: "${DB_BACKUP_RECOVERY_REQUIRED:-1}"
+      DB_BACKUP_RECOVERY_REQUIRED: "${DB_BACKUP_RECOVERY_REQUIRED:-0}"
       DB_BACKUP_RECOVERY_STATUS_PATH: "${DB_BACKUP_RECOVERY_STATUS_PATH:-/backups/node-recovery-status.json}"
       DB_BACKUP_OPS_DB_PATH: "${DB_BACKUP_OPS_DB_PATH:-/ops-data/ops.db}"
       DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/app/xray/.env,/project/app/xray/runtime,/project/app/xray/reports,/project/scripts,/data/uploads}"
-      # Read the actual normal/AI node files over Tailscale SSH before bundling.
+      # Full node capture is opt-in: set the collection/recovery flags to 1,
+      # provide real targets and host-side Tailscale mounts, then recreate it.
       # The target aliases are passed through so the backup collector sees the
       # same node inventory as the control-plane application.
-      DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-1}"
-      DB_BACKUP_SSH_COLLECTION_REQUIRED: "${DB_BACKUP_SSH_COLLECTION_REQUIRED:-1}"
+      DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-0}"
+      DB_BACKUP_SSH_COLLECTION_REQUIRED: "${DB_BACKUP_SSH_COLLECTION_REQUIRED:-0}"
       DB_BACKUP_SSH_TRANSPORT: "${DB_BACKUP_SSH_TRANSPORT:-tailscale}"
       DB_BACKUP_TAILSCALE_BIN: "${DB_BACKUP_TAILSCALE_BIN:-/usr/local/bin/tailscale}"
       DB_BACKUP_TAILSCALE_SOCKET: "${DB_BACKUP_TAILSCALE_SOCKET:-/var/run/tailscale/tailscaled.sock}"
@@ -159,7 +160,7 @@ services:
       DB_BACKUP_SSH_OPTIONS: "${DB_BACKUP_SSH_OPTIONS:-}"
       DB_BACKUP_SSH_TIMEOUT_SECONDS: "${DB_BACKUP_SSH_TIMEOUT_SECONDS:-20}"
       DB_BACKUP_SSH_MAX_FILE_BYTES: "${DB_BACKUP_SSH_MAX_FILE_BYTES:-5242880}"
-      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-root@<normal-data-plane-host>}"
+      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"
       DB_BACKUP_DATAPLANE_SSH_PORT: "${DB_BACKUP_DATAPLANE_SSH_PORT:-22}"
       DB_BACKUP_DATAPLANE_KNOWN_HOSTS: "${DB_BACKUP_DATAPLANE_KNOWN_HOSTS:-/root/.ssh/known_hosts}"

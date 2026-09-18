@@ -42,7 +42,7 @@ node-recovery-manifest.json
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
 
-控制面自己的配置由 `DB_BACKUP_EXTRA_PATHS` 提供。Compose 默认把 `/app/xray/.env` 和 `/app/xray/runtime` 以只读方式挂载到备份服务，因此普通数据面和远端 AI 快照来自 Tailscale SSH，本机 AI 备用快照来自控制面本地目录。
+控制面自己的配置由 `DB_BACKUP_EXTRA_PATHS` 提供。Compose 默认把 `/app/xray/.env` 和 `/app/xray/runtime` 以只读方式挂载到备份服务；启用完整节点模式后，普通数据面和远端 AI 快照来自 Tailscale SSH，本机 AI 备用快照来自控制面本地目录。
 
 ## 认证与主机校验
 
@@ -59,8 +59,8 @@ node-recovery-manifest.json
 
 | 变量 | 默认值（Compose） | 作用 |
 | --- | --- | --- |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | `1` | 是否采集普通数据面；关闭时仍生成控制面本地灾备归档 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `1` | `1`：所有已配置远端节点的必需恢复文件必须成功采集；`0`：失联只写入 manifest 并继续控制面归档 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | `0`（Compose） | 是否采集普通数据面；完整节点模式设为 `1`，关闭时仍生成控制面本地灾备归档 |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0`（Compose） | 完整节点模式设为 `1`，所有已配置远端节点的必需恢复文件必须成功采集；`0`：失联只写入 manifest 并继续控制面归档 |
 | `DB_BACKUP_SSH_TRANSPORT` | `tailscale` | 远端采集传输；默认执行 `tailscale ssh` |
 | `DB_BACKUP_TAILSCALE_BIN` | `/usr/local/bin/tailscale` | 备份容器内 Tailscale CLI 路径 |
 | `DB_BACKUP_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | 宿主机 Tailscale daemon socket 的容器路径 |
@@ -72,7 +72,7 @@ node-recovery-manifest.json
 | `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json,/etc/xray/.env` | 配置远端 AI 目标时的默认只读采集路径；为空时使用该默认值 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
 
-默认采用恢复完整性门禁：已配置的远端节点无法通过 Tailscale SSH 提供必需文件时，本次灾备上传失败，并保留 manifest/状态用于排障。只有计划中的节点维护、且明确接受控制面-only 归档时，才设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 和 `DB_BACKUP_RECOVERY_REQUIRED=0`。
+完整节点模式采用恢复完整性门禁：将 `DB_BACKUP_SSH_COLLECTION_ENABLED=1`、`DB_BACKUP_SSH_COLLECTION_REQUIRED=1` 和 `DB_BACKUP_RECOVERY_REQUIRED=1` 后，已配置的远端节点无法通过 Tailscale SSH 提供必需文件时，本次灾备上传失败，并保留 manifest/状态用于排障。未启用完整节点模式时，Compose 允许控制面-only 归档。
 
 ## manifest 与核验
 
