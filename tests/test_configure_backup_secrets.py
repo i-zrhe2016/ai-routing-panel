@@ -72,6 +72,18 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
     assert not list(tmp_path.glob(".env.*.tmp"))
 
 
+def test_crlf_line_endings_and_default_env_path_are_preserved(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(b"APP_ENV=production\r\nDB_BACKUP_R2_ENABLED=0\r\n")
+
+    write_env_file(env_file, {"DB_BACKUP_R2_ENABLED": "1", "NEW_KEY": "value"})
+
+    assert env_file.read_bytes() == (
+        b'APP_ENV=production\r\nDB_BACKUP_R2_ENABLED="1"\r\nNEW_KEY="value"\r\n'
+    )
+    assert configure_backup_secrets.default_env_file() == ROOT / ".env"
+
+
 def test_invalid_endpoint_and_short_password_are_rejected() -> None:
     values = valid_values()
     values["DB_BACKUP_R2_ENDPOINT"] = "http://r2.example.invalid"

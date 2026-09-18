@@ -8,7 +8,6 @@ import getpass
 import os
 import re
 import secrets
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -108,7 +107,8 @@ def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
     if not target.is_file():
         raise ValueError(f"配置路径不是普通文件: {target}")
 
-    lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+    with target.open("r", encoding="utf-8", newline="") as handle:
+        lines = handle.read().splitlines(keepends=True)
     values: dict[str, str] = {}
     for line in lines:
         match = ENV_ASSIGNMENT.match(line.rstrip("\r\n"))
@@ -128,6 +128,8 @@ def _quote_env_value(value: str) -> str:
 
 
 def _preserve_file_metadata(source: Path, destination: Path) -> None:
+    if source.is_symlink():
+        raise ValueError(f"配置文件不能是符号链接: {source}")
     source_stat = source.stat()
     destination_stat = destination.stat()
     if (source_stat.st_uid, source_stat.st_gid) != (
@@ -135,12 +137,35 @@ def _preserve_file_metadata(source: Path, destination: Path) -> None:
         destination_stat.st_gid,
     ):
         os.chown(destination, source_stat.st_uid, source_stat.st_gid)
-    shutil.copystat(source, destination, follow_symlinks=False)
+    os.utime(
+        destination,
+        ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+        follow_symlinks=False,
+    )
+    listxattr = getattr(os, "listxattr", None)
+    getxattr = getattr(os, "getxattr", None)
+    setxattr = getattr(os, "setxattr", None)
+    if listxattr and getxattr and setxattr:
+        for name in listxattr(source, follow_symlinks=False):
+            value = getxattr(source, name, follow_symlinks=False)
+            setxattr(destination, name, value, follow_symlinks=False)
 
 
 def _render_env(lines: list[str], updates: dict[str, str]) -> str:
     rendered: list[str] = []
     replaced: set[str] = set()
+    default_newline = next(
+        (
+            "\r\n"
+            if line.endswith("\r\n")
+            else "\r"
+            if line.endswith("\r")
+            else "\n"
+            for line in lines
+            if line.endswith(("\r\n", "\r", "\n"))
+        ),
+        "\n",
+    )
     for line in lines:
         line_body = line.rstrip("\r\n")
         match = ENV_ASSIGNMENT.match(line_body)
@@ -154,14 +179,15 @@ def _render_env(lines: list[str], updates: dict[str, str]) -> str:
         suffix = line_body[match.end() :]
         comment_start = _inline_comment_start(suffix)
         comment = suffix[comment_start:].rstrip() if comment_start is not None else ""
-        rendered.append(f"{prefix}{key}={_quote_env_value(updates[key])}{comment}\n")
+        newline = "\r\n" if line.endswith("\r\n") else "\r" if line.endswith("\r") else "\n"
+        rendered.append(f"{prefix}{key}={_quote_env_value(updates[key])}{comment}{newline}")
         replaced.add(key)
 
     if rendered and not rendered[-1].endswith(("\n", "\r")):
-        rendered[-1] += "\n"
+        rendered[-1] += default_newline
     for key, value in updates.items():
         if key not in replaced:
-            rendered.append(f"{key}={_quote_env_value(value)}\n")
+            rendered.append(f"{key}={_quote_env_value(value)}{default_newline}")
     return "".join(rendered)
 
 
@@ -349,7 +375,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="中文配置和检查灾备加密密码、R2 凭据。")
     parser.add_argument(
         "--env-file",
-        default=".env",
+        default=None,
         help="要更新或检查的 dotenv 文件，默认是项目根目录 .env",
     )
     parser.add_argument(
@@ -360,9 +386,13 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def default_env_file() -> Path:
+    return Path(__file__).resolve().parents[1] / ".env"
+
+
 def main() -> int:
     args = _parse_args()
-    target = Path(args.env_file).expanduser()
+    target = Path(args.env_file).expanduser() if args.env_file else default_env_file()
     try:
         _, values = read_env_file(target)
         if args.check:
