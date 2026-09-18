@@ -208,12 +208,7 @@ def enforce_recovery_readiness(bundle_path):
         node.get("source") == "remote-ssh" and not node.get("recoveryReady", False)
         for node in validated["nodeManifest"].get("nodes", [])
     )
-    if recovery_gate_enabled and not collection_enabled:
-        print(
-            "[backup:recovery] gate=skipped ssh_collection=disabled",
-            flush=True,
-        )
-    elif recovery_gate_enabled and (
+    if recovery_gate_enabled and (
         not readiness["recoveryReady"] or remote_collection_incomplete
     ):
         raise RuntimeError("node recovery artifacts are incomplete; see node-recovery-status.json")

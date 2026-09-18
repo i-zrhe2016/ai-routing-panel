@@ -211,6 +211,13 @@ class NodeRecoveryTest(unittest.TestCase):
         self.assertFalse(self.recovery.is_recoverable_role("evil-node"))
         self.assertFalse(self.recovery.is_recoverable_role("ai-data-plane-"))
 
+    def test_recovery_manifest_rejects_unknown_remote_role(self):
+        with self.assertRaisesRegex(ValueError, "unsupported recovery node role"):
+            self.recovery.build_node_recovery_manifest(
+                [],
+                {"nodes": [{"role": "evil-node", "target": "root@evil-host"}]},
+            )
+
     def test_prepare_node_creates_ready_standalone_compose_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

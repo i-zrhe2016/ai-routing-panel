@@ -336,6 +336,9 @@ def build_node_recovery_manifest(
         for item in (remote_collection or {}).get("nodes", [])
         if isinstance(item, dict) and item.get("role")
     }
+    for role in remote_nodes:
+        if not is_recoverable_role(role):
+            raise ValueError(f"unsupported recovery node role: {role}")
     remote_normal = remote_nodes.get("normal-data-plane")
     remote_normal_failed = str((remote_normal or {}).get("status", "")) == "failed"
     if remote_collection is None or remote_normal is None or (
