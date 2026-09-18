@@ -4,6 +4,7 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -21,7 +22,7 @@ from scripts.configure_backup_secrets import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "configure_backup_secrets.py"
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="requires POSIX file permissions and symlinks")
+posix_only = pytest.mark.skipif(os.name != "posix", reason="requires POSIX file permissions and symlinks")
 
 
 def valid_values() -> dict[str, str]:
@@ -51,6 +52,7 @@ def test_validation_lists_missing_names_without_exposing_values() -> None:
     assert "access-id-for-test" not in joined
 
 
+@posix_only
 def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -76,6 +78,7 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
     assert not list(tmp_path.glob(".env.*.tmp"))
 
 
+@posix_only
 def test_failed_replace_keeps_original_file(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     original = "APP_ENV=production\nDB_BACKUP_R2_ENABLED=0\n"
@@ -91,7 +94,8 @@ def test_failed_replace_keeps_original_file(tmp_path: Path) -> None:
     assert not list(tmp_path.glob(".env.*.tmp"))
 
 
-def test_temporary_file_is_private_before_replace_under_permissive_umask(tmp_path: Path) -> None:
+@posix_only
+def test_temporary_file_is_private_before_replace(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     observed: dict[str, object] = {}
 
@@ -101,21 +105,26 @@ def test_temporary_file_is_private_before_replace_under_permissive_umask(tmp_pat
         observed["content"] = temporary.read_text(encoding="utf-8")
         raise OSError("injected replace failure")
 
-    previous_umask = os.umask(0)
-    try:
-        with (
-            mock.patch.object(os, "replace", side_effect=inspect_replace),
-            pytest.raises(OSError, match="injected replace failure"),
-        ):
-            write_env_file(env_file, valid_values())
-    finally:
-        os.umask(previous_umask)
+    real_mkstemp = tempfile.mkstemp
+
+    def permissive_mkstemp(*args: object, **kwargs: object) -> tuple[int, str]:
+        descriptor, temporary_name = real_mkstemp(*args, **kwargs)
+        os.chmod(temporary_name, 0o666)
+        return descriptor, temporary_name
+
+    with (
+        mock.patch.object(configure_backup_secrets.tempfile, "mkstemp", side_effect=permissive_mkstemp),
+        mock.patch.object(os, "replace", side_effect=inspect_replace),
+        pytest.raises(OSError, match="injected replace failure"),
+    ):
+        write_env_file(env_file, valid_values())
 
     assert observed["mode"] == 0o600
     assert "secret-for-test" in observed["content"]
     assert not list(tmp_path.glob(".env.*.tmp"))
 
 
+@posix_only
 def test_crlf_line_endings_and_default_env_path_are_preserved(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_bytes(b"APP_ENV=production\r\nDB_BACKUP_R2_ENABLED=0\r\n")
@@ -128,6 +137,7 @@ def test_crlf_line_endings_and_default_env_path_are_preserved(tmp_path: Path) ->
     assert configure_backup_secrets.default_env_file() == ROOT / ".env"
 
 
+@posix_only
 def test_main_uses_project_default_path_when_env_file_is_omitted(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     write_env_file(env_file, valid_values())
@@ -172,6 +182,7 @@ def test_endpoint_rejects_credentials_and_malformed_authority(endpoint: str) -> 
     assert any("DB_BACKUP_R2_ENDPOINT" in issue for issue in issues)
 
 
+@posix_only
 def test_symlink_target_is_rejected_without_changing_target(tmp_path: Path) -> None:
     real_file = tmp_path / "real.env"
     real_file.write_text("APP_ENV=production\n", encoding="utf-8")
@@ -184,6 +195,7 @@ def test_symlink_target_is_rejected_without_changing_target(tmp_path: Path) -> N
     assert real_file.read_text(encoding="utf-8") == "APP_ENV=production\n"
 
 
+@posix_only
 def test_symlinked_parent_is_rejected(tmp_path: Path) -> None:
     real_parent = tmp_path / "real-parent"
     real_parent.mkdir()
@@ -194,6 +206,7 @@ def test_symlinked_parent_is_rejected(tmp_path: Path) -> None:
         write_env_file(linked_parent / ".env", valid_values())
 
 
+@posix_only
 def test_check_command_reports_status_only(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     secret_marker = "secret-for-test"
@@ -227,6 +240,7 @@ def test_check_command_reports_status_only(tmp_path: Path) -> None:
         assert values[key][-8:] not in completed.stderr
 
 
+@posix_only
 def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     write_env_file(
@@ -249,6 +263,42 @@ def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> 
     assert "DB_BACKUP_R2_ENDPOINT" in completed.stdout
 
 
+@posix_only
+def test_failed_check_does_not_echo_invalid_secret_values(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    values = {
+        "DB_BACKUP_R2_ENABLED": "1",
+        "DB_BACKUP_BUNDLE_ENABLED": "1",
+        "DB_BACKUP_R2_ENDPOINT": "http://endpoint-sentinel.example.invalid",
+        "DB_BACKUP_R2_BUCKET": "Invalid_Bucket_Sentinel",
+        "DB_BACKUP_R2_ACCESS_KEY_ID": "access-sentinel-value",
+        "DB_BACKUP_R2_SECRET_ACCESS_KEY": "secret-sentinel-value",
+        "DB_BACKUP_ENCRYPTION_PASSWORD": "password-sentinel-value-0123456789",
+    }
+    write_env_file(env_file, values)
+
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--env-file", str(env_file), "--check"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    for key in (
+        "DB_BACKUP_R2_ENDPOINT",
+        "DB_BACKUP_R2_BUCKET",
+        "DB_BACKUP_R2_ACCESS_KEY_ID",
+        "DB_BACKUP_R2_SECRET_ACCESS_KEY",
+        "DB_BACKUP_ENCRYPTION_PASSWORD",
+    ):
+        for fragment in (values[key], values[key][:8], values[key][2:10], values[key][-8:]):
+            assert fragment not in completed.stdout
+            assert fragment not in completed.stderr
+
+
+@posix_only
 def test_interactive_generation_is_persisted_without_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     env_file = tmp_path / ".env"
     answers = iter(["", "n", ""])
@@ -309,6 +359,17 @@ def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> N
         _render_env([], {"DB_BACKUP_R2_SECRET_ACCESS_KEY": "line\nbreak"})
 
 
+def test_multiline_quoted_values_are_rejected_before_update(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "OTHER_SETTING='first\nDB_BACKUP_R2_ENABLED=1\n'\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="跨行"):
+        read_env_file(env_file)
+
+
 def test_variable_references_are_rejected_in_managed_values(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("DB_BACKUP_ENCRYPTION_PASSWORD=${ARCHIVE_PASSWORD}\n", encoding="utf-8")
@@ -338,6 +399,7 @@ def test_r2_bucket_names_follow_s3_rules(bucket: str) -> None:
     assert any("DB_BACKUP_R2_BUCKET" in issue for issue in issues)
 
 
+@posix_only
 def test_new_parent_directory_is_private(tmp_path: Path) -> None:
     env_file = tmp_path / "private" / "nested" / ".env"
 

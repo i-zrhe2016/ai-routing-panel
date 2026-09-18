@@ -134,6 +134,12 @@ def read_env_file(path: str | Path) -> tuple[list[str], dict[str, str]]:
         if match:
             key = match.group("key")
             raw_value = line.rstrip("\r\n")[match.end() :]
+            stripped_value = raw_value.lstrip()
+            if stripped_value and stripped_value[0] in {"'", '"'}:
+                try:
+                    _quoted_end(stripped_value, stripped_value[0])
+                except ValueError as exc:
+                    raise ValueError("dotenv 不支持跨行引号值") from exc
             try:
                 values[key] = _parse_env_value(raw_value, reject_interpolation=key in MANAGED_KEYS)
             except ValueError:
