@@ -25,10 +25,10 @@ from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 
 try:
-    from node_recovery import RECOVERABLE_ROLES, validate_backup_bundle
+    from node_recovery import is_recoverable_role, validate_backup_bundle
     from upload_backup_r2 import MAGIC
 except ModuleNotFoundError:
-    from scripts.node_recovery import RECOVERABLE_ROLES, validate_backup_bundle
+    from scripts.node_recovery import is_recoverable_role, validate_backup_bundle
     from scripts.upload_backup_r2 import MAGIC
 
 
@@ -345,7 +345,7 @@ def _build_restore_plan(validated: dict, allow_incomplete: bool) -> list[Planned
 
     for node in node_manifest.get("nodes", []):
         role = str(node.get("role", ""))
-        if role not in RECOVERABLE_ROLES:
+        if not is_recoverable_role(role):
             raise ValueError(f"unsupported node role in recovery manifest: {role}")
         for group_name in ("requiredArtifacts", "optionalArtifacts"):
             for artifact in node.get(group_name, []):

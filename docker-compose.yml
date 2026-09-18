@@ -118,6 +118,50 @@ services:
       interval: 30s
       timeout: 15s
       retries: 3
+  xray-routing-panel-db-backup-tailscale:
+    build: .
+    container_name: xray-routing-panel-db-backup-tailscale
+    restart: unless-stopped
+    command: ["python3", "/app/scripts/tailscale_ssh_broker.py"]
+    environment:
+      DB_BACKUP_SSH_TRANSPORT: "tailscale"
+      DB_BACKUP_TAILSCALE_BIN: "/usr/local/bin/tailscale"
+      DB_BACKUP_TAILSCALE_SOCKET: "/var/run/tailscale/tailscaled.sock"
+      DB_BACKUP_TAILSCALE_BROKER_SOCKET: "${DB_BACKUP_TAILSCALE_BROKER_SOCKET:-/var/run/xray-backup/tailscale-ssh.sock}"
+      DB_BACKUP_SSH_KNOWN_HOSTS: "${DB_BACKUP_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      DB_BACKUP_SSH_OPTIONS: "${DB_BACKUP_SSH_OPTIONS:-}"
+      DB_BACKUP_SSH_TIMEOUT_SECONDS: "${DB_BACKUP_SSH_TIMEOUT_SECONDS:-20}"
+      DB_BACKUP_SSH_MAX_FILE_BYTES: "${DB_BACKUP_SSH_MAX_FILE_BYTES:-5242880}"
+      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-}"
+      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"
+      DB_BACKUP_DATAPLANE_SSH_PORT: "${DB_BACKUP_DATAPLANE_SSH_PORT:-22}"
+      DB_BACKUP_DATAPLANE_KNOWN_HOSTS: "${DB_BACKUP_DATAPLANE_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      DB_BACKUP_DATAPLANE_SSH_OPTIONS: "${DB_BACKUP_DATAPLANE_SSH_OPTIONS:-}"
+      DB_BACKUP_DATAPLANE_CONFIG_PATH: "${DB_BACKUP_DATAPLANE_CONFIG_PATH:-}"
+      DB_BACKUP_DATAPLANE_REMOTE_PATHS: "${DB_BACKUP_DATAPLANE_REMOTE_PATHS:-/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json,/root/xray-routing-panel/app/xray/runtime/client-test.json,/root/xray-routing-panel/app/xray/runtime/client-share.txt,/root/xray-routing-panel/app/xray/reports/hourly-domains/latest.json}"
+      DB_BACKUP_DATAPLANE_DEPLOY_ROOT: "${DB_BACKUP_DATAPLANE_DEPLOY_ROOT:-/root/xray-routing-panel}"
+      DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET-}"
+      DB_BACKUP_AI_NODE_SSH_TARGETS: "${DB_BACKUP_AI_NODE_SSH_TARGETS:-}"
+      AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
+      AI_NODE_SSH_TARGETS: "${AI_NODE_SSH_TARGETS:-}"
+      AI_NODE_IDS: "${AI_NODE_IDS:-}"
+      DB_BACKUP_AI_NODE_SSH_PORT: "${DB_BACKUP_AI_NODE_SSH_PORT:-22}"
+      DB_BACKUP_AI_NODE_KNOWN_HOSTS: "${DB_BACKUP_AI_NODE_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
+      DB_BACKUP_AI_NODE_SSH_OPTIONS: "${DB_BACKUP_AI_NODE_SSH_OPTIONS:-}"
+      DB_BACKUP_AI_NODE_CONFIG_PATH: "${DB_BACKUP_AI_NODE_CONFIG_PATH:-}"
+      DB_BACKUP_AI_NODE_REMOTE_PATHS: "${DB_BACKUP_AI_NODE_REMOTE_PATHS-}"
+      DB_BACKUP_AI_NODE_DEPLOY_ROOT: "${DB_BACKUP_AI_NODE_DEPLOY_ROOT:-/root/xray-routing-panel}"
+    volumes:
+      - ./scripts:/app/scripts:ro
+      # Only this isolated broker sees the host Tailscale CLI and LocalAPI.
+      - ${DB_BACKUP_TAILSCALE_BIN_HOST:-./scripts/tailscale-disabled}:/usr/local/bin/tailscale:ro
+      - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-./scripts/tailscale-disabled}:/var/run/tailscale/tailscaled.sock:ro
+      - xray-routing-panel-db-backup-tailscale-socket:/var/run/xray-backup
+    healthcheck:
+      test: ["CMD-SHELL", "test -S \"$${DB_BACKUP_TAILSCALE_BROKER_SOCKET:-/var/run/xray-backup/tailscale-ssh.sock}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
   xray-routing-panel-db-backup:
     build: .
     container_name: xray-routing-panel-db-backup
@@ -147,15 +191,20 @@ services:
       DB_BACKUP_RECOVERY_STATUS_PATH: "${DB_BACKUP_RECOVERY_STATUS_PATH:-/backups/node-recovery-status.json}"
       DB_BACKUP_OPS_DB_PATH: "${DB_BACKUP_OPS_DB_PATH:-/ops-data/ops.db}"
       DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/app/xray/.env,/project/app/xray/runtime,/project/app/xray/reports,/project/scripts,/data/uploads}"
-      # Read the actual normal/AI node files over the private SSH network
-      # before bundling. Both management endpoints use the standard SSH port.
-      DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-1}"
+      # Full node capture is opt-in: set the collection/recovery flags to 1,
+      # provide real targets and host-side Tailscale mounts, then recreate it.
+      # The target aliases are passed through so the backup collector sees the
+      # same node inventory as the control-plane application.
+      DB_BACKUP_SSH_COLLECTION_ENABLED: "${DB_BACKUP_SSH_COLLECTION_ENABLED:-0}"
       DB_BACKUP_SSH_COLLECTION_REQUIRED: "${DB_BACKUP_SSH_COLLECTION_REQUIRED:-0}"
+      DB_BACKUP_SSH_TRANSPORT: "${DB_BACKUP_SSH_TRANSPORT:-tailscale-broker}"
+      DB_BACKUP_TAILSCALE_BROKER_SOCKET: "${DB_BACKUP_TAILSCALE_BROKER_SOCKET:-/var/run/xray-backup/tailscale-ssh.sock}"
       DB_BACKUP_SSH_KNOWN_HOSTS: "${DB_BACKUP_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DB_BACKUP_SSH_OPTIONS: "${DB_BACKUP_SSH_OPTIONS:-}"
       DB_BACKUP_SSH_TIMEOUT_SECONDS: "${DB_BACKUP_SSH_TIMEOUT_SECONDS:-20}"
       DB_BACKUP_SSH_MAX_FILE_BYTES: "${DB_BACKUP_SSH_MAX_FILE_BYTES:-5242880}"
-      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-root@<normal-data-plane-host>}"
+      DB_BACKUP_DATAPLANE_SSH_TARGET: "${DB_BACKUP_DATAPLANE_SSH_TARGET:-}"
+      DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-}"
       DB_BACKUP_DATAPLANE_SSH_PORT: "${DB_BACKUP_DATAPLANE_SSH_PORT:-22}"
       DB_BACKUP_DATAPLANE_KNOWN_HOSTS: "${DB_BACKUP_DATAPLANE_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
       DB_BACKUP_DATAPLANE_SSH_OPTIONS: "${DB_BACKUP_DATAPLANE_SSH_OPTIONS:-}"
@@ -163,6 +212,10 @@ services:
       DB_BACKUP_DATAPLANE_REMOTE_PATHS: "${DB_BACKUP_DATAPLANE_REMOTE_PATHS:-/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json,/root/xray-routing-panel/app/xray/runtime/client-test.json,/root/xray-routing-panel/app/xray/runtime/client-share.txt,/root/xray-routing-panel/app/xray/reports/hourly-domains/latest.json}"
       DB_BACKUP_DATAPLANE_DEPLOY_ROOT: "${DB_BACKUP_DATAPLANE_DEPLOY_ROOT:-/root/xray-routing-panel}"
       DB_BACKUP_AI_NODE_SSH_TARGET: "${DB_BACKUP_AI_NODE_SSH_TARGET-}"
+      DB_BACKUP_AI_NODE_SSH_TARGETS: "${DB_BACKUP_AI_NODE_SSH_TARGETS:-}"
+      AI_NODE_SSH_TARGET: "${AI_NODE_SSH_TARGET:-}"
+      AI_NODE_SSH_TARGETS: "${AI_NODE_SSH_TARGETS:-}"
+      AI_NODE_IDS: "${AI_NODE_IDS:-}"
       DB_BACKUP_AI_NODE_SSH_PORT: "${DB_BACKUP_AI_NODE_SSH_PORT:-22}"
       DB_BACKUP_AI_NODE_KNOWN_HOSTS: "${DB_BACKUP_AI_NODE_KNOWN_HOSTS:-/root/.ssh/known_hosts_ai}"
       DB_BACKUP_AI_NODE_SSH_OPTIONS: "${DB_BACKUP_AI_NODE_SSH_OPTIONS:-}"
@@ -181,7 +234,11 @@ services:
       - /srv/xray-ops:/ops-data:ro
       - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
+      - xray-routing-panel-db-backup-tailscale-socket:/var/run/xray-backup:ro
       - ./logs:/var/log
+    depends_on:
+      xray-routing-panel-db-backup-tailscale:
+        condition: service_healthy
   xray-reality:
     profiles: ["xray"]
     image: ghcr.io/xtls/xray-core:26.5.3
@@ -291,3 +348,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  xray-routing-panel-db-backup-tailscale-socket:

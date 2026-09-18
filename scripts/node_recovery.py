@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tarfile
 from datetime import datetime, timezone
@@ -26,6 +27,16 @@ from pathlib import Path, PurePosixPath
 NODE_RECOVERY_MANIFEST_NAME = "node-recovery-manifest.json"
 DEFAULT_XRAY_IMAGE = "ghcr.io/xtls/xray-core:26.5.3"
 RECOVERABLE_ROLES = ("normal-data-plane", "ai-data-plane")
+
+
+def is_recoverable_role(role: str) -> bool:
+    if role in {"normal-data-plane", "ai-data-plane"}:
+        return True
+    prefix = "ai-data-plane-"
+    if not role.startswith(prefix):
+        return False
+    suffix = role[len(prefix):]
+    return bool(suffix) and re.fullmatch(r"[A-Za-z0-9._-]+", suffix) is not None
 
 
 def _now() -> str:
@@ -137,6 +148,13 @@ def _artifact_from_collection(
     return artifact
 
 
+def _collection_node_is_configured(collection_node: dict | None) -> bool:
+    collection_node = collection_node or {}
+    return bool(str(collection_node.get("target", "")).strip()) or str(
+        collection_node.get("status", "")
+    ) in {"failed", "partial"}
+
+
 def _remote_node_manifest(
     role: str,
     collection_node: dict | None,
@@ -176,7 +194,8 @@ def _remote_node_manifest(
 
     required = [item for item in artifacts if item.get("required")]
     optional = [item for item in artifacts if not item.get("required")]
-    configured = bool(str(collection_node.get("target", "")).strip())
+    collection_status = str(collection_node.get("status", "not_collected"))
+    configured = _collection_node_is_configured(collection_node)
     recovery_ready = configured and bool(required) and all(
         item.get("status") == "ok" and item.get("archivePath") for item in required
     )
@@ -186,7 +205,7 @@ def _remote_node_manifest(
         "configured": configured,
         "target": str(collection_node.get("target", "")),
         "sshPort": str(collection_node.get("sshPort", "22")),
-        "collectionStatus": str(collection_node.get("status", "not_collected")),
+        "collectionStatus": collection_status,
         "requiredPaths": required_paths,
         "requiredArtifacts": required,
         "optionalArtifacts": optional,
@@ -276,12 +295,14 @@ def _local_runtime_node_manifest(
     }
 
 
-def _local_ai_node_manifest(file_entries: dict[str, dict], remote_node: dict | None) -> dict:
-    if remote_node and str(remote_node.get("target", "")).strip():
-        return _remote_node_manifest("ai-data-plane", remote_node, file_entries)
+def _local_ai_node_manifest(
+    file_entries: dict[str, dict], remote_node: dict | None, role: str = "ai-data-plane"
+) -> dict:
+    if remote_node and _collection_node_is_configured(remote_node):
+        return _remote_node_manifest(role, remote_node, file_entries)
 
     result = _local_runtime_node_manifest(
-        "ai-data-plane", file_entries, "/app/xray/runtime/config-ai-node.json"
+        role, file_entries, "/app/xray/runtime/config-ai-node.json"
     )
     result["source"] = "control-plane-local"
     result["target"] = "local Docker xray-ai-node" if result["configured"] else ""
@@ -320,22 +341,43 @@ def build_node_recovery_manifest(
     """Build the explicit recovery contract for a just-created archive."""
 
     indexed = _file_entry_index(file_entries)
-    remote_nodes = {
-        str(item.get("role")): item
-        for item in (remote_collection or {}).get("nodes", [])
-        if isinstance(item, dict) and item.get("role")
-    }
+    remote_nodes = {}
+    for item in (remote_collection or {}).get("nodes", []):
+        if not isinstance(item, dict) or not item.get("role"):
+            continue
+        role = str(item["role"])
+        if role in remote_nodes:
+            raise ValueError(f"duplicate recovery node role: {role}")
+        remote_nodes[role] = item
+    for role in remote_nodes:
+        if not is_recoverable_role(role):
+            raise ValueError(f"unsupported recovery node role: {role}")
     remote_normal = remote_nodes.get("normal-data-plane")
-    if remote_collection is None or not str((remote_normal or {}).get("target", "")).strip():
+    if remote_collection is None or remote_normal is None or not _collection_node_is_configured(
+        remote_normal
+    ):
         normal = _local_runtime_node_manifest(
             "normal-data-plane", indexed, "/app/xray/runtime/config.json"
         )
     else:
         normal = _remote_node_manifest("normal-data-plane", remote_normal, indexed)
-    ai = _local_ai_node_manifest(indexed, remote_nodes.get("ai-data-plane"))
+    remote_ai_nodes = [
+        item
+        for role, item in remote_nodes.items()
+        if role == "ai-data-plane" or role.startswith("ai-data-plane-")
+    ]
+    ai_nodes = []
+    for item in remote_ai_nodes:
+        role = str(item["role"])
+        if _collection_node_is_configured(item):
+            ai_nodes.append(_remote_node_manifest(role, item, indexed))
+        else:
+            ai_nodes.append(_local_ai_node_manifest(indexed, item, role))
+    if not ai_nodes:
+        ai_nodes = [_local_ai_node_manifest(indexed, remote_nodes.get("ai-data-plane"))]
     database = _database_artifact(indexed)
     shared_ready = database.get("status") == "ok"
-    nodes = [normal, ai]
+    nodes = [normal, *ai_nodes]
     configured_nodes = [node for node in nodes if node.get("configured")]
     optional_databases = {
         "name": "ops-database",
@@ -492,10 +534,22 @@ def validate_backup_bundle(bundle_path: str | Path) -> dict:
         if NODE_RECOVERY_MANIFEST_NAME not in file_index:
             raise ValueError("backup manifest does not cover node-recovery-manifest.json")
         _validate_node_artifacts(node_manifest, file_index)
+        remote_collection = None
+        if "nodes/remote-node-collection.json" in members:
+            remote_collection = _read_json_member(
+                archive, members, "nodes/remote-node-collection.json"
+            )
+            if (
+                remote_collection.get("version") != 1
+                or remote_collection.get("purpose") != "remote-node-config-collection"
+                or not isinstance(remote_collection.get("nodes"), list)
+            ):
+                raise ValueError("unsupported or malformed remote-node-collection.json")
         return {
             "bundle": bundle.resolve(),
             "backupManifest": backup_manifest,
             "nodeManifest": node_manifest,
+            "remoteCollection": remote_collection,
             "readiness": readiness_summary(node_manifest),
         }
 
@@ -567,7 +621,7 @@ def prepare_node(
 ) -> dict:
     """Validate a bundle and create an isolated, ready-to-start node folder."""
 
-    if role not in RECOVERABLE_ROLES:
+    if not is_recoverable_role(role):
         raise ValueError(f"unsupported recoverable node role: {role}")
     validated = validate_backup_bundle(bundle_path)
     node = _node_for_role(validated["nodeManifest"], role)
@@ -648,7 +702,11 @@ def _parse_args() -> argparse.Namespace:
 
     prepare = subparsers.add_parser("prepare", help="create an isolated replacement-node directory")
     prepare.add_argument("--bundle", required=True)
-    prepare.add_argument("--node", choices=RECOVERABLE_ROLES, required=True)
+    prepare.add_argument(
+        "--node",
+        required=True,
+        help="normal-data-plane, ai-data-plane, or an ai-data-plane-<node-id> role from the recovery manifest",
+    )
     prepare.add_argument("--output-dir", required=True)
     prepare.add_argument("--force", action="store_true")
     prepare.add_argument("--allow-incomplete", action="store_true")

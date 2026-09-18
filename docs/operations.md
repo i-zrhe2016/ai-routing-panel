@@ -156,9 +156,9 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 - `xray-routing-panel-db-backup` 默认每天 `03:00 UTC` 备份一次 `panel.db`，并生成一个包含配置文件的灾备归档
 - 本地 `.db` 和 `tar.gz` 备份文件均落在 `./backups`
 - 额外文件由 `DB_BACKUP_EXTRA_PATHS` 指定；Compose 默认包含 `app/xray/.env`、运行时/报告、`data/uploads` 和部署脚本
- - Compose 还会在打包前通过内网直连 SSH 以只读方式采集普通数据面（`root@<normal-data-plane-host>:22`）；本机 AI 备用的 `.env` 与 `config-ai-node.json` 已在控制面运行时目录中，随 `config/` 归档
+- 配置完整节点模式后，Compose 会在打包前通过宿主机 Tailscale SSH 以只读方式采集普通数据面和已配置远端 AI 节点；未启用远端采集时，本机 AI 备用的 `.env` 与 `config-ai-node.json` 随 `config/` 归档
 - 每个归档都包含 `node-recovery-manifest.json`，任务还会生成 `node-recovery-status.json`，明确标记 `recoveryReady`
-- 远端采集默认是非必需的：普通数据面失联不会丢弃控制面归档；要把普通数据面配置作为任务门禁，设置 `DB_BACKUP_SSH_COLLECTION_REQUIRED=1`
+- 完整节点模式下远端采集默认是必需的：配置节点无法通过 Tailscale SSH 提供恢复文件时，本次归档不会继续上传；控制面-only 默认保持两个门禁为 `0`，计划维护时也可暂时关闭完整节点门禁
 - 当 `DB_BACKUP_R2_ENABLED=1` 时，归档成功后会继续调用 `R2 灾备上传`
 - R2 对象 key 默认包含日期、归档名称和 SHA-256 前缀；对象保留由 Cloudflare R2 生命周期策略控制，不承担快速恢复
 

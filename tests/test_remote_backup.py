@@ -38,8 +38,9 @@ class RemoteBackupTest(unittest.TestCase):
         )
         response = {"version": 1, "role": node.role, "files": []}
         completed = SimpleNamespace(returncode=0, stdout=json.dumps(response), stderr="")
-        with patch.object(self.module.subprocess, "run", return_value=completed) as run:
-            result = self.module.read_remote(node, 12, 2048)
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "openssh"}, clear=False):
+            with patch.object(self.module.subprocess, "run", return_value=completed) as run:
+                result = self.module.read_remote(node, 12, 2048)
 
         self.assertEqual(result, response)
         command = run.call_args.args[0]
@@ -53,6 +54,125 @@ class RemoteBackupTest(unittest.TestCase):
         self.assertIn("UserKnownHostsFile=/tmp/known_hosts", command)
         self.assertNotIn("-i", command)
         self.assertIn("XRAY_BACKUP_REMOTE_MAX_FILE_BYTES=2048", command[-1])
+
+    def test_read_remote_uses_tailscale_ssh_without_openssh_flags(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="root@data-plane",
+            paths=("/etc/xray/config.json",),
+            known_hosts="/tmp/known_hosts",
+        )
+        response = {"version": 1, "role": node.role, "files": []}
+        completed = SimpleNamespace(returncode=0, stdout=json.dumps(response), stderr="")
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_SSH_TRANSPORT"] = "tailscale"
+            os.environ["DB_BACKUP_TAILSCALE_BIN"] = "/usr/local/bin/tailscale"
+            with (
+                patch.object(
+                    self.module,
+                    "_tailscale_executable",
+                    return_value="/usr/local/bin/tailscale",
+                ),
+                patch.object(
+                    self.module,
+                    "_tailscale_socket",
+                    return_value="/var/run/tailscale/tailscaled.sock",
+                ),
+                patch.object(self.module.subprocess, "run", return_value=completed) as run,
+            ):
+                result = self.module.read_remote(node, 12, 2048)
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+        self.assertEqual(result, response)
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command[:5],
+            [
+                "/usr/local/bin/tailscale",
+                "--socket",
+                "/var/run/tailscale/tailscaled.sock",
+                "ssh",
+                "root@data-plane",
+            ],
+        )
+        self.assertNotIn("-o", command)
+        self.assertNotIn("known_hosts", command)
+        self.assertIs(run.call_args.kwargs["stdin"], self.module.subprocess.DEVNULL)
+
+    def test_broker_transport_uses_scoped_broker_instead_of_localapi(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="root@data-plane",
+            paths=("/etc/xray/config.json",),
+            known_hosts="/tmp/known_hosts",
+        )
+        response = {"version": 1, "role": node.role, "files": []}
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "tailscale-broker"}, clear=False):
+            with patch.object(
+                self.module, "_read_broker_remote", return_value=response
+            ) as broker:
+                result = self.module.read_remote(node, 12, 2048)
+
+        self.assertEqual(result, response)
+        broker.assert_called_once_with(node, 12, 2048)
+
+    def test_tailscale_transport_rejects_openssh_options(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="root@data-plane",
+            paths=("/etc/xray/config.json",),
+            known_hosts="/tmp/known_hosts",
+            options=("-4",),
+        )
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_SSH_TRANSPORT"] = "tailscale"
+            with self.assertRaisesRegex(ValueError, "not supported"):
+                self.module.read_remote(node, 12, 2048)
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+    def test_tailscale_transport_rejects_custom_ssh_port(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="root@data-plane",
+            paths=("/etc/xray/config.json",),
+            known_hosts="/tmp/known_hosts",
+            ssh_port="2222",
+        )
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_SSH_TRANSPORT"] = "tailscale"
+            with self.assertRaisesRegex(ValueError, "custom SSH ports"):
+                self.module.read_remote(node, 12, 2048)
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+    def test_tailscale_transport_reports_missing_runtime(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="root@data-plane",
+            paths=("/etc/xray/config.json",),
+            known_hosts="/tmp/known_hosts",
+        )
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_SSH_TRANSPORT"] = "tailscale"
+            with patch.object(
+                self.module,
+                "_tailscale_executable",
+                side_effect=RuntimeError("Tailscale SSH CLI is unavailable"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Tailscale SSH CLI"):
+                    self.module.read_remote(node, 12, 2048)
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
 
     def test_ssh_options_cannot_override_identity_or_known_hosts(self):
         with self.assertRaisesRegex(ValueError, "UserKnownHostsFile"):
@@ -73,9 +193,10 @@ class RemoteBackupTest(unittest.TestCase):
             stdout=json.dumps({"version": 1, "role": "wrong", "files": []}),
             stderr="",
         )
-        with patch.object(self.module.subprocess, "run", return_value=completed):
-            with self.assertRaisesRegex(RuntimeError, "invalid SSH collection response"):
-                self.module.read_remote(node, 12, 2048)
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "openssh"}, clear=False):
+            with patch.object(self.module.subprocess, "run", return_value=completed):
+                with self.assertRaisesRegex(RuntimeError, "invalid SSH collection response"):
+                    self.module.read_remote(node, 12, 2048)
 
     def test_write_collection_verifies_checksum_and_preserves_node_path(self):
         data = b'{"inbounds": []}\n'
@@ -186,7 +307,7 @@ class RemoteBackupTest(unittest.TestCase):
         self.assertEqual(ai.ssh_port, "2222")
         self.assertIn("/opt/xray/.env", ai.paths)
 
-    def test_build_nodes_defaults_to_private_network_normal_target_and_no_remote_ai_target(self):
+    def test_build_nodes_defaults_to_no_remote_targets(self):
         original = os.environ.copy()
         try:
             for name in (
@@ -194,6 +315,7 @@ class RemoteBackupTest(unittest.TestCase):
                 "DATAPLANE_SSH_TARGET",
                 "DB_BACKUP_AI_NODE_SSH_TARGET",
                 "AI_NODE_SSH_TARGET",
+                "AI_NODE_SSH_TARGETS",
                 "DB_BACKUP_AI_NODE_SSH_PORT",
             ):
                 os.environ.pop(name, None)
@@ -202,7 +324,7 @@ class RemoteBackupTest(unittest.TestCase):
             os.environ.clear()
             os.environ.update(original)
 
-        self.assertEqual(normal.target, "root@100.116.187.106")
+        self.assertEqual(normal.target, "")
         self.assertEqual(normal.ssh_port, "22")
         self.assertEqual(ai.target, "")
         self.assertEqual(ai.ssh_port, "22")
@@ -214,6 +336,35 @@ class RemoteBackupTest(unittest.TestCase):
                 "/root/xray-routing-panel/app/xray/.env",
             ),
         )
+
+    def test_build_nodes_prefers_plural_ai_targets_over_singular_aliases(self):
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_AI_NODE_SSH_TARGET"] = "root@legacy-ai"
+            os.environ["AI_NODE_SSH_TARGET"] = "root@legacy-ai-2"
+            os.environ["AI_NODE_SSH_TARGETS"] = "root@first-ai,root@second-ai"
+            nodes = self.module.build_nodes()
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+        self.assertEqual(len(nodes), 3)
+        self.assertEqual(nodes[1].target, "root@first-ai")
+        self.assertEqual(nodes[1].role, "ai-data-plane-1")
+        self.assertEqual(nodes[2].target, "root@second-ai")
+        self.assertEqual(nodes[2].role, "ai-data-plane-2")
+
+    def test_build_nodes_ignores_compose_placeholder_before_dataplane_fallback(self):
+        original = os.environ.copy()
+        try:
+            os.environ["DB_BACKUP_DATAPLANE_SSH_TARGET"] = "root@<normal-data-plane-host>"
+            os.environ["DATAPLANE_SSH_TARGET"] = "root@normal-from-env"
+            normal, _ = self.module.build_nodes()
+        finally:
+            os.environ.clear()
+            os.environ.update(original)
+
+        self.assertEqual(normal.target, "root@normal-from-env")
 
     def test_explicit_remote_paths_still_require_sibling_env_file(self):
         original = os.environ.copy()

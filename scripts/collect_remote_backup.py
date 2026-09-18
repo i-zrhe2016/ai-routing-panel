@@ -16,6 +16,9 @@ import json
 import os
 import re
 import shlex
+import shutil
+import socket
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -114,7 +117,7 @@ DEFAULT_DATAPLANE_DEPLOY_ROOT = "/root/xray-routing-panel"
 DEFAULT_AI_CONFIG_PATH = "/etc/xray/config.json"
 DEFAULT_AI_ENV_PATH = "/etc/xray/.env"
 DEFAULT_AI_DEPLOY_ROOT = "/root/xray-routing-panel"
-DEFAULT_NORMAL_TARGET = "root@100.116.187.106"
+DEFAULT_NORMAL_TARGET = ""
 DEFAULT_AI_TARGET = ""
 DEFAULT_AI_SSH_PORT = "22"
 DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -128,10 +131,80 @@ DEFAULT_NORMAL_REMOTE_PATHS = (
     "/root/xray-routing-panel/app/xray/reports/hourly-domains/latest.json",
 )
 DEFAULT_AI_REMOTE_PATHS = (DEFAULT_AI_CONFIG_PATH, DEFAULT_AI_ENV_PATH)
+DEFAULT_TAILSCALE_SOCKET = "/var/run/tailscale/tailscaled.sock"
+DEFAULT_TAILSCALE_BIN = "tailscale"
+DEFAULT_TAILSCALE_BROKER_SOCKET = "/var/run/xray-backup/tailscale-ssh.sock"
+SUPPORTED_SSH_TRANSPORTS = {"openssh", "tailscale", "tailscale-broker"}
 
 
 def env_enabled(name: str, default: str = "0") -> bool:
     return str(os.environ.get(name, default)).strip().lower() in TRUE_VALUES
+
+
+def ssh_transport() -> str:
+    transport = str(os.environ.get("DB_BACKUP_SSH_TRANSPORT", "tailscale")).strip().lower()
+    if transport not in SUPPORTED_SSH_TRANSPORTS:
+        raise ValueError(f"unsupported backup SSH transport: {transport}")
+    return transport
+
+
+def _split_targets(value: str) -> tuple[str, ...]:
+    targets = []
+    for raw in re.split(r"[,\n]+", str(value or "")):
+        target = raw.strip()
+        if not target or "<" in target or ">" in target:
+            continue
+        targets.append(target)
+    return tuple(targets)
+
+
+def _configured_targets(*names: str) -> tuple[str, ...]:
+    for name in names:
+        targets = _split_targets(os.environ.get(name, ""))
+        if targets:
+            return targets
+    return ()
+
+
+def _configured_target(*names: str) -> str:
+    return (_configured_targets(*names) or ("",))[0]
+
+
+def _tailscale_executable() -> str:
+    configured = str(
+        os.environ.get("DB_BACKUP_TAILSCALE_BIN", DEFAULT_TAILSCALE_BIN)
+    ).strip() or DEFAULT_TAILSCALE_BIN
+    resolved = configured if "/" in configured else shutil.which(configured)
+    if not resolved or not os.access(resolved, os.X_OK):
+        raise RuntimeError("Tailscale SSH CLI is unavailable in the backup container")
+    return resolved
+
+
+def _tailscale_socket() -> str:
+    socket_path = str(
+        os.environ.get("DB_BACKUP_TAILSCALE_SOCKET", DEFAULT_TAILSCALE_SOCKET)
+    ).strip() or DEFAULT_TAILSCALE_SOCKET
+    try:
+        socket_mode = os.stat(socket_path).st_mode
+    except OSError as exc:
+        raise RuntimeError("Tailscale daemon socket is unavailable in the backup container") from exc
+    if not stat.S_ISSOCK(socket_mode):
+        raise RuntimeError("Tailscale daemon socket is unavailable in the backup container")
+    return socket_path
+
+
+def _tailscale_broker_socket() -> str:
+    return str(
+        os.environ.get(
+            "DB_BACKUP_TAILSCALE_BROKER_SOCKET", DEFAULT_TAILSCALE_BROKER_SOCKET
+        )
+    ).strip() or DEFAULT_TAILSCALE_BROKER_SOCKET
+
+
+def _broker_response_limit(node: RemoteNode, max_bytes: int) -> int:
+    # Base64 expands each file by at most 4/3; leave room for JSON metadata and
+    # paths while keeping the limit tied to the configured per-file bound.
+    return max(16 * 1024 * 1024, max(1, max_bytes) * max(1, len(node.paths)) * 2 + 1024 * 1024)
 
 
 def parse_non_negative_int(value: str, default: int) -> int:
@@ -145,6 +218,17 @@ def parse_non_negative_int(value: str, default: int) -> int:
     if parsed < 0:
         raise ValueError(f"invalid non-negative integer: {value!r}")
     return parsed
+
+
+def _validate_remote_payload(payload: object, role: str) -> dict:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != 1
+        or payload.get("role") != role
+        or not isinstance(payload.get("files"), list)
+    ):
+        raise RuntimeError(f"invalid SSH collection response for {role}")
+    return payload
 
 
 def parse_paths(value: str, defaults: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -193,12 +277,12 @@ def validate_options(options: tuple[str, ...]) -> None:
     }
     index = 0
     while index < len(options):
-        token = options[index]
-        if token in allowed_flags:
+        option_value = options[index]
+        if option_value in allowed_flags:
             index += 1
             continue
-        if token != "-o" or index + 1 >= len(options):
-            raise ValueError(f"unsupported remote backup SSH option: {token}")
+        if option_value != "-o" or index + 1 >= len(options):
+            raise ValueError(f"unsupported remote backup SSH option: {option_value}")
         key = options[index + 1].split("=", 1)[0].strip().lower()
         if key in dangerous_keys or key not in allowed_keys:
             raise ValueError(f"unsupported remote backup SSH option: {options[index + 1]}")
@@ -267,18 +351,16 @@ class RemoteNode:
 
 
 def build_nodes() -> tuple[RemoteNode, ...]:
-    normal_target = str(
-        os.environ.get(
-            "DB_BACKUP_DATAPLANE_SSH_TARGET",
-            os.environ.get("DATAPLANE_SSH_TARGET", DEFAULT_NORMAL_TARGET),
-        )
-    ).strip()
-    ai_target = str(
-        os.environ.get(
-            "DB_BACKUP_AI_NODE_SSH_TARGET",
-            os.environ.get("AI_NODE_SSH_TARGET", DEFAULT_AI_TARGET),
-        )
-    ).strip()
+    normal_target = (
+        _configured_target("DB_BACKUP_DATAPLANE_SSH_TARGET", "DATAPLANE_SSH_TARGET")
+        or DEFAULT_NORMAL_TARGET
+    )
+    ai_targets = _configured_targets(
+        "DB_BACKUP_AI_NODE_SSH_TARGETS",
+        "AI_NODE_SSH_TARGETS",
+        "DB_BACKUP_AI_NODE_SSH_TARGET",
+        "AI_NODE_SSH_TARGET",
+    )
     normal_config = str(
         os.environ.get("DB_BACKUP_DATAPLANE_CONFIG_PATH", os.environ.get("DATAPLANE_CONFIG_PATH", ""))
     ).strip()
@@ -327,27 +409,40 @@ def build_nodes() -> tuple[RemoteNode, ...]:
     default_known_hosts = str(
         os.environ.get("DB_BACKUP_SSH_KNOWN_HOSTS", DEFAULT_KNOWN_HOSTS)
     ).strip() or DEFAULT_KNOWN_HOSTS
-    return (
-        RemoteNode(
-            role="normal-data-plane",
-            target=normal_target,
-            paths=normal_paths,
-            known_hosts=str(
-                os.environ.get("DB_BACKUP_DATAPLANE_KNOWN_HOSTS", default_known_hosts)
-            ).strip()
-            or default_known_hosts,
-            ssh_port=str(os.environ.get("DB_BACKUP_DATAPLANE_SSH_PORT", "22")).strip() or "22",
-            options=normal_options,
-            required_paths=required_paths(
-                normal_paths,
-                normal_config,
-                DEFAULT_DATAPLANE_ENV_PATH,
-            ),
-            restore_root=normal_restore_root,
+    normal_node = RemoteNode(
+        role="normal-data-plane",
+        target=normal_target,
+        paths=normal_paths,
+        known_hosts=str(
+            os.environ.get("DB_BACKUP_DATAPLANE_KNOWN_HOSTS", default_known_hosts)
+        ).strip()
+        or default_known_hosts,
+        ssh_port=str(os.environ.get("DB_BACKUP_DATAPLANE_SSH_PORT", "22")).strip() or "22",
+        options=normal_options,
+        required_paths=required_paths(
+            normal_paths,
+            normal_config,
+            DEFAULT_DATAPLANE_ENV_PATH,
         ),
+        restore_root=normal_restore_root,
+    )
+    if not ai_targets:
+        ai_targets = ("",)
+    ai_ids = _split_targets(os.environ.get("AI_NODE_IDS", ""))
+    ai_roles = []
+    for index, _ in enumerate(ai_targets):
+        if len(ai_targets) == 1:
+            role = "ai-data-plane"
+        else:
+            suffix = ai_ids[index] if index < len(ai_ids) else str(index + 1)
+            role = f"ai-data-plane-{safe_component(suffix)}"
+            if role in ai_roles:
+                role = f"{role}-{index + 1}"
+        ai_roles.append(role)
+    ai_nodes = tuple(
         RemoteNode(
-            role="ai-data-plane",
-            target=ai_target,
+            role=role,
+            target=target,
             paths=ai_paths,
             known_hosts=str(
                 os.environ.get("DB_BACKUP_AI_NODE_KNOWN_HOSTS", DEFAULT_AI_KNOWN_HOSTS)
@@ -360,39 +455,47 @@ def build_nodes() -> tuple[RemoteNode, ...]:
             options=ai_options,
             required_paths=required_paths(ai_paths, ai_config, DEFAULT_AI_ENV_PATH),
             restore_root=ai_restore_root,
-        ),
+        )
+        for role, target in zip(ai_roles, ai_targets)
     )
+    return (normal_node, *ai_nodes)
+
+
+def _read_broker_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
+    request = {
+        "version": 1,
+        "role": node.role,
+        "maxBytes": max_bytes,
+    }
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(max(1, timeout + 5))
+    try:
+        client.connect(_tailscale_broker_socket())
+        client.sendall((json.dumps(request, separators=(",", ":")) + "\n").encode("utf-8"))
+        response = b""
+        while not response.endswith(b"\n"):
+            chunk = client.recv(65536)
+            if not chunk:
+                break
+            response += chunk
+            if len(response) > _broker_response_limit(node, max_bytes):
+                raise RuntimeError("Tailscale SSH broker response is too large")
+    except OSError as exc:
+        raise RuntimeError("Tailscale SSH broker is unavailable") from exc
+    finally:
+        client.close()
+    try:
+        envelope = json.loads(response.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("invalid Tailscale SSH broker response") from exc
+    if not isinstance(envelope, dict) or envelope.get("version") != 1:
+        raise RuntimeError("invalid Tailscale SSH broker response")
+    if not envelope.get("ok"):
+        raise RuntimeError(f"Tailscale SSH broker rejected {node.role}")
+    return _validate_remote_payload(envelope.get("payload"), node.role)
 
 
 def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
-    validate_options(node.options)
-    options = (
-        *node.options,
-        "-o",
-        "BatchMode=no",
-        "-o",
-        "PubkeyAuthentication=no",
-        "-o",
-        "PreferredAuthentications=password,keyboard-interactive",
-        "-o",
-        "PasswordAuthentication=yes",
-        "-o",
-        "KbdInteractiveAuthentication=yes",
-        "-o",
-        "ChallengeResponseAuthentication=yes",
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        f"UserKnownHostsFile={node.known_hosts}",
-        "-o",
-        f"ConnectTimeout={max(1, timeout)}",
-        "-o",
-        "ServerAliveInterval=5",
-        "-o",
-        "ServerAliveCountMax=1",
-        "-p",
-        node.ssh_port,
-    )
     remote_command = " ".join(
         shlex.quote(value)
         for value in (
@@ -405,15 +508,69 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
             *node.paths,
         )
     )
+    transport = ssh_transport()
+    if transport == "tailscale-broker":
+        return _read_broker_remote(node, timeout, max_bytes)
+    if transport == "tailscale":
+        if node.options:
+            raise ValueError("SSH options are not supported with Tailscale SSH transport")
+        if node.ssh_port != "22":
+            raise ValueError("custom SSH ports are not supported with Tailscale SSH transport")
+        command = [
+            _tailscale_executable(),
+            "--socket",
+            _tailscale_socket(),
+            "ssh",
+            node.target,
+            remote_command,
+        ]
+    else:
+        validate_options(node.options)
+        options = (
+            *node.options,
+            "-o",
+            "BatchMode=no",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-o",
+            "PasswordAuthentication=yes",
+            "-o",
+            "KbdInteractiveAuthentication=yes",
+            "-o",
+            "ChallengeResponseAuthentication=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={node.known_hosts}",
+            "-o",
+            f"ConnectTimeout={max(1, timeout)}",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=1",
+            "-p",
+            node.ssh_port,
+        )
+        command = [
+            os.environ.get("DB_BACKUP_SSH_BIN", "ssh"),
+            *options,
+            node.target,
+            remote_command,
+        ]
     try:
         completed = subprocess.run(
-            [os.environ.get("DB_BACKUP_SSH_BIN", "ssh"), *options, node.target, remote_command],
+            command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=None if transport == "openssh" else subprocess.DEVNULL,
             text=True,
             timeout=max(1, timeout + 5),
             check=False,
         )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"{transport} SSH executable is unavailable") from exc
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"SSH timeout for {node.role}") from exc
     if completed.returncode != 0:
@@ -423,14 +580,7 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"invalid SSH collection response for {node.role}") from exc
-    if (
-        not isinstance(payload, dict)
-        or payload.get("version") != 1
-        or payload.get("role") != node.role
-        or not isinstance(payload.get("files"), list)
-    ):
-        raise RuntimeError(f"invalid SSH collection response for {node.role}")
-    return payload
+    return _validate_remote_payload(payload, node.role)
 
 
 def write_collection(output_dir: Path, node: RemoteNode, payload: dict) -> dict:
@@ -512,6 +662,7 @@ def collect_nodes(
     output_dir: Path,
     nodes: tuple[RemoteNode, ...],
     required: bool,
+    raise_on_required: bool = True,
 ) -> list[dict]:
     results = []
     timeout = parse_non_negative_int(os.environ.get("DB_BACKUP_SSH_TIMEOUT_SECONDS", "20"), 20)
@@ -524,19 +675,21 @@ def collect_nodes(
             # The AI data plane may intentionally run as a local Docker
             # service.  Strict collection must gate configured SSH nodes, not
             # fail because that optional remote target is unset.
-            if required and node.role != "ai-data-plane":
+            if required and node.role == "normal-data-plane" and raise_on_required:
                 raise RuntimeError(f"missing SSH target for {node.role}")
+            missing_target = required and node.role == "normal-data-plane"
             results.append(
                 {
                     "role": node.role,
                     "target": node.target,
                     "sshPort": node.ssh_port,
                     "knownHosts": node.known_hosts,
-                    "status": "skipped_no_target",
+                    "status": "failed" if missing_target else "skipped_no_target",
                     "requestedPaths": list(node.paths),
                     "requiredPaths": list(node.required_paths or node.paths[:1]),
                     "restoreRoot": node.restore_root,
                     "recoveryReady": False,
+                    **({"error": f"missing SSH target for {node.role}"} if missing_target else {}),
                 }
             )
             continue
@@ -544,7 +697,7 @@ def collect_nodes(
             payload = read_remote(node, timeout, max_bytes)
             node_result = write_collection(output_dir, node, payload)
             results.append(node_result)
-            if required and not node_result.get("recoveryReady", False):
+            if required and not node_result.get("recoveryReady", False) and raise_on_required:
                 raise RuntimeError(f"remote recovery artifacts are incomplete for {node.role}")
         except Exception as exc:
             results.append(
@@ -561,12 +714,16 @@ def collect_nodes(
                     "error": str(exc)[:500],
                 }
             )
-            if required:
+            if required and raise_on_required:
                 raise RuntimeError(str(exc)) from exc
     return results
 
 
-def collect_remote_configs(output_dir: Path, required: bool = False) -> dict:
+def collect_remote_configs(
+    output_dir: Path,
+    required: bool = False,
+    raise_on_required: bool = True,
+) -> dict:
     output_dir = Path(output_dir)
     if output_dir.exists():
         if not output_dir.is_dir():
@@ -586,10 +743,25 @@ def collect_remote_configs(output_dir: Path, required: bool = False) -> dict:
         output_dir,
         nodes,
         required,
+        raise_on_required=False,
     )
     manifest_path = output_dir / "remote-node-collection.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.chmod(manifest_path, 0o600)
+    if required and raise_on_required:
+        failure = next(
+            (
+                node
+                for node in manifest["nodes"]
+                if node.get("status") == "failed"
+                or (node.get("target") and not node.get("recoveryReady", False))
+            ),
+            None,
+        )
+        if failure:
+            raise RuntimeError(
+                str(failure.get("error") or f"remote recovery artifacts are incomplete for {failure.get('role', 'node')}")
+            )
     return {"output_dir": output_dir, "manifest_path": manifest_path, "manifest": manifest}
 
 

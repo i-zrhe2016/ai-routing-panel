@@ -59,7 +59,7 @@ class NodeRecoveryTest(unittest.TestCase):
             )
         normal_node = self.collector.RemoteNode(
             role="normal-data-plane",
-            target="root@normal.example",
+            target="root@normal-host",
             paths=tuple(normal_paths),
             known_hosts="/tmp/known_hosts",
             required_paths=(
@@ -140,6 +140,170 @@ class NodeRecoveryTest(unittest.TestCase):
             sources = {node["role"]: node["source"] for node in validated["nodeManifest"]["nodes"]}
             self.assertEqual(sources["normal-data-plane"], "local-runtime")
             self.assertEqual(sources["ai-data-plane"], "control-plane-local")
+
+    def test_multiple_remote_ai_nodes_keep_distinct_recovery_roles(self):
+        paths = (
+            "/root/xray-routing-panel/app/xray/runtime/config.json",
+            "/root/xray-routing-panel/app/xray/.env",
+        )
+        files = [
+            {
+                "archivePath": "database/panel.db",
+                "sourcePath": "/data/panel.db",
+                "size": 1,
+                "sha256": "database-hash",
+            }
+        ]
+        nodes = []
+        for role, target in (
+            ("normal-data-plane", "root@normal-host"),
+            ("ai-data-plane-hawaii", "root@hawaii-host"),
+            ("ai-data-plane-taiwan", "root@taiwan-host"),
+        ):
+            node_files = []
+            for path, restore_path in (
+                (paths[0], "app/xray/runtime/config.json"),
+                (paths[1], "app/xray/.env"),
+            ):
+                staged = f"{role}/root/xray-routing-panel/app/xray/{'runtime/config.json' if path.endswith('config.json') else '.env'}"
+                files.append(
+                    {
+                        "archivePath": f"nodes/{staged}",
+                        "sourcePath": path,
+                        "size": 1,
+                        "sha256": f"{role}-{restore_path}",
+                    }
+                )
+                node_files.append(
+                    {
+                        "path": path,
+                        "status": "ok",
+                        "stagedPath": staged,
+                        "restorePath": restore_path,
+                    }
+                )
+            nodes.append(
+                {
+                    "role": role,
+                    "target": target,
+                    "status": "ok",
+                    "requestedPaths": list(paths),
+                    "requiredPaths": list(paths),
+                    "files": node_files,
+                }
+            )
+
+        manifest = self.recovery.build_node_recovery_manifest(files, {"nodes": nodes})
+
+        self.assertTrue(manifest["recoveryReady"])
+        roles = {node["role"] for node in manifest["nodes"]}
+        self.assertEqual(
+            roles,
+            {"normal-data-plane", "ai-data-plane-hawaii", "ai-data-plane-taiwan"},
+        )
+        self.assertEqual(
+            {node["source"] for node in manifest["nodes"]},
+            {"remote-ssh"},
+        )
+
+    def test_recovery_role_validation_rejects_arbitrary_and_empty_ai_roles(self):
+        self.assertTrue(self.recovery.is_recoverable_role("ai-data-plane-hawaii"))
+        self.assertFalse(self.recovery.is_recoverable_role("evil-node"))
+        self.assertFalse(self.recovery.is_recoverable_role("ai-data-plane-"))
+
+    def test_targetless_ai_collection_status_controls_fallback(self):
+        files = [
+            {
+                "archivePath": "database/panel.db",
+                "sourcePath": "/data/panel.db",
+                "size": 1,
+                "sha256": "database-hash",
+            },
+            {
+                "archivePath": "config/app/xray/runtime/config.json",
+                "sourcePath": "/app/xray/runtime/config.json",
+                "size": 1,
+                "sha256": "normal-config-hash",
+            },
+            {
+                "archivePath": "config/app/xray/runtime/config-ai-node.json",
+                "sourcePath": "/app/xray/runtime/config-ai-node.json",
+                "size": 1,
+                "sha256": "ai-config-hash",
+            },
+            {
+                "archivePath": "config/app/xray/.env",
+                "sourcePath": "/app/xray/.env",
+                "size": 1,
+                "sha256": "env-hash",
+            },
+        ]
+        for status, expected_source in (
+            ("failed", "remote-ssh"),
+            ("partial", "remote-ssh"),
+            ("skipped_no_target", "control-plane-local"),
+        ):
+            with self.subTest(status=status):
+                manifest = self.recovery.build_node_recovery_manifest(
+                    files,
+                    {
+                        "nodes": [
+                            {
+                                "role": "ai-data-plane",
+                                "target": "",
+                                "status": status,
+                                "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
+                                "files": [],
+                            }
+                        ]
+                    },
+                )
+
+                ai_node = next(
+                    item for item in manifest["nodes"] if item["role"] == "ai-data-plane"
+                )
+                self.assertEqual(ai_node["source"], expected_source)
+
+    def test_skipped_ai_inventory_is_retained_with_other_remote_ai_nodes(self):
+        manifest = self.recovery.build_node_recovery_manifest(
+            [
+                {
+                    "archivePath": "database/panel.db",
+                    "sourcePath": "/data/panel.db",
+                    "size": 1,
+                    "sha256": "database-hash",
+                }
+            ],
+            {
+                "nodes": [
+                    {
+                        "role": "ai-data-plane",
+                        "target": "",
+                        "status": "skipped_no_target",
+                        "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
+                        "files": [],
+                    },
+                    {
+                        "role": "ai-data-plane-hawaii",
+                        "target": "root@hawaii-host",
+                        "status": "failed",
+                        "requiredPaths": ["/etc/xray/config.json", "/etc/xray/.env"],
+                        "files": [],
+                    },
+                ]
+            },
+        )
+
+        nodes = {item["role"]: item for item in manifest["nodes"]}
+        self.assertEqual(nodes["ai-data-plane"]["source"], "control-plane-local")
+        self.assertEqual(nodes["ai-data-plane-hawaii"]["source"], "remote-ssh")
+
+    def test_recovery_manifest_rejects_unknown_remote_role(self):
+        with self.assertRaisesRegex(ValueError, "unsupported recovery node role"):
+            self.recovery.build_node_recovery_manifest(
+                [],
+                {"nodes": [{"role": "evil-node", "target": "root@evil-host"}]},
+            )
 
     def test_prepare_node_creates_ready_standalone_compose_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:

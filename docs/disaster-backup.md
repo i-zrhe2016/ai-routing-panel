@@ -27,7 +27,7 @@ flowchart LR
 任务入口是 `scripts/run_db_backup_cycle.py`：
 
 1. 调用 `scripts/backup_db.py`，通过 SQLite 在线备份 API 生成 `backups/<prefix>-<UTC 时间戳>.db`。
-2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，以严格只读 SSH 采集普通数据面的主配置与可选环境文件；本机 AI 备用由 `DB_BACKUP_EXTRA_PATHS` 归档，不发起 AI SSH。
+2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，通过宿主机 Tailscale CLI/socket 执行严格只读 `tailscale ssh`，采集普通数据面和已配置远端 AI 节点的主配置与可选环境文件；没有远端 AI 目标时，本机 AI 备用由 `DB_BACKUP_EXTRA_PATHS` 归档。
 3. 调用 `scripts/build_backup_bundle.py`，把数据库快照放在 `database/`、控制面额外路径放在 `config/`、远端 staging 放在 `nodes/`，并写入 `backup-manifest.json` 和 `node-recovery-manifest.json`。
 4. 重新校验归档内所有文件的大小和 SHA-256，并把节点恢复状态写入 `node-recovery-status.json`。
 5. `DB_BACKUP_R2_ENABLED=1` 时，使用 R2 S3 兼容 API 上传加密归档。
@@ -51,7 +51,7 @@ Docker Compose 的备份容器默认收集：
 - Compose、ops-reporting Compose、`.env`/`.env.ops-reporting`
 - Xray `.env`、渲染运行配置、报告、备份脚本和 `data/uploads`
 
-项目目录和 `/srv/xray-ops` 均只读挂载到备份容器；缺失的可选文件会记录在 manifest 中，不阻断 `panel.db` 备份。启用 SSH 采集后，归档还会加入：
+项目目录和 `/srv/xray-ops` 均只读挂载到备份容器；缺失的可选文件会记录在 manifest 中，不阻断 `panel.db` 备份。远端节点采集默认关闭；启用完整节点模式后，归档还会加入：
 
 ```text
 database/
@@ -64,7 +64,7 @@ backup-manifest.json
 node-recovery-manifest.json
 ```
 
-普通数据面通过控制面内网 SSH `root@100.116.187.106:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `redacted-ip-004`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
+普通数据面和显式配置的远端 AI 节点通过 Tailscale SSH 管理，主配置默认是 `/root/xray-routing-panel/app/xray/runtime/config.json`；未配置远端 AI 目标时，本机 AI 备用配置随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整边界见[远端节点配置采集](remote-node-backup.md)。
 
 ## 配置
 
@@ -76,16 +76,22 @@ node-recovery-manifest.json
 | `DB_BACKUP_BUNDLE_DIR` | `DB_BACKUP_DIR` | 灾备归档本地目录 |
 | `DB_BACKUP_BUNDLE_KEEP_DAYS` | `DB_BACKUP_KEEP_DAYS` | 本地灾备归档保留天数，`0` 表示不清理 |
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过 SSH 读取普通数据面 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `1` 时所有已配置远端节点的必需恢复文件必须成功；`0` 时记录失败但继续保留控制面归档 |
-| `DB_BACKUP_DATAPLANE_SSH_TARGET` | `root@100.116.187.106` | 普通数据面内网 SSH 目标；采集器不使用私钥 |
-| `DB_BACKUP_SSH_OPTIONS` | 空 | 仅允许 `-4`/`-6`、日志级别和连接超时/keepalive 等安全选项 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `0`，脚本默认 `0` | 是否在打包前通过远端 SSH 读取节点配置；完整节点模式设为 `1` |
+| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | Compose 为 `0` | 所有已配置远端节点的必需恢复文件必须成功；完整节点模式设为 `1`，计划维护时才保持为 `0` |
+| `DB_BACKUP_SSH_TRANSPORT` | `tailscale-broker`（Compose） | Compose 通过隔离 broker 执行 `tailscale ssh`；直接运行采集器可用 `tailscale`，兼容旧环境时可用 `openssh` |
+| `DB_BACKUP_TAILSCALE_BROKER_SOCKET` | `/var/run/xray-backup/tailscale-ssh.sock` | 备份容器访问 broker 的 Unix socket；不暴露宿主机 Tailscale LocalAPI |
+| `DB_BACKUP_TAILSCALE_BIN` | `/usr/local/bin/tailscale`（broker） | 隔离 broker 内的 Tailscale CLI 路径 |
+| `DB_BACKUP_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock`（broker） | 仅隔离 broker 使用的宿主机 Tailscale daemon socket |
+| `DB_BACKUP_TAILSCALE_BIN_HOST` | `./scripts/tailscale-disabled`（未配置时） | 隔离 broker 的宿主机 Tailscale CLI 源路径；启用完整节点模式时必须改为实际路径 |
+| `DB_BACKUP_TAILSCALE_SOCKET_HOST` | `./scripts/tailscale-disabled`（未配置时） | 隔离 broker 的宿主机 daemon socket 源路径；启用完整节点模式时必须改为实际路径 |
+| `DB_BACKUP_DATAPLANE_SSH_TARGET` | 部署环境提供的 `root@<normal-data-plane-host>` | 普通数据面 Tailscale SSH 目标；不填写密码或私钥 |
+| `DB_BACKUP_SSH_OPTIONS` | 空 | 仅 `openssh` 传输使用；Tailscale SSH 不接受 OpenSSH 选项 |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号/换行分隔；配置和 `.env` 是恢复必需文件，其余为可选 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
-| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 仅在显式启用远端 AI 节点 SSH 采集时使用 |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | 空 | 当前本机 AI 备用不使用远端采集 |
+| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | Tailscale SSH 必须保持 `22`；只有 `DB_BACKUP_SSH_TRANSPORT=openssh` 时才可使用自定义端口 |
+| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json,/etc/xray/.env`（远端目标存在时） | 远端 AI 节点只读采集路径；为空时使用该默认值 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
-| `DB_BACKUP_RECOVERY_REQUIRED` | `0` | `1` 时不完整节点恢复包阻止后续上传；默认保留数据库备份并记录状态 |
+| `DB_BACKUP_RECOVERY_REQUIRED` | Compose 为 `0` | 不完整节点恢复包阻止后续上传；完整节点模式设为 `1`，控制面-only 归档保持为 `0` |
 | `DB_BACKUP_RECOVERY_STATUS_PATH` | 归档目录下的 `node-recovery-status.json` | 最近一次节点恢复完整性报告 |
 | `DB_BACKUP_R2_ENABLED` | `1`（Compose） | 是否将加密灾备归档上传到 R2；直接执行脚本时需显式设置并注入凭据 |
 | `DB_BACKUP_R2_ENDPOINT` | 空 | Cloudflare R2 S3 endpoint |
@@ -103,7 +109,9 @@ DB_BACKUP_EXTRA_PATHS=/app/xray/.env,/app/xray/runtime,/app/xray/reports,/data/u
 
 `DB_BACKUP_EXTRA_PATHS` 路径会被写入归档的 `config/` 前缀下，远端 SSH staging 则写入 `nodes/`，避免恢复时覆盖宿主机绝对路径。归档内的 `backup-manifest.json` 记录每个文件的来源、大小和 SHA-256；`remote-node-collection.json` 记录 SSH 目标和逐路径状态；`node-recovery-manifest.json` 再声明哪些文件足以快速恢复每类节点。
 
-`DB_BACKUP_EXTRA_PATHS` 可以包含业务敏感配置，但不要把 R2 密钥、SSH 私钥或其他不需要迁移的凭据目录加入列表；数据库快照和灾备归档在本地生成时仍是明文，文件权限统一为 `0600`，备份目录也必须限制为备份服务可读。R2 凭据只通过部署环境、Docker Secret 或外部 Secret 管理注入，灾备加密密码必须与 R2 Secret Access Key 分离保存。任何出现在聊天、日志或 shell 历史中的 token 都应立即撤销。
+启用完整节点的 Tailscale broker 采集前，必须在控制面 `.env` 中配置普通数据面目标、`DB_BACKUP_TAILSCALE_BIN_HOST` 和 `DB_BACKUP_TAILSCALE_SOCKET_HOST`；Compose 的 `scripts/tailscale-disabled` 回退只用于让本地-only 模式在未安装 Tailscale 的主机上能够启动，不能用于实际 Tailscale 采集。
+
+`DB_BACKUP_EXTRA_PATHS` 可以包含业务敏感配置，但不要把 R2 密钥、SSH 私钥或其他不需要迁移的凭据目录加入列表；数据库快照和灾备归档在本地生成时仍是明文，文件权限统一为 `0600`，备份目录也必须限制为备份服务可读。Tailscale SSH 的身份由宿主机 daemon 管理，备份容器只读映射 CLI 和 socket，不保存登录密码或私钥。R2 凭据只通过部署环境、Docker Secret 或外部 Secret 管理注入，灾备加密密码必须与 R2 Secret Access Key 分离保存。任何出现在聊天、日志或 shell 历史中的 token 都应立即撤销。
 
 ## R2 灾备保留策略
 
