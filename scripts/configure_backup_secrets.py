@@ -274,6 +274,14 @@ def _open_existing_file(directory_fd: int, name: str) -> int | None:
         raise
 
 
+def _verify_existing_file_security(file_fd: int) -> None:
+    file_stat = os.fstat(file_fd)
+    if file_stat.st_uid not in {0, os.geteuid()}:
+        raise ValueError("配置文件属主不受信任")
+    if stat.S_IMODE(file_stat.st_mode) & 0o077:
+        raise ValueError("配置文件权限必须禁止 group/other 访问（建议 0600）")
+
+
 def _open_private_temp(directory_fd: int, basename: str) -> tuple[int, str]:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     for _ in range(32):
@@ -371,6 +379,7 @@ def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
             lines = []
             source_stat = None
         else:
+            _verify_existing_file_security(source_fd)
             with os.fdopen(os.dup(source_fd), "r", encoding="utf-8", newline="") as handle:
                 lines = handle.read().splitlines(keepends=True)
             _parse_env_lines(lines)
@@ -473,7 +482,7 @@ def validate_values(values: dict[str, str]) -> list[str]:
             issues.append(f"{key} 必须是 0/1 或布尔值")
 
     bundle_enabled = _enabled(values.get("DB_BACKUP_BUNDLE_ENABLED"))
-    r2_enabled = _enabled(values.get("DB_BACKUP_R2_ENABLED"))
+    r2_enabled = _enabled(values.get("DB_BACKUP_R2_ENABLED"), default=False)
     encryption_password = values.get("DB_BACKUP_ENCRYPTION_PASSWORD", "")
     if (bundle_enabled or r2_enabled) and not encryption_password:
         issues.append("缺少 DB_BACKUP_ENCRYPTION_PASSWORD")
@@ -572,7 +581,7 @@ def interactive_updates(values: dict[str, str]) -> dict[str, str]:
     updates["DB_BACKUP_BUNDLE_ENABLED"] = "1" if bundle_enabled else "0"
     r2_enabled = _ask_yes_no(
         "是否启用 Cloudflare R2 灾备上传？",
-        _enabled(values.get("DB_BACKUP_R2_ENABLED")),
+        _enabled(values.get("DB_BACKUP_R2_ENABLED"), default=False),
     )
     updates["DB_BACKUP_R2_ENABLED"] = "1" if r2_enabled else "0"
     if r2_enabled:

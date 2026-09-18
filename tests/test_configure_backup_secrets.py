@@ -60,7 +60,7 @@ def test_atomic_write_preserves_unrelated_lines_and_uses_private_mode(tmp_path: 
         encoding="utf-8",
     )
     original_stat = env_file.stat()
-    env_file.chmod(0o640)
+    env_file.chmod(0o600)
 
     values = valid_values()
     write_env_file(env_file, values)
@@ -82,6 +82,7 @@ def test_failed_replace_keeps_original_file(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     original = "APP_ENV=production\nDB_BACKUP_R2_ENABLED=0\n"
     env_file.write_text(original, encoding="utf-8")
+    env_file.chmod(0o600)
 
     with (
         mock.patch.object(os, "replace", side_effect=OSError("injected replace failure")),
@@ -131,6 +132,7 @@ def test_temporary_file_is_private_before_replace(tmp_path: Path) -> None:
 def test_crlf_line_endings_and_default_env_path_are_preserved(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_bytes(b"APP_ENV=production\r\nDB_BACKUP_R2_ENABLED=0\r\n")
+    env_file.chmod(0o600)
 
     write_env_file(env_file, {"DB_BACKUP_R2_ENABLED": "1", "NEW_KEY": "value"})
 
@@ -407,8 +409,10 @@ def test_interactive_r2_setup_persists_and_redacts_values(tmp_path: Path, capsys
     bucket = "backup-bucket"
     access_key = "access-key-for-test"
     secret_key = "secret-key-for-test"
+    forbidden_in_prompts = (endpoint, bucket, access_key, secret_key, generated)
 
     def respond(prompt: str) -> str:
+        assert all(value not in prompt for value in forbidden_in_prompts)
         if "是否生成灾备归档？" in prompt:
             return ""
         if "是否启用 Cloudflare R2 灾备上传？" in prompt:
@@ -422,6 +426,7 @@ def test_interactive_r2_setup_persists_and_redacts_values(tmp_path: Path, capsys
         raise AssertionError(f"unexpected prompt: {prompt}")
 
     def respond_secret(prompt: str) -> str:
+        assert all(value not in prompt for value in forbidden_in_prompts)
         if "DB_BACKUP_R2_ACCESS_KEY_ID" in prompt:
             return access_key
         if "DB_BACKUP_R2_SECRET_ACCESS_KEY" in prompt:
