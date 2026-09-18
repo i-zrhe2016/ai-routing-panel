@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import tarfile
 import tempfile
@@ -100,31 +101,52 @@ def _resolve_password(
 def _decrypt_bundle(source: Path, destination: Path, passphrase: str) -> None:
     try:
         from cryptography.exceptions import InvalidTag
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
     except ImportError as exc:
         raise RuntimeError("cryptography is required to decrypt a disaster bundle") from exc
 
-    raw = source.read_bytes()
     header_size = len(MAGIC)
     salt_size = 16
     nonce_size = 12
-    minimum_size = header_size + salt_size + nonce_size + 1
-    if len(raw) < minimum_size or raw[:header_size] != MAGIC:
+    tag_size = 16
+    payload_start = header_size + salt_size + nonce_size
+    source_size = source.stat().st_size
+    if source_size < payload_start + tag_size:
         raise ValueError("invalid encrypted disaster bundle header")
 
-    salt_start = header_size
-    nonce_start = salt_start + salt_size
-    salt = raw[salt_start:nonce_start]
-    nonce = raw[nonce_start : nonce_start + nonce_size]
-    ciphertext = raw[nonce_start + nonce_size :]
+    with source.open("rb") as handle:
+        if handle.read(header_size) != MAGIC:
+            raise ValueError("invalid encrypted disaster bundle header")
+        salt = handle.read(salt_size)
+        nonce = handle.read(nonce_size)
+        if len(salt) != salt_size or len(nonce) != nonce_size:
+            raise ValueError("invalid encrypted disaster bundle header")
+        handle.seek(-tag_size, os.SEEK_END)
+        tag = handle.read(tag_size)
+        if len(tag) != tag_size:
+            raise ValueError("invalid encrypted disaster bundle header")
+        handle.seek(payload_start)
+
     key = Scrypt(salt=salt, length=32, n=2**14, r=8, p=1).derive(passphrase.encode())
+    ciphertext_size = source_size - payload_start - tag_size
+    decryptor = Cipher(algorithms.AES(key), modes.GCM(nonce, tag)).decryptor()
+    decryptor.authenticate_additional_data(MAGIC)
     try:
-        plaintext = AESGCM(key).decrypt(nonce, ciphertext, MAGIC)
+        with source.open("rb") as handle, destination.open("wb") as output:
+            handle.seek(payload_start)
+            remaining = ciphertext_size
+            while remaining:
+                chunk = handle.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ValueError("encrypted disaster bundle ended unexpectedly")
+                output.write(decryptor.update(chunk))
+                remaining -= len(chunk)
+            output.write(decryptor.finalize())
     except (InvalidTag, ValueError) as exc:
+        destination.unlink(missing_ok=True)
         raise ValueError("encrypted disaster bundle authentication failed") from exc
 
-    destination.write_bytes(plaintext)
     os.chmod(destination, 0o600)
 
 
@@ -338,18 +360,132 @@ def _write_file(path: Path, data: bytes, force: bool) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _ensure_output(output_dir: Path, force: bool) -> None:
+def _validate_output(output_dir: Path, force: bool) -> None:
     if output_dir.is_symlink():
         raise ValueError(f"restore output must not be a symlink: {output_dir}")
     if output_dir.exists() and not output_dir.is_dir():
         raise NotADirectoryError(f"restore output is not a directory: {output_dir}")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(output_dir, 0o700)
-    if any(output_dir.iterdir()) and not force:
+    if output_dir.exists() and any(output_dir.iterdir()) and not force:
         raise FileExistsError(
             f"restore output is not empty: {output_dir}; use a new directory or --force"
         )
+
+
+def _new_staging_directory(output_dir: Path) -> Path:
+    prefix = f".{output_dir.name or 'restore'}.restore-"
+    staging = Path(tempfile.mkdtemp(prefix=prefix, dir=output_dir.parent))
+    os.chmod(staging, 0o700)
+    return staging
+
+
+def _restore_destination(root: Path, relative: str) -> Path:
+    safe_relative = _safe_relative(relative, "restore path")
+    destination = root / PurePosixPath(safe_relative)
+    try:
+        destination.resolve().relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"restore path escapes output directory: {relative}") from exc
+
+    parent = root
+    for part in PurePosixPath(safe_relative).parts[:-1]:
+        parent /= part
+        if parent.is_symlink():
+            raise ValueError(f"restore path traverses a symlink: {relative}")
+    return destination
+
+
+def _staged_files(staging: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in sorted(staging.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"staging tree contains an unexpected symlink: {path}")
+        if path.is_file():
+            files.append(path)
+        elif not path.is_dir():
+            raise ValueError(f"staging tree contains an unexpected entry: {path}")
+    return files
+
+
+def _merge_staging(staging: Path, output: Path) -> None:
+    """Publish into an existing forced output with file-level rollback."""
+
+    output_root = output.resolve()
+    rollback = Path(tempfile.mkdtemp(prefix=f".{output.name}.rollback-", dir=output.parent))
+    staged_entries: list[tuple[Path, Path, Path | None]] = []
+    applied: list[tuple[Path, Path | None]] = []
+    created_directories: list[Path] = []
+    try:
+        for staged_file in _staged_files(staging):
+            relative = _safe_relative(
+                staged_file.relative_to(staging).as_posix(), "restore path"
+            )
+            target = _restore_destination(output_root, relative)
+            backup: Path | None = None
+            if target.exists() or target.is_symlink():
+                if target.is_dir() and not target.is_symlink():
+                    raise IsADirectoryError(f"restore target is a directory: {target}")
+                backup = rollback / PurePosixPath(relative)
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                if target.is_symlink():
+                    backup.symlink_to(os.readlink(target))
+                else:
+                    shutil.copy2(target, backup)
+            staged_entries.append((staged_file, target, backup))
+
+        for staged_file, target, backup in staged_entries:
+            missing_directories: list[Path] = []
+            parent = target.parent
+            while not parent.exists():
+                missing_directories.append(parent)
+                parent = parent.parent
+            target.parent.mkdir(parents=True, exist_ok=True)
+            for directory in reversed(missing_directories):
+                os.chmod(directory, 0o700)
+                created_directories.append(directory)
+            os.replace(staged_file, target)
+            applied.append((target, backup))
+            os.chmod(target, 0o600)
+        os.chmod(output, 0o700)
+    except Exception:
+        for target, backup in reversed(applied):
+            target.unlink(missing_ok=True)
+            if backup is not None:
+                os.replace(backup, target)
+        for directory in reversed(created_directories):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        raise
+    finally:
+        shutil.rmtree(rollback, ignore_errors=True)
+
+
+def _publish_staging(staging: Path, output: Path, force: bool) -> None:
+    if output.is_symlink():
+        raise ValueError(f"restore output must not be a symlink: {output}")
+    if not output.exists():
+        os.replace(staging, output)
+        os.chmod(output, 0o700)
+        return
+    if not output.is_dir():
+        raise NotADirectoryError(f"restore output is not a directory: {output}")
+    if not any(output.iterdir()):
+        output.rmdir()
+        try:
+            os.replace(staging, output)
+        except Exception:
+            output.mkdir(parents=True, exist_ok=True)
+            os.chmod(output, 0o700)
+            raise
+        os.chmod(output, 0o700)
+        return
+    if not force:
+        raise FileExistsError(
+            f"restore output is not empty: {output}; use a new directory or --force"
+        )
+    _merge_staging(staging, output)
 
 
 def prepare_restore(
@@ -386,48 +522,49 @@ def prepare_restore(
             )
 
         plans = _build_restore_plan(validated)
-        _ensure_output(output, force)
-        output_root = output.resolve()
-        restored_files: list[str] = []
-        with tarfile.open(plain_bundle, mode="r:gz") as archive:
-            members = _archive_member_index(archive)
-            for plan in plans:
-                destination = (output / PurePosixPath(plan.destination)).resolve()
-                try:
-                    destination.relative_to(output_root)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"restore path escapes output directory: {plan.destination}"
-                    ) from exc
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                os.chmod(destination.parent, 0o700)
-                _write_file(
-                    destination,
-                    _read_member_bytes(archive, members, plan.archive_path),
-                    force,
-                )
-                restored_files.append(plan.destination)
+        _validate_output(output, force)
+        staging = _new_staging_directory(output)
+        try:
+            output_root = staging.resolve()
+            restored_files: list[str] = []
+            with tarfile.open(plain_bundle, mode="r:gz") as archive:
+                members = _archive_member_index(archive)
+                for plan in plans:
+                    destination = _restore_destination(output_root, plan.destination)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    os.chmod(destination.parent, 0o700)
+                    _write_file(
+                        destination,
+                        _read_member_bytes(archive, members, plan.archive_path),
+                        False,
+                    )
+                    restored_files.append(plan.destination)
 
-        report = {
-            "version": 1,
-            "purpose": "restore-preparation",
-            "preparedAt": _now(),
-            "sourceBundle": Path(bundle_path).expanduser().name,
-            "encrypted": encrypted,
-            "recoveryReady": bool(readiness["recoveryReady"]),
-            "sharedReady": bool(readiness["sharedReady"]),
-            "allowIncomplete": bool(allow_incomplete),
-            "files": sorted(restored_files),
-            "nodes": readiness["nodes"],
-            "nextStep": "Review this tree, then perform service-specific recovery manually.",
-        }
-        _write_file(
-            output / RESTORE_REPORT_NAME,
-            (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-            force,
-        )
-        report["report"] = RESTORE_REPORT_NAME
-        return {**report, "outputDir": str(output.resolve())}
+            report = {
+                "version": 1,
+                "purpose": "restore-preparation",
+                "preparedAt": _now(),
+                "sourceBundle": Path(bundle_path).expanduser().name,
+                "encrypted": encrypted,
+                "recoveryReady": bool(readiness["recoveryReady"]),
+                "sharedReady": bool(readiness["sharedReady"]),
+                "allowIncomplete": bool(allow_incomplete),
+                "files": sorted(restored_files),
+                "nodes": readiness["nodes"],
+                "nextStep": "Review this tree, then perform service-specific recovery manually.",
+            }
+            _write_file(
+                staging / RESTORE_REPORT_NAME,
+                (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                False,
+            )
+            report["report"] = RESTORE_REPORT_NAME
+            result = {**report, "outputDir": str(output.resolve())}
+            _publish_staging(staging, output, force)
+            return result
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
 
 
 def _add_bundle_options(parser: argparse.ArgumentParser) -> None:

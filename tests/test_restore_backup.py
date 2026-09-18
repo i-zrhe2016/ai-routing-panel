@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -137,9 +138,35 @@ class RestoreBackupTest(unittest.TestCase):
             encrypted = root / "bundle.enc"
             self.uploader.encrypt_bundle(bundle, encrypted, "correct")
 
+            output = root / "restore"
             with self.assertRaisesRegex(ValueError, "authentication") as context:
-                self.restore.validate_restore_bundle(encrypted, passphrase="wrong")
+                self.restore.prepare_restore(encrypted, output, passphrase="wrong")
             self.assertNotIn("wrong", str(context.exception))
+            self.assertFalse(output.exists())
+
+    def test_failed_materialization_does_not_publish_partial_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle = self._create_bundle(root)
+            output = root / "restore"
+            original_write_file = self.restore._write_file
+            calls = 0
+
+            def fail_on_second_write(path, data, force):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("synthetic materialization failure")
+                return original_write_file(path, data, force)
+
+            with (
+                mock.patch.object(self.restore, "_write_file", side_effect=fail_on_second_write),
+                self.assertRaisesRegex(OSError, "synthetic materialization failure"),
+            ):
+                self.restore.prepare_restore(bundle, output)
+
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.glob(".restore.restore-*")), [])
 
     def test_incomplete_node_is_rejected_unless_explicitly_allowed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
