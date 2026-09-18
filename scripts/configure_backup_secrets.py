@@ -28,8 +28,8 @@ MANAGED_KEYS = (
     *R2_KEYS,
 )
 STATUS_KEYS = MANAGED_KEYS
-UNESCAPED_INTERPOLATION_PATTERN = re.compile(
-    r"(?<!\$)\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"
+INTERPOLATION_PATTERN = re.compile(
+    r"\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"
 )
 ENV_ASSIGNMENT = re.compile(
     r"^(?P<indent>\s*)(?:(?P<export>export)\s+)?"
@@ -56,7 +56,7 @@ def _quoted_end(value: str, quote: str) -> int:
 def _decode_double_quoted(value: str) -> str:
     decoded: list[str] = []
     index = 0
-    escapes = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\", '"': '"'}
+    escapes = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\", '"': '"', "$": "$"}
     while index < len(value):
         character = value[index]
         if character == "\\" and index + 1 < len(value):
@@ -71,6 +71,21 @@ def _decode_double_quoted(value: str) -> str:
         decoded.append(character)
         index += 1
     return "".join(decoded)
+
+
+def _has_unescaped_interpolation(value: str) -> bool:
+    for match in INTERPOLATION_PATTERN.finditer(value):
+        index = match.start()
+        if index and value[index - 1] == "$":
+            continue
+        backslashes = 0
+        index -= 1
+        while index >= 0 and value[index] == "\\":
+            backslashes += 1
+            index -= 1
+        if backslashes % 2 == 0:
+            return True
+    return False
 
 
 def _inline_comment_start(value: str) -> int | None:
@@ -102,14 +117,14 @@ def _parse_env_value(raw: str, reject_interpolation: bool = True) -> str:
         if trailing and not trailing.startswith("#"):
             raise ValueError("dotenv 引号值后存在无法解析的内容")
         quoted = value[1:end]
-        if value[0] == '"' and reject_interpolation and UNESCAPED_INTERPOLATION_PATTERN.search(quoted):
+        if value[0] == '"' and reject_interpolation and _has_unescaped_interpolation(quoted):
             raise ValueError("dotenv 值不能使用未转义的变量引用")
         return _decode_double_quoted(quoted) if value[0] == '"' else quoted
 
     comment_start = _inline_comment_start(value)
     if comment_start is not None:
         value = value[:comment_start].rstrip()
-    if reject_interpolation and UNESCAPED_INTERPOLATION_PATTERN.search(value):
+    if reject_interpolation and _has_unescaped_interpolation(value):
         raise ValueError("dotenv 值不能使用未转义的变量引用")
     return value
 
@@ -167,6 +182,13 @@ def validate_env_file_security(path: str | Path) -> list[str]:
         issues.append("配置文件属主不受信任")
     if stat.S_IMODE(file_stat.st_mode) & 0o077:
         issues.append("配置文件权限必须禁止 group/other 访问（建议 0600）")
+    if os.name == "posix":
+        try:
+            directory_fd = _open_trusted_directory(target.parent, create_missing=False)
+        except (OSError, ValueError):
+            issues.append("配置文件父目录不满足安全属主或写权限要求")
+        else:
+            os.close(directory_fd)
     return issues
 
 
@@ -178,7 +200,7 @@ def _quote_env_value(value: str) -> str:
     return f'"{escaped}"'
 
 
-def _open_trusted_directory(parent: Path) -> int:
+def _open_trusted_directory(parent: Path, create_missing: bool = True) -> int:
     if os.name != "posix":
         raise OSError("安全原子更新需要 POSIX 目录 fd 支持")
     absolute_parent = Path(os.path.abspath(parent))
@@ -193,6 +215,8 @@ def _open_trusted_directory(parent: Path) -> int:
                 next_fd = os.open(component, flags, dir_fd=directory_fd)
                 created = False
             except FileNotFoundError:
+                if not create_missing:
+                    raise
                 os.mkdir(component, 0o700, dir_fd=directory_fd)
                 next_fd = os.open(component, flags, dir_fd=directory_fd)
                 created = True
@@ -200,9 +224,13 @@ def _open_trusted_directory(parent: Path) -> int:
                 if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
                     raise ValueError("配置路径的父目录不能是符号链接或普通文件") from exc
                 raise
-            if created:
-                os.fchmod(next_fd, 0o700)
-            _verify_directory_fd(next_fd)
+            try:
+                if created:
+                    os.fchmod(next_fd, 0o700)
+                _verify_directory_fd(next_fd)
+            except Exception:
+                os.close(next_fd)
+                raise
             os.close(directory_fd)
             directory_fd = next_fd
         return directory_fd

@@ -272,6 +272,28 @@ def test_check_rejects_insecure_env_file_permissions(tmp_path: Path) -> None:
 
 
 @posix_only
+def test_check_rejects_insecure_parent_directory(tmp_path: Path) -> None:
+    unsafe_parent = tmp_path / "unsafe"
+    unsafe_parent.mkdir(mode=0o700)
+    env_file = unsafe_parent / ".env"
+    values = valid_values()
+    env_file.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+    env_file.chmod(0o600)
+    unsafe_parent.chmod(0o777)
+
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--env-file", str(env_file), "--check"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "父目录" in completed.stdout
+
+
+@posix_only
 def test_check_command_returns_nonzero_for_incomplete_config(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     write_env_file(
@@ -386,6 +408,10 @@ def test_dotenv_hash_and_backslash_values_are_not_truncated(tmp_path: Path) -> N
     temp.write_text("DB_BACKUP_R2_ACCESS_KEY_ID='ends-with-backslash\\'\n", encoding="utf-8")
     _, parsed = read_env_file(temp)
     assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == "ends-with-backslash\\"
+
+    temp.write_text('DB_BACKUP_R2_ACCESS_KEY_ID="literal\\$ARCHIVE_PASSWORD"\n', encoding="utf-8")
+    _, parsed = read_env_file(temp)
+    assert parsed["DB_BACKUP_R2_ACCESS_KEY_ID"] == "literal$ARCHIVE_PASSWORD"
 
     values = {
         "DB_BACKUP_R2_ENABLED": "1",
