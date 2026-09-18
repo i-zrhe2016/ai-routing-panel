@@ -236,6 +236,33 @@ class RestoreBackupTest(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertEqual(list(root.glob(".restore.restore-*")), [])
 
+    def test_force_publish_rolls_back_when_target_permissions_fail(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle = self._create_bundle(root)
+            output = root / "restore"
+            target = output / "data" / "panel.db"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"original panel snapshot")
+            stale = output / "keep.txt"
+            stale.write_text("keep", encoding="utf-8")
+            real_chmod = self.restore.os.chmod
+
+            def fail_target_chmod(path, mode, *args, **kwargs):
+                if Path(path) == target and mode == 0o600:
+                    raise OSError("synthetic permission failure")
+                return real_chmod(path, mode, *args, **kwargs)
+
+            with (
+                mock.patch.object(self.restore.os, "chmod", side_effect=fail_target_chmod),
+                self.assertRaisesRegex(OSError, "synthetic permission failure"),
+            ):
+                self.restore.prepare_restore(bundle, output, force=True)
+
+            self.assertEqual(target.read_bytes(), b"original panel snapshot")
+            self.assertEqual(stale.read_text(encoding="utf-8"), "keep")
+            self.assertFalse((output / "restore-report.json").exists())
+
     def test_archive_path_safety_rejects_traversal_and_links(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
