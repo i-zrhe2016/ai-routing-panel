@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { NCard, NGrid, NGi, NList, NListItem, NSpin, NEmpty, NStatistic } from "naive-ui";
+import { NCard, NEmpty, NList, NListItem, NSpin } from "naive-ui";
 
 import { api } from "../store.js";
 import { useToast } from "../notify.js";
@@ -25,13 +25,30 @@ onMounted(async () => {
 <template>
   <n-spin :show="loading">
     <div v-if="data">
-      <n-grid cols="1 s:3" :x-gap="16" :y-gap="12" responsive="screen" item-responsive>
-        <n-gi><n-card><n-statistic label="生效订阅" :value="data.summary.service_count" /></n-card></n-gi>
-        <n-gi><n-card><n-statistic label="可续费" :value="data.summary.renewable_count" /></n-card></n-gi>
-        <n-gi><n-card><n-statistic label="进行中订单" :value="data.summary.open_order_count" /></n-card></n-gi>
-      </n-grid>
+      <header class="customer-page-head">
+        <h1>Your service</h1>
+        <p>查看当前订阅、续费状态和最近订单，不暴露底层 Xray / data plane 实现细节。</p>
+      </header>
 
-      <n-card title="最近订阅" style="margin-top:16px">
+      <section class="customer-summary-grid">
+        <article class="cc-metric">
+          <span class="cc-metric__label">ACTIVE SERVICES</span>
+          <strong>{{ data.summary.service_count }}</strong>
+          <small>当前生效订阅</small>
+        </article>
+        <article class="cc-metric">
+          <span class="cc-metric__label">RENEWABLE</span>
+          <strong>{{ data.summary.renewable_count }}</strong>
+          <small>当前可续费服务</small>
+        </article>
+        <article class="cc-metric">
+          <span class="cc-metric__label">OPEN ORDERS</span>
+          <strong>{{ data.summary.open_order_count }}</strong>
+          <small>进行中的订单</small>
+        </article>
+      </section>
+
+      <n-card title="My services" class="customer-list-card">
         <n-empty v-if="!data.services.length" description="暂无订阅" />
         <n-list v-else>
           <n-list-item v-for="s in data.services" :key="s.id">
@@ -40,7 +57,7 @@ onMounted(async () => {
         </n-list>
       </n-card>
 
-      <n-card title="最近订单" style="margin-top:16px">
+      <n-card title="Recent orders" class="customer-list-card">
         <n-empty v-if="!data.orders.length" description="暂无订单" />
         <n-list v-else>
           <n-list-item v-for="o in data.orders" :key="o.order_no">
