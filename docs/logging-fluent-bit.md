@@ -1,6 +1,6 @@
 # Fluent Bit 日志采集
 
-本模块按控制面、普通数据面和 AI 备用三个角色采集 Docker 主机日志和关键错误日志，经 Tailscale 发送到远端 Loki，再由控制面 Grafana 查询。当前 AI 备用与控制面共用主机，不额外启动一台日志主机。
+本模块按控制面、普通数据面和 AI 数据面三个角色采集 Docker 主机日志和关键错误日志，经 Tailscale 发送到 Loki，再由控制面 Grafana 查询。当前日志中心与 Grafana 都运行在控制面主机上，不额外启动一台日志主机。
 
 ![Fluent Bit log collection](diagrams/logging-fluent-bit.svg)
 
@@ -10,26 +10,27 @@
 
 | 组件 | 部署位置 | 职责 |
 | --- | --- | --- |
-| Fluent Bit Agent | 三台 Docker 主机 | 读取 Docker JSON 日志、Xray `error.log`/`ai-error.log`、allowlist 内的 systemd 错误日志；本地 filesystem 缓冲；通过 Tailscale 推送 |
-| Loki | 独立日志中心主机 | 单实例 filesystem 存储、LogQL 查询、7 天保留 |
+| Fluent Bit Agent | 控制面和普通数据面 Docker 主机 | 读取 Docker JSON 日志、Xray `error.log`/`ai-error.log`、allowlist 内的 systemd 错误日志；本地 filesystem 缓冲；通过 Tailscale 推送 |
+| Loki | 控制面主机 | 单实例 filesystem 存储、LogQL 查询、7 天保留 |
 | Grafana | 控制面监控主机 | 通过 `GRAFANA_LOKI_URL` 查询远端 Loki |
-| Tailscale | 四个主机端点 | 提供 Agent 到 Loki、Grafana 到 Loki 的 tailnet 网络边界 |
+| Tailscale | 控制面和普通数据面主机 | 提供 Agent 到 Loki、Grafana 到 Loki 的 tailnet 网络边界 |
 
 首期只支持 Docker Compose 节点。日志采集不进入用户代理流量路径，也不依赖控制面业务进程。控制面业务日志只写 stdout/stderr，不新增 SQLite 审计表；Loki 保持当前 7 天（168 小时）保留策略。
 
 ## 当前生产部署
 
-截至 **2026-08-20**，控制面和普通数据面日志链路已完成部署；AI 备用复用控制面主机的监控链路。控制面业务容器已加载 `app/observability/logging.py`，业务 JSON 经控制面 Fluent Bit 转发到 Loki；普通数据面和 AI 备用不运行控制面业务模块。
+截至 **2026-09-20**，控制面和普通数据面日志链路已完成部署并在运行：控制面 Loki 提供日志中心，两台主机的 Fluent Bit Agent 都指向它。控制面业务容器已加载 `app/observability/logging.py`，业务 JSON 经控制面 Fluent Bit 转发到 Loki；普通数据面不运行控制面业务模块。
 
-| 节点 | Tailscale 地址 | Fluent Bit 角色 | Agent 配置目录 | Xray 日志目录 |
-| --- | --- | --- | --- | --- |
-| 控制面 / AI 备用 | `redacted-ip-004` | `control_plane` / `ai_data_plane` | `/root/xray-routing-panel/monitoring/fluent-bit` | `/root/ai-routing-panel/app/xray/logs` |
-| 普通数据面 | `redacted-ip-003` | `normal_data_plane` | `/root/xray-fluent-bit` | `/root/xray-routing-panel/app/xray/logs` |
-| AI 备用 | `redacted-ip-004` | `ai_data_plane` | 控制面监控栈 | `/root/ai-routing-panel/app/xray/logs` |
+| 节点 | Fluent Bit 角色 | Agent 配置目录 | Xray 日志目录 |
+| --- | --- | --- | --- |
+| 控制面 | `control_plane` | `/root/ai-routing-panel/monitoring/fluent-bit` | `/root/ai-routing-panel/app/xray/logs` |
+| 普通数据面 | `normal_data_plane` | `/root/xray-fluent-bit` | `/root/xray-routing-panel/app/xray/logs` |
 
-控制面 Loki 绑定 `redacted-ip-004:3100`，Grafana 使用现有本机 `3001` 入口。控制面和普通数据面 Agent 使用相同的 parser 和低基数 label 配置，原配置会在滚动更新前保留为带时间戳的 `.bak` 文件。
+远端台湾 AI 节点当前不运行 Fluent Bit Agent，其日志不进入 Loki；面板改为经受管 SSH 读取该节点宿主机上的 `ai-access.log` 做域名和端口分析。
 
-当前验收结果：控制面 `/healthz` 返回 `ok=true` 且数据面可达；Loki 可按 `category="business"` 查询到 `dns_failover.checked` 业务事件；Grafana 的 `Control Plane Business Logs` dashboard 已加载。AI 备用的 `ai-error.log` 纳入控制面 Agent 的采集范围；高频 `ai-access.log` 只保留在本机，不进入 Loki。
+控制面 Loki 监听控制面主机的 Tailscale 地址 `3100` 端口，Grafana 使用现有本机 `3001` 入口。控制面和普通数据面 Agent 使用相同的 parser 和低基数 label 配置，原配置会在滚动更新前保留为带时间戳的 `.bak` 文件。
+
+当前验收结果：控制面 `/healthz` 返回 `ok=true` 且数据面可达；Loki 的 `host` label 已出现 `control-plane` 和 `dmit-normal-data-plane`，可按 `category="business"` 查询到 `dns_failover.checked` 业务事件；Grafana 的 `Control Plane Business Logs` dashboard 已加载。高频 `ai-access.log` 只保留在节点本机，不进入 Loki。
 
 ## 控制面业务日志
 

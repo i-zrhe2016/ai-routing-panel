@@ -76,7 +76,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；远端模式通常填写目标主机回环地址 |
 | `AI_NODE_API_SERVERS` | 多节点 Socket 存活检查地址，按顺序对应；支持远端回环地址，如 `127.0.0.1:27166` |
 | `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；远端 SSH 模式通过 AI 节点回环读取，禁止改成公网监听 |
-| `AI_NODE_ACCESS_LOG_PATH` | AI access log 路径；本机 Docker 默认 `/app/xray/logs/ai-access.log`，远端 SSH 默认 `/var/log/xray/ai-access.log`，只做域名/端口分析 |
+| `AI_NODE_ACCESS_LOG_PATH` | AI access log 路径；本机 Docker 用容器内 `/app/xray/logs/ai-access.log`，远端 SSH 必须填节点宿主机上的实际路径（容器内 `/var/log/xray` 通常只是 bind mount），只做域名/端口分析 |
 | `AI_NODE_DESTINATION_WINDOW_SECONDS` | AI 域名/端口请求分析窗口，默认 `600` 秒 |
 | `AI_NODE_DESTINATION_MAX_LABELS` | 每次展开的高流量域名/端口 Top 数，默认 `50`，用于限制 Prometheus 标签基数 |
 | `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；多节点时使用 `AI_NODE_PROBE_HOSTS` 按序对应 |
