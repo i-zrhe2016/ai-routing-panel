@@ -28,7 +28,7 @@ nodes/
   normal-data-plane/
     root/xray-routing-panel/app/xray/runtime/config.json
   ai-data-plane/
-    app/xray/runtime/config-ai-node.json
+    root/ai-routing-panel/app/xray/runtime/config-ai-node.json
   remote-node-collection.json
 backup-manifest.json
 node-recovery-manifest.json
@@ -39,7 +39,9 @@ node-recovery-manifest.json
 | 节点 | SSH 目标 | 主配置路径 | 配置环境文件 |
 | --- | --- | --- | --- |
 | 普通数据面 | `root@redacted-ip-003:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
-| AI 数据面 | `root@<ai-node-host>:22` | `/root/ai-routing-panel/app/xray/runtime/config-ai-node.json` | `/root/ai-routing-panel/app/xray/.env` |
+| AI 数据面 | `root@<ai-node-host>:22` | 默认 `/etc/xray/config.json`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/runtime/config-ai-node.json` | 默认 `/etc/xray/.env`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/.env` |
+
+`nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再用部署根把它映射成便携恢复路径，所以归档路径和恢复路径看起来不同。AI 数据面使用 `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 覆盖部署根后，恢复路径为 `app/xray/runtime/config-ai-node.json`。
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
 
@@ -60,18 +62,18 @@ node-recovery-manifest.json
 
 | 变量 | 默认值（Compose） | 作用 |
 | --- | --- | --- |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | `1` | 是否采集普通数据面；关闭时仍生成控制面本地灾备归档 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | `1` | 是否启用远端配置采集；开关作用于采集器整体，每个角色只在其 SSH 目标已配置时执行，关闭时仍生成控制面本地灾备归档 |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `0`：已配置远端节点失联只写入 manifest；`1`：所有已配置远端节点的必需恢复文件必须成功采集 |
 | `DB_BACKUP_SSH_TIMEOUT_SECONDS` | `20` | 单节点连接/远端读取超时上限 |
 | `DB_BACKUP_SSH_MAX_FILE_BYTES` | `5242880` | 单个远端文件大小上限，默认 5 MiB |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号或换行分隔；配置和 `.env` 是恢复必需文件 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
 | `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | AI 数据面节点 SSH 采集端口 |
-| `DB_BACKUP_AI_NODE_SSH_TARGETS` | 空 | AI 数据面节点的 SSH 目标；为空时跳过该角色，不会回退到普通数据面目标 |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | 空 | AI 数据面节点的配置和 `.env`；两者都是恢复必需文件 |
+| `DB_BACKUP_AI_NODE_SSH_TARGET` | 空（回退 `AI_NODE_SSH_TARGET`） | AI 数据面节点的 SSH 目标；为空时跳过该角色，不会回退到普通数据面目标 |
+| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json`、`/etc/xray/.env` | AI 数据面节点的配置和 `.env`；默认值只适用于标准部署，实际宿主机路径不同时必须覆盖 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | AI 数据面节点的部署根；该节点的实际部署根不同时必须显式覆盖，否则恢复路径会退化为 `remote/...` 前缀 |
 
-`DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 是灾备优先的默认策略：普通数据面暂时不可达时仍保留控制面数据库和本地配置，manifest 会记录 `failed`、`skipped_no_target` 或文件级 `missing`。需要把普通数据面配置作为发布门禁时才设置为 `1`。
+`DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 是灾备优先的默认策略：远端节点暂时不可达时仍保留控制面数据库和本地配置，manifest 会记录 `failed`、`skipped_no_target` 或文件级 `missing`。设置为 `1` 后，任何已配置 SSH 目标的角色（普通数据面或 AI 数据面）采集失败都会中止本次归档；未配置目标的角色仍然只是 `skipped_no_target`。
 
 ## manifest 与核验
 

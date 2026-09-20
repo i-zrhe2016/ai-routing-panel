@@ -94,7 +94,7 @@ curl -fsS http://100.x.y.z:3100/ready
 
 ### 2. Fluent Bit Agent
 
-在三台 Docker 主机分别执行：
+在需要采集日志的 Docker 主机分别执行（当前生产为控制面和普通数据面两台）：
 
 ```bash
 cd monitoring/fluent-bit
@@ -116,6 +116,8 @@ FLUENT_BIT_STORAGE_LIMIT=2G
 - `control_plane`
 - `normal_data_plane`
 - `ai_data_plane`
+
+`ai_data_plane` 是受支持的角色，但当前生产未部署：远端 AI 节点的日志保留在节点本机，由面板经受管 SSH 读取，不进入 Loki。
 
 `FLUENT_BIT_XRAY_LOG_DIR` 是宿主机目录。普通数据面和 AI 数据面使用其实际 Xray 日志目录，不要把 `/var/log/xray` 容器内路径直接当作宿主机路径。
 
@@ -167,7 +169,7 @@ Grafana 中打开 `Control Plane Business Logs` dashboard，或在 Explore 使�
 
 ## Tailscale 网络边界
 
-建议给四个端点配置明确标签：
+建议给每个加入 tailnet 的日志端点配置明确标签（当前生产为控制面、普通数据面两个 Agent 端点）：
 
 ```text
 tag:log-agent  = control-plane / normal-data-plane / ai-data-plane
@@ -274,7 +276,7 @@ curl -fsS http://loki.tailnet.example:3100/ready
 
 ## 变更验收
 
-1. 三台主机各写入一条测试 stdout/stderr，Grafana 能按 `host` 和 `node_role` 查到。
+1. 每台已部署 Agent 的主机各写入一条测试 stdout/stderr，Grafana 能按 `host` 和 `node_role` 查到。
 2. 写入 Xray `error.log` 测试行，能查到 `source="xray_error"`。
 3. 写入 `access.log` 测试行，Loki 中不存在该行。
 4. 停止 Loki，确认 Agent 本地队列增长且业务容器保持运行；恢复后确认日志补发。
@@ -287,7 +289,7 @@ curl -fsS http://loki.tailnet.example:3100/ready
 1. `xray-routing-panel`、`loki`、`grafana`、`fluent-bit-agent` 容器均为运行状态。
 2. 控制面健康检查返回 `ok=true`，且响应包含 `X-Request-ID`。
 3. Loki 的业务查询至少返回一条 `category="business"` 日志。
-4. 普通数据面查询能看到 `node_role="normal_data_plane"`；AI 数据面无日志源时只要求 Agent 无投递错误。
+4. 普通数据面查询能看到 `node_role="normal_data_plane"`；AI 数据面当前不部署 Agent，因此不要求其日志出现在 Loki。
 5. 业务日志中不出现密码、Authorization、Cookie、CSRF、租户 token 或订阅 token。
 
 ## 回滚
