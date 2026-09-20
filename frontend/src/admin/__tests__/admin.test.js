@@ -178,7 +178,9 @@ describe("AdminApp", () => {
     await wrapper.findAll(".workspace-nav__item").at(1).trigger("click");
     expect(wrapper.vm.activeWorkspace).toBe("routing");
     expect(wrapper.find(".routing-workspace").exists()).toBe(true);
-  });  it("exposes resources and commerce as direct workspaces", async () => {
+  });
+
+  it("exposes resources and commerce as direct workspaces", async () => {
     const wrapper = await mountAdmin();
     await wrapper.findAll(".workspace-nav__item").at(3).trigger("click");
     expect(wrapper.vm.activeWorkspace).toBe("resources");
@@ -187,3 +189,210 @@ describe("AdminApp", () => {
     expect(wrapper.vm.activeWorkspace).toBe("commerce");
     expect(wrapper.find(".commerce-workspace").exists()).toBe(true);
   });
+
+  it("fetches the dashboard on mount and renders a port card", async () => {
+    const wrapper = await mountAdmin();
+    expect(fetchMock).toHaveBeenCalledWith("/api/dashboard", expect.objectContaining({ method: "GET" }));
+    expect(wrapper.text()).toContain("端口 31098");
+    expect(wrapper.text()).toContain("客户A");
+  });
+
+  it("renders a StatusPill for the port status and selects the first port", async () => {
+    const wrapper = await mountAdmin();
+    expect(wrapper.findComponent({ name: "StatusPill" }).exists()).toBe(true);
+    expect(wrapper.vm.selectedPort && wrapper.vm.selectedPort.id).toBe(1);
+  });
+
+  it("renders CopyFields for the selected port subscription links", async () => {
+    const wrapper = await mountAdmin();
+    const values = wrapper.findAll("input[data-copy-value]").map((node) => node.attributes("data-copy-value"));
+    expect(values).toContain("clash://example/abc");
+    expect(values).toContain("vless://uuid@1.2.3.4:443");
+  });
+
+  it("renders plan and order data", async () => {
+    const wrapper = await mountAdmin();
+    expect(wrapper.text()).toContain("基础套餐");
+    expect(wrapper.text()).toContain("ODR2606210001");
+  });
+
+  it("formats traffic via humanBytes in the overview", async () => {
+    const wrapper = await mountAdmin();
+    // total = 512 + 512 = 1024 -> "1.00 KB"
+    expect(wrapper.text()).toContain("1.00 KB");
+  });
+
+  it("renders the AI primary/backup control and switches to the backup after confirmation", async () => {
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    expect(control.text()).toContain("主 AI 节点");
+    expect(control.text()).toContain("备用 AI 节点");
+    expect(control.text()).toContain("nat.qq.pw:27166");
+    expect(control.text()).toContain("100.87.76.6:27166");
+    await control.get('[data-testid="ai-switch-backup"]').trigger("click");
+    expect(control.text()).toContain("确认备用 AI 节点");
+    await control.get('[data-testid="ai-confirm-submit"]').trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai-routing/switch",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "backup" }) }),
+    );
+  });
+
+  it("keeps the topology focused on the current path without duplicating AI actions", async () => {
+    const wrapper = await mountAdmin();
+    expect(wrapper.text()).toContain("三节点流量切换拓扑");
+    expect(wrapper.find('[data-testid="ai-route-control-overview"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="ai-route-control-detail"]').exists()).toBe(false);
+    expect(wrapper.findAll('[data-testid="ai-force-direct"]')).toHaveLength(1);
+  });
+
+  it("requires confirmation before enabling the advanced data-plane direct fallback", async () => {
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    await control.get('[data-testid="ai-force-direct"]').trigger("click");
+    expect(control.text()).toContain("启用应急直出");
+    await control.get('[data-testid="ai-confirm-submit"]').trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai-routing/switch",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "forced_fallback" }) }),
+    );
+  });
+
+  it("keeps an unreachable AI candidate selectable and shows the risk in confirmation", async () => {
+    const unreachableDashboard = structuredClone(dashboard);
+    unreachableDashboard.meta.ai_routing_status.ai_candidates[1].is_reachable = false;
+    fetchMock.mockImplementation((url) => jsonResp({
+      ok: true,
+      message: "ok",
+      dashboard: unreachableDashboard,
+    }));
+
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    const switchButton = control.get('[data-testid="ai-switch-backup"]');
+    expect(switchButton.attributes("disabled")).toBeUndefined();
+    await switchButton.trigger("click");
+    expect(control.text()).toContain("不可达");
+  });
+
+  it("restores automatic probing from a manually fixed backup", async () => {
+    const manualDashboard = structuredClone(dashboard);
+    manualDashboard.meta.ai_routing_status.manual_mode = "backup";
+    manualDashboard.meta.ai_routing_status.manual_mode_label = "人工固定备用 AI";
+    manualDashboard.meta.ai_routing_status.ai_candidates[0].selected = false;
+    manualDashboard.meta.ai_routing_status.ai_candidates[1].selected = true;
+    fetchMock.mockImplementation((url) => jsonResp({
+      ok: true,
+      message: "ok",
+      dashboard: manualDashboard,
+    }));
+
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    await control.get('[data-testid="ai-restore-auto"]').trigger("click");
+    await control.get('[data-testid="ai-confirm-submit"]').trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai-routing/switch",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "auto" }) }),
+    );
+  });
+
+  it("does not render a fake backup action when only one AI candidate is configured", async () => {
+    const singleCandidateDashboard = structuredClone(dashboard);
+    singleCandidateDashboard.meta.ai_routing_status.ai_candidates = [
+      singleCandidateDashboard.meta.ai_routing_status.ai_candidates[0],
+    ];
+    fetchMock.mockImplementation((url) => jsonResp({
+      ok: true,
+      message: "ok",
+      dashboard: singleCandidateDashboard,
+    }));
+
+    const wrapper = await mountAdmin();
+    const control = wrapper.get('[data-testid="ai-route-control-overview"]');
+    expect(control.find('[data-testid="ai-switch-backup"]').exists()).toBe(false);
+    expect(control.text()).toContain("主 AI 节点");
+  });
+
+  it("fulfills an order via POST /api/orders/<id>/fulfill", async () => {
+    const wrapper = await mountAdmin();
+    const fulfillBtn = wrapper.findAll("button").find((b) => b.text().includes("审核通过并开通"));
+    expect(fulfillBtn).toBeTruthy();
+    await fulfillBtn.trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/orders/5/fulfill", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("creates a port via POST /api/ports", async () => {
+    const wrapper = await mountAdmin();
+    wrapper.vm.createForm.listen_port = "31200";
+    // The create button is type=submit; jsdom doesn't translate a click into a
+    // form submit, so trigger the form's @submit.prevent directly.
+    const createForm = wrapper.findAll("form").find((f) => f.text().includes("创建端口"));
+    expect(createForm).toBeTruthy();
+    await createForm.trigger("submit");
+    await flushPromises();
+    const portsCalls = fetchMock.mock.calls.filter((c) => c[0] === "/api/ports" && c[1] && c[1].method === "POST");
+    expect(portsCalls).toHaveLength(1);
+  });
+
+  it("refreshes and selects the existing port when create returns a listen-port conflict", async () => {
+    fetchMock.mockImplementation((url, init) => {
+      if (url === "/api/ports" && init?.method === "POST") {
+        return jsonResp({ ok: false, message: "监听端口已存在，请更换其他端口。" }, 409);
+      }
+      return jsonResp({ ok: true, message: "ok", dashboard });
+    });
+    const wrapper = await mountAdmin();
+    wrapper.vm.filters.query = "missing";
+    wrapper.vm.filters.status = "disabled";
+    wrapper.vm.createForm.listen_port = "31098";
+    const createForm = wrapper.findAll("form").find((f) => f.text().includes("创建端口"));
+
+    await createForm.trigger("submit");
+    await flushPromises();
+
+    expect(fetchMock.mock.calls.filter((c) => c[0] === "/api/ports")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some((c) => c[0] === "/api/client-errors")).toBe(false);
+    expect(wrapper.vm.selectedPortId).toBe(1);
+    expect(wrapper.vm.filters).toMatchObject({ query: "", status: "all" });
+    expect(wrapper.vm.flash).toMatchObject({ message: "监听端口已存在，已选中已有端口。", level: "info" });
+    expect(wrapper.vm.createForm.listen_port).toBe("");
+  });
+
+  it("refreshes the dashboard when deleting a port that is already gone", async () => {
+    const emptyDashboard = structuredClone(dashboard);
+    emptyDashboard.ports = [];
+    emptyDashboard.summary = {
+      ...emptyDashboard.summary,
+      total_ports: 0,
+      active_ports: 0,
+      total_connections: 0,
+      total_bytes_received: 0,
+      total_bytes_sent: 0,
+    };
+    let dashboardLoads = 0;
+    fetchMock.mockImplementation((url, init) => {
+      if (url === "/api/ports/1" && init?.method === "DELETE") {
+        return jsonResp({ ok: false, message: "端口记录不存在。" }, 400);
+      }
+      if (url === "/api/dashboard") {
+        dashboardLoads += 1;
+        return jsonResp({ ok: true, message: "ok", dashboard: dashboardLoads === 1 ? dashboard : emptyDashboard });
+      }
+      return jsonResp({ ok: true, message: "ok", dashboard });
+    });
+    const wrapper = await mountAdmin();
+    const deleteButton = wrapper.findAll("button").find((b) => b.text().includes("删除端口"));
+
+    await deleteButton.trigger("click");
+    await flushPromises();
+
+    expect(fetchMock.mock.calls.some((c) => c[0] === "/api/client-errors")).toBe(false);
+    expect(wrapper.vm.ports).toHaveLength(0);
+    expect(wrapper.vm.flash).toMatchObject({ message: "端口已不存在，列表已刷新。", level: "info" });
+  });
+});
