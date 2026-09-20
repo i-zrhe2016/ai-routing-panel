@@ -1,47 +1,34 @@
 <script setup>
-import { h, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
-import {
-  NButton,
-  NConfigProvider,
-  NDialogProvider,
-  NDrawer,
-  NDrawerContent,
-  NLayout,
-  NLayoutContent,
-  NLayoutHeader,
-  NLayoutSider,
-  NMenu,
-  NMessageProvider,
-  NSpace,
-} from "naive-ui";
+import { NButton, NConfigProvider, NDialogProvider, NDrawer, NDrawerContent, NMessageProvider } from "naive-ui";
 
 import { naiveThemeOverrides } from "../shared/tokens.js";
 import { logout, portal, refreshMe } from "./store.js";
 
 const route = useRoute();
 const themeOverrides = naiveThemeOverrides();
-
 const isMobile = ref(false);
 const mobileNavOpen = ref(false);
-function updateIsMobile() {
-  const mobile = typeof window !== "undefined" && window.innerWidth <= 768;
-  isMobile.value = mobile;
-  if (!mobile) mobileNavOpen.value = false;
-}
 
-const menuOptions = [
-  { key: "/", label: () => h(RouterLink, { to: "/" }, { default: () => "总览" }) },
-  { key: "/subscriptions", label: () => h(RouterLink, { to: "/subscriptions" }, { default: () => "我的订阅" }) },
-  { key: "/orders", label: () => h(RouterLink, { to: "/orders" }, { default: () => "我的订单" }) },
-  { key: "/plans", label: () => h(RouterLink, { to: "/plans" }, { default: () => "套餐" }) },
+const links = [
+  { to: "/", label: "Home" },
+  { to: "/subscriptions", label: "My Service" },
+  { to: "/orders", label: "Orders" },
+  { to: "/plans", label: "Plans" },
 ];
 
-function activeKey() {
-  if (route.path.startsWith("/subscriptions")) return "/subscriptions";
-  if (route.path.startsWith("/orders")) return "/orders";
-  if (route.path.startsWith("/plans")) return "/plans";
-  return "/";
+const pageTitle = computed(() => {
+  if (route.path.startsWith("/subscriptions")) return "My Service";
+  if (route.path.startsWith("/orders")) return "Orders";
+  if (route.path.startsWith("/plans")) return "Plans";
+  return "Customer Home";
+});
+
+function updateIsMobile() {
+  const mobile = typeof window !== "undefined" && window.innerWidth <= 840;
+  isMobile.value = mobile;
+  if (!mobile) mobileNavOpen.value = false;
 }
 
 onMounted(() => {
@@ -59,51 +46,55 @@ onBeforeUnmount(() => {
   <n-config-provider :theme-overrides="themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
-        <n-layout position="absolute">
-          <n-layout-header bordered class="portal-header">
-            <n-space align="center" :size="8" :wrap-item="false">
-              <n-button v-if="isMobile" size="small" quaternary class="portal-nav-toggle" @click="mobileNavOpen = true">☰</n-button>
-              <strong style="font-size:16px">订阅中心</strong>
-            </n-space>
-            <n-space align="center">
-              <span v-if="portal.me && !isMobile" style="color:var(--c-text-muted)">{{ portal.me.email }}</span>
-              <n-button size="small" tertiary @click="logout">退出登录</n-button>
-            </n-space>
-          </n-layout-header>
-          <n-layout has-sider position="absolute" style="top:60px">
-            <n-layout-sider v-if="!isMobile" bordered :width="200" content-style="padding:12px 0">
-              <n-menu :value="activeKey()" :options="menuOptions" />
-            </n-layout-sider>
-            <n-layout-content :content-style="isMobile ? 'padding:16px;max-width:1080px' : 'padding:24px;max-width:1080px'">
+        <div class="portal-shell">
+          <aside class="portal-sidebar" aria-label="客户中心导航">
+            <div class="portal-brand">
+              <div class="portal-brand__mark" aria-hidden="true">XR</div>
+              <div>
+                <strong>Routing Panel</strong>
+                <small>CUSTOMER PORTAL</small>
+              </div>
+            </div>
+            <nav class="portal-nav">
+              <RouterLink v-for="item in links" :key="item.to" :to="item.to" @click="mobileNavOpen = false">
+                <span class="portal-nav__dot" aria-hidden="true"></span>
+                <span>{{ item.label }}</span>
+              </RouterLink>
+            </nav>
+            <div class="portal-sidebar__footer">
+              <span>Signed in</span>
+              <strong>{{ portal.me?.email || "Customer" }}</strong>
+            </div>
+          </aside>
+
+          <div class="portal-main">
+            <header class="portal-topbar">
+              <div class="portal-topbar__title">
+                <strong>{{ pageTitle }}</strong>
+                <small>Subscription, usage and order management</small>
+              </div>
+              <div class="portal-action-row">
+                <n-button v-if="isMobile" class="portal-mobile-nav" secondary size="small" @click="mobileNavOpen = true">Menu</n-button>
+                <n-button size="small" tertiary @click="logout">退出登录</n-button>
+              </div>
+            </header>
+            <main class="portal-content">
               <router-view />
-            </n-layout-content>
-          </n-layout>
-          <n-drawer v-if="isMobile" v-model:show="mobileNavOpen" :width="240" placement="left">
-            <n-drawer-content :native-scrollbar="false" body-content-style="padding:12px 0">
-              <n-menu :value="activeKey()" :options="menuOptions" @update:value="mobileNavOpen = false" />
-            </n-drawer-content>
-          </n-drawer>
-        </n-layout>
+            </main>
+          </div>
+        </div>
+
+        <n-drawer v-if="isMobile" v-model:show="mobileNavOpen" :width="260" placement="left">
+          <n-drawer-content title="Customer Portal" :native-scrollbar="false">
+            <nav class="portal-nav" style="background:#11151b;padding:10px;border-radius:12px">
+              <RouterLink v-for="item in links" :key="item.to" :to="item.to" @click="mobileNavOpen = false">
+                <span class="portal-nav__dot" aria-hidden="true"></span>
+                <span>{{ item.label }}</span>
+              </RouterLink>
+            </nav>
+          </n-drawer-content>
+        </n-drawer>
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
-
-<style scoped>
-.portal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 24px;
-  height: 60px;
-}
-.portal-nav-toggle {
-  font-size: 18px;
-}
-@media (max-width: 768px) {
-  .portal-header {
-    padding: 0 16px;
-  }
-}
-</style>
