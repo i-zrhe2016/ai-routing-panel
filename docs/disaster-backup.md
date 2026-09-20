@@ -85,7 +85,8 @@ node-recovery-manifest.json
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号/换行分隔；配置和 `.env` 是恢复必需文件，其余为可选 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
 | `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | AI 数据面节点 SSH 采集端口 |
-| `DB_BACKUP_AI_NODE_SSH_TARGET` | 空（回退 `AI_NODE_SSH_TARGET`） | AI 数据面节点的 SSH 目标；为空时跳过该角色，不会回退到普通数据面目标 |
+| `DB_BACKUP_AI_NODE_SSH_TARGET` | 空 | AI 数据面节点的 SSH 目标；必须显式设置，Compose 会把未设置的变量传成空值，因此不依赖 `AI_NODE_SSH_TARGET` 回退 |
+| `DB_BACKUP_AI_NODE_KNOWN_HOSTS` | `/root/.ssh/known_hosts_ai` | AI 数据面节点的 known_hosts 文件；该文件以只读方式挂载进备份容器，必须事先写入已核验的节点主机密钥 |
 | `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json`、`/etc/xray/.env` | AI 数据面节点的配置和 `.env`；默认值只适用于标准部署，实际宿主机路径不同时必须覆盖 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | AI 数据面节点的部署根；该节点的实际部署根不同时必须显式覆盖 |
 | `DB_BACKUP_RECOVERY_REQUIRED` | `0` | `1` 时不完整节点恢复包阻止后续上传；默认保留数据库备份并记录状态 |

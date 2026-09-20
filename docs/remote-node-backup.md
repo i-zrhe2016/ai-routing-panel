@@ -1,6 +1,6 @@
 # 远端节点配置采集
 
-本模块只说明控制面如何通过 SSH 读取数据面实际配置，并把结果交给灾备归档器。当前普通数据面和 AI 数据面节点都在远端主机上，两者的 Xray 配置和 `.env` 都通过同一套只读 SSH 采集归档。
+本模块只说明控制面如何通过 SSH 读取远端数据面实际配置，并把结果交给灾备归档器。启用远端 AI 数据面节点后，普通数据面和 AI 数据面节点的 Xray 配置与 `.env` 都通过同一套只读 SSH 采集归档；AI 角色只有在 `DB_BACKUP_AI_NODE_SSH_TARGET` 已配置时才会执行。
 
 ![远端节点只读配置采集流程](diagrams/remote-backup-flow.svg)
 
@@ -69,7 +69,8 @@ node-recovery-manifest.json
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号或换行分隔；配置和 `.env` 是恢复必需文件 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
 | `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | AI 数据面节点 SSH 采集端口 |
-| `DB_BACKUP_AI_NODE_SSH_TARGET` | 空（回退 `AI_NODE_SSH_TARGET`） | AI 数据面节点的 SSH 目标；为空时跳过该角色，不会回退到普通数据面目标 |
+| `DB_BACKUP_AI_NODE_SSH_TARGET` | 空 | AI 数据面节点的 SSH 目标；必须显式设置，未设置时跳过该角色，不会回退到普通数据面目标 |
+| `DB_BACKUP_AI_NODE_KNOWN_HOSTS` | `/root/.ssh/known_hosts_ai` | AI 数据面节点的 known_hosts 文件；Compose 把该路径以只读方式挂载进备份容器，必须事先写入已核验的节点主机密钥 |
 | `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json`、`/etc/xray/.env` | AI 数据面节点的配置和 `.env`；默认值只适用于标准部署，实际宿主机路径不同时必须覆盖 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | AI 数据面节点的部署根；该节点的实际部署根不同时必须显式覆盖，否则恢复路径会退化为 `remote/...` 前缀 |
 
@@ -100,7 +101,7 @@ DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/confi
 python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-staging --required
 ```
 
-检查输出目录中的 `remote-node-collection.json`，确认普通数据面 `configCollected=true` 且 `recoveryReady=true`。AI 数据面节点使用同一采集器，只读验证时把 `DB_BACKUP_DATAPLANE_*` 换成 `DB_BACKUP_AI_NODE_*` 并指定该节点的 known_hosts。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
+检查输出目录中的 `remote-node-collection.json`，确认普通数据面和 AI 数据面各自的 `configCollected=true` 且 `recoveryReady=true`。采集器没有角色选择器，始终处理两个角色：普通数据面目标未提供时会回退到内置目标，AI 角色只在配置了 `DB_BACKUP_AI_NODE_SSH_TARGET` 时才执行，所以只替换变量并不能得到 AI-only 验证。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
 
 ## 排障顺序
 

@@ -102,7 +102,7 @@ ops-daily-reports/
 | `OPS_GITHUB_REPORTS_BRANCH` | 当前分支 | 推送目标分支；留空使用当前分支。 |
 | `OPS_GITHUB_REPORTS_PUSH_ENABLED` | `1` | 是否执行 `git push`；设为 `0` 时只提交不推送。 |
 | `OPS_GITHUB_REPORTS_AUTHOR_NAME` | `i-zrhe2016` | 自动提交作者。 |
-| `OPS_GITHUB_REPORTS_AUTHOR_EMAIL` | `ops-reporter@example.com` | 自动提交邮箱；生产部署必须显式覆盖为实际归档身份。 |
+| `OPS_GITHUB_REPORTS_AUTHOR_EMAIL` | Compose 为 `ops-reporter@example.com`；非 Compose 运行时回退到维护者地址 | 自动提交邮箱；生产部署必须显式覆盖为实际归档身份。 |
 | `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` | `/dev/null` | 宿主机上的 GitHub token 文件路径；通过只读挂载进入容器。 |
 | `OPS_GITHUB_REPORTS_TOKEN_FILE` | `/run/secrets/github_reports_token` | 容器内 GitHub token 文件路径；HTTPS remote 推送时使用。 |
 
