@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-09-20 @ c733bc1
+Last verified: 2026-09-20 @ 8288952
 
 ## Current Focus
 
@@ -12,7 +12,7 @@ Last verified: 2026-09-20 @ c733bc1
 - `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 可将带独立凭据的 fallback 分享链接提升为候选 0；单候选可作为主节点，过期的 `backup` 状态会归一化，人工固定备用仍要求至少两个候选。
 - AI 管理器已拆分到 `app/xray/ai_routing/`，节点控制统一使用 `app/xray/node/` 的 canonical backend；控制面由 `app/bootstrap.py` 组装 Application。
 - 远端 AI 节点的指标和访问日志通过受管 SSH 通道读取；本地节点继续使用本地 endpoint/file 路径。远端日志读取具备有界读取、超长记录丢弃和跨轮次续传状态。控制面运行镜像已于 2026-09-20 从当前 `main` 重建部署，`xray_panel_ai_node_metrics_available`、`xray_panel_ai_destination_log_available` 和 `xray_panel_ai_node_running` 均为 1。
-- 运维日报器支持第三方 OpenAI 兼容 provider：`OPS_CODEX_MODEL_PROVIDER`、`OPS_CODEX_PROVIDER_BASE_URL`、`OPS_CODEX_PROVIDER_WIRE_API`、`OPS_CODEX_MODEL_REASONING_SUMMARY` 通过 `-c` 显式覆盖 Codex 配置，仍不读取任何用户 `config.toml`。
+- 运维日报器支持第三方 OpenAI 兼容 provider：`OPS_CODEX_MODEL_PROVIDER`、`OPS_CODEX_PROVIDER_BASE_URL`、`OPS_CODEX_PROVIDER_WIRE_API`、`OPS_CODEX_MODEL_REASONING_SUMMARY`、`OPS_CODEX_OUTPUT_SCHEMA` 通过 `-c` 显式覆盖 Codex 配置，仍不读取任何用户 `config.toml`。拒绝约束输出的 provider 可设 `OPS_CODEX_OUTPUT_SCHEMA=0`，此时改为把同一份 JSON Schema 文档写进提示词。2026-09-20 实测 2026-09-19 日报以 `generation_mode=codex` 成功生成。
 - 控制面 Loki 与 Fluent Bit Agent 组成集中日志链路，控制面和普通数据面 Agent 通过 Tailscale 推送；Grafana 通过 `GRAFANA_LOKI_URL` 查询。
 - 灾备 SSH 采集已启用，覆盖普通数据面和 AI 节点；AI 节点采集其 Xray 配置和 `.env`。2026-09-20 手工执行 `run_db_backup_cycle.py`（关闭 R2）验证两个角色均为 `ok`、`recoveryReady=true`。
 - Prometheus 目标保留控制面、普通数据面和台湾 AI 节点的当前拓扑，旧 AI 主节点目标已移除。
@@ -21,13 +21,13 @@ Last verified: 2026-09-20 @ c733bc1
 
 ## In Progress
 
-- None.
+- `fix/backup-tailscale-ssh-completeness`（Plan #44）尚未合并：该分支包含 `DB_BACKUP_AI_NODE_SSH_TARGETS` 列表支持和 broker 加固，工作副本位于该分支上。
 
 ## Known Issues / Failing Checks
 
-- 全量 `PYTHONPATH=. .venv/bin/pytest -q`：370 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
+- 全量 `PYTHONPATH=. .venv/bin/pytest -q`：375 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
 - 手工采集周期使用 `DB_BACKUP_R2_ENABLED=0`，因此本次未验证 R2 上传链路；定时 `03:00 UTC` 任务在本次会话中未被观察。
-- 日报器在第三方 provider 拒绝推理 `summary` 字段时以 `codex_process_failed` 失败；需要 `OPS_CODEX_MODEL_REASONING_SUMMARY=none`，且必须运行包含该配置项的镜像。
+- 日报器的 GitHub 归档步骤报 `github_reports_branch_behind_upstream`：`OPS_GITHUB_REPORTS_REPO_HOST_DIR` 挂载的仓库工作副本当前停在未推送的 `fix/backup-tailscale-ssh-completeness` 分支且落后 `origin/main`，发布器拒绝在该状态下提交。日报仍写入 `/data/xray-ops/reports` 并入库，归档在仓库工作副本回到最新 `main` 后自动重试。
 - AI 节点自建的控制面栈（`prometheus` 重启循环、`xray-routing-panel` `/healthz` 非 200）是遗留部署；本仓库当前只对其做灾备采集，不接管其运行时。
 
 ## Constraints
@@ -40,6 +40,7 @@ Last verified: 2026-09-20 @ c733bc1
 - 远端发布前必须明确不可变目标、并发锁/隔离、健康门禁和恢复路径；当前不把 SSH 可达性视为发布授权。
 - AI 节点的访问日志位于远端宿主机路径，不是容器内路径；`AI_NODE_ACCESS_LOG_PATH` 必须指向宿主机上的实际文件。
 - 第三方 provider 不支持 `wire_api=chat`，Codex CLI 会拒绝启动；`model_reasoning_summary` 只接受 `auto`、`concise`、`detailed`、`none`。
+- 固定版本的 Codex CLI 总会发送 `update_plan`、`view_image`、`request_user_input` 等工具且无法全部关闭，因此拒绝“约束输出 + 工具”组合的 provider 必须关闭 `OPS_CODEX_OUTPUT_SCHEMA`；此时契约只能靠提示词中的 schema 文档加本地校验保证。
 
 ## Architecture Snapshot
 
@@ -50,4 +51,4 @@ Last verified: 2026-09-20 @ c733bc1
 
 ## Next
 
-- 无进行中的 Plan；新增需求先记录 GitHub Issue Plan，再创建 Plan 分支。
+- 新增需求先记录 GitHub Issue Plan，再创建 Plan 分支。
