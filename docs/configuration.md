@@ -146,7 +146,7 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `DB_BACKUP_BUNDLE_ENABLED` | 是否生成包含数据库和配置文件的灾备归档；默认 `1` |
 | `DB_BACKUP_EXTRA_PATHS` | 逗号/换行分隔的额外文件、目录或 glob |
 | `DB_BACKUP_BUNDLE_DIR` / `DB_BACKUP_BUNDLE_KEEP_DAYS` | 本地归档目录和保留天数 |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否启用远端配置采集；每个角色只在其 SSH 目标已配置时执行，控制面自身文件由 `DB_BACKUP_EXTRA_PATHS` 归档 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否启用远端配置采集；普通数据面在目标未配置时会回退到内置目标，AI 数据面只在目标已配置时执行，控制面自身文件由 `DB_BACKUP_EXTRA_PATHS` 归档 |
 
 R2 对象不会由备份任务删除；生命周期规则在 Cloudflare 侧配置。恢复时人工下载、解密、校验 manifest，再恢复数据库和配置。
 

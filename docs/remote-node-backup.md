@@ -19,7 +19,7 @@
 
 ## 各节点的配置来源
 
-灾备归档包含控制面本地文件和两台远端节点的实际宿主机文件：
+灾备归档包含控制面本地文件，以及每个已启用角色的远端宿主机文件；AI 目标未配置时只包含普通数据面：
 
 ```text
 database/
@@ -41,7 +41,7 @@ node-recovery-manifest.json
 | 普通数据面 | `root@redacted-ip-003:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
 | AI 数据面 | `root@<ai-node-host>:22` | 默认 `/etc/xray/config.json`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/runtime/config-ai-node.json` | 默认 `/etc/xray/.env`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/.env` |
 
-`nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再用部署根把它映射成便携恢复路径，所以归档路径和恢复路径看起来不同。AI 数据面使用 `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 覆盖部署根后，恢复路径为 `app/xray/runtime/config-ai-node.json`。
+`nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再把同一文件映射成便携恢复路径，所以归档路径和恢复路径看起来不同。映射规则是：远端路径位于该角色的部署根之下时去掉部署根前缀；否则按文件名回退到固定的便携路径（`config.json` → `app/xray/runtime/config.json`，`.env` → `app/xray/.env`，其余归到 `remote/`）。AI 数据面的默认路径 `/etc/xray/*` 不在任何部署根之下，因此必须用 `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 指向真实部署根，否则它的恢复路径会和普通数据面重名。
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
 
@@ -70,7 +70,7 @@ node-recovery-manifest.json
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
 | `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | AI 数据面节点 SSH 采集端口 |
 | `DB_BACKUP_AI_NODE_SSH_TARGET` | 空 | AI 数据面节点的 SSH 目标；必须显式设置，未设置时跳过该角色，不会回退到普通数据面目标 |
-| `DB_BACKUP_AI_NODE_KNOWN_HOSTS` | `/root/.ssh/known_hosts_ai` | AI 数据面节点的 known_hosts 文件；Compose 把该路径以只读方式挂载进备份容器，必须事先写入已核验的节点主机密钥 |
+| `DB_BACKUP_AI_NODE_KNOWN_HOSTS` | `/root/.ssh/known_hosts_ai` | AI 数据面节点的 known_hosts 文件；必须是备份容器内可见的路径，Compose 只把 `/root/.ssh/known_hosts_ai` 以只读方式挂载进容器，改到其他路径必须同时改挂载 |
 | `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json`、`/etc/xray/.env` | AI 数据面节点的配置和 `.env`；默认值只适用于标准部署，实际宿主机路径不同时必须覆盖 |
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | AI 数据面节点的部署根；该节点的实际部署根不同时必须显式覆盖，否则恢复路径会退化为 `remote/...` 前缀 |
 
@@ -101,7 +101,7 @@ DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/confi
 python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-staging --required
 ```
 
-检查输出目录中的 `remote-node-collection.json`，确认普通数据面和 AI 数据面各自的 `configCollected=true` 且 `recoveryReady=true`。采集器没有角色选择器，始终处理两个角色：普通数据面目标未提供时会回退到内置目标，AI 角色只在配置了 `DB_BACKUP_AI_NODE_SSH_TARGET` 时才执行，所以只替换变量并不能得到 AI-only 验证。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
+上面的命令只验证普通数据面：它没有设置 AI 目标，因此 `remote-node-collection.json` 里 AI 角色会是 `skipped_no_target`，不会出现 `configCollected=true`。采集器没有角色选择器，一次调用始终处理两个角色——普通数据面目标未提供时回退到内置目标，AI 角色只在配置了 `DB_BACKUP_AI_NODE_SSH_TARGET` 时才执行。要在同一次验证里也检查 AI 数据面，需要在同一命令上追加该角色的目标、known_hosts 和远端路径变量，并确认它同样得到 `configCollected=true` 和 `recoveryReady=true`。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
 
 ## 排障顺序
 

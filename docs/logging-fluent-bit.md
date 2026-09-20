@@ -1,6 +1,6 @@
 # Fluent Bit 日志采集
 
-本模块按控制面、普通数据面和 AI 数据面三个角色采集 Docker 主机日志和关键错误日志，经 Tailscale 发送到 Loki，再由控制面 Grafana 查询。当前日志中心与 Grafana 都运行在控制面主机上，不额外启动一台日志主机。
+本模块支持控制面、普通数据面和 AI 数据面三个角色采集 Docker 主机日志和关键错误日志；当前实际部署的是控制面和普通数据面，两者经 Tailscale 发送到 Loki，再由控制面 Grafana 查询，AI 数据面的日志仍保留在节点本机。日志中心与 Grafana 都运行在控制面主机上，不额外启动一台日志主机。
 
 ![Fluent Bit log collection](diagrams/logging-fluent-bit.svg)
 

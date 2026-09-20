@@ -34,7 +34,7 @@ Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注
 | `OPS_CODEX_MODEL_REASONING_SUMMARY` | 空 | 覆盖 `model_reasoning_summary`；留空则不下发该配置项。可选 `auto`、`concise`、`detailed`、`none`。 |
 | `OPS_CODEX_MODEL` | 空 | 覆盖 `model`；留空则使用 provider 默认模型。 |
 
-部分第三方 provider 会拒绝 `summary` 字段并返回 `InvalidParameter`，此时应设为 `OPS_CODEX_MODEL_REASONING_SUMMARY=none`；`OPS_CODEX_PROVIDER_WIRE_API=chat` 不受支持，Codex CLI 会直接拒绝启动。
+部分第三方 provider 会拒绝 `summary` 字段并返回 `InvalidParameter`，此时应设为 `OPS_CODEX_MODEL_REASONING_SUMMARY=none`。日报器本身接受 `responses` 和 `chat` 两个取值，但当前固定版本的 Codex CLI 会在启动时拒绝 `wire_api=chat`，因此实际只能使用 `responses`。
 
 ## 数据面流量
 
