@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-09-20 @ 8288952
+Last verified: 2026-09-20 @ 63935d3
 
 ## Current Focus
 
@@ -27,7 +27,8 @@ Last verified: 2026-09-20 @ 8288952
 
 - 全量 `PYTHONPATH=. .venv/bin/pytest -q`：375 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
 - 手工采集周期使用 `DB_BACKUP_R2_ENABLED=0`，因此本次未验证 R2 上传链路；定时 `03:00 UTC` 任务在本次会话中未被观察。
-- 日报器的 GitHub 归档步骤报 `github_reports_branch_behind_upstream`：`OPS_GITHUB_REPORTS_REPO_HOST_DIR` 挂载的仓库工作副本当前停在未推送的 `fix/backup-tailscale-ssh-completeness` 分支且落后 `origin/main`，发布器拒绝在该状态下提交。日报仍写入 `/data/xray-ops/reports` 并入库，归档在仓库工作副本回到最新 `main` 后自动重试。
+- 日报归档已启用推送：`OPS_GITHUB_REPORTS_PUSH_ENABLED=1` 且通过 `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` 只读挂载 token；2026-09-20 实测调度周期把归档提交推到 `origin/main`，日志为 `push_status=pushed`、`ahead_after=0`。
+- 归档日期存在缺口：`ops-daily-reports/` 在 `origin/main` 上从 2026-09-08 直接跳到 2026-09-19；2026-09-09 的报告只提交在本地 `main` 分支且未推送，2026-09-10 至 2026-09-18 因日报器故障未生成。本仓库不计划回补。
 - AI 节点自建的控制面栈（`prometheus` 重启循环、`xray-routing-panel` `/healthz` 非 200）是遗留部署；本仓库当前只对其做灾备采集，不接管其运行时。
 
 ## Constraints
@@ -41,6 +42,8 @@ Last verified: 2026-09-20 @ 8288952
 - AI 节点的访问日志位于远端宿主机路径，不是容器内路径；`AI_NODE_ACCESS_LOG_PATH` 必须指向宿主机上的实际文件。
 - 第三方 provider 不支持 `wire_api=chat`，Codex CLI 会拒绝启动；`model_reasoning_summary` 只接受 `auto`、`concise`、`detailed`、`none`。
 - 固定版本的 Codex CLI 总会发送 `update_plan`、`view_image`、`request_user_input` 等工具且无法全部关闭，因此拒绝“约束输出 + 工具”组合的 provider 必须关闭 `OPS_CODEX_OUTPUT_SCHEMA`；此时契约只能靠提示词中的 schema 文档加本地校验保证。
+- 归档检出必须是独立仓库：`git worktree` 的 `.git` 是指向主仓库 `.git/worktrees/<name>` 的文件，容器内不可用，会报 `fatal: not a git repository`。
+- 归档检出与 upstream 的同步规则（仅适用于配置了 tracking upstream 的检出；没有 upstream 时发布器跳过 fetch 和落后检查，推送时直接 `git push -u`）：启用推送时先 fetch，且只在检出落后时处理同步——工作树干净则以 `--ff-only` 自动快进，工作树有未提交改动则以 `github_reports_branch_behind_upstream` 报错，同时领先（分叉）导致无法快进则以 `fatal: Not possible to fast-forward` 报错，需要先人工理顺该检出；未落后时不做这些检查。关闭推送时不做 fetch，落后直接以 `github_reports_branch_behind_upstream` 拒绝提交。
 
 ## Architecture Snapshot
 
