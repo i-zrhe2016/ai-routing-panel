@@ -97,7 +97,9 @@ curl -fsS http://100.x.y.z:3100/ready
 在需要采集日志的 Docker 主机分别执行（当前生产为控制面和普通数据面两台）：
 
 ```bash
-cd monitoring/fluent-bit
+# 控制面：/root/ai-routing-panel/monitoring/fluent-bit
+# 普通数据面：/root/xray-fluent-bit
+cd <agent-config-dir>
 cp .env.example .env
 ```
 
