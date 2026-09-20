@@ -156,7 +156,12 @@ Grafana 通过 proxy 模式访问 Loki，浏览器不需要直接访问 Loki 端
 ```bash
 curl -fsS http://YOUR_CONTROL_PLANE_HOST:18080/healthz
 curl -fsS http://YOUR_LOKI_HOST:3100/ready
-curl -fsS http://YOUR_CONTROL_PLANE_HOST:2020/api/v1/metrics
+```
+
+Fluent Bit 的 HTTP server 只监听 `127.0.0.1:2020`，因此 Agent 指标必须在对应 Agent 主机本机查询：
+
+```bash
+curl -fsS http://127.0.0.1:2020/api/v1/metrics
 ```
 
 查询控制面业务日志：
@@ -256,7 +261,7 @@ Grafana 已预置 `Control Plane Business Logs` dashboard；也可以在 Explore
 Agent 健康检查：
 
 ```bash
-curl -s http://YOUR_AGENT_HOST:2020/api/v1/metrics
+curl -s http://127.0.0.1:2020/api/v1/metrics   # 在 Agent 主机本机执行
 docker compose -f docker-compose.agent.yml logs --tail=200 fluent-bit
 ```
 
