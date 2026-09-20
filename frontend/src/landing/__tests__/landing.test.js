@@ -23,8 +23,8 @@ describe("landing App", () => {
     await wrapper.vm.$nextTick();
 
     const text = wrapper.text();
-    expect(text).toContain("满血智力");
-    expect(text).toContain("原生家宽");
+    expect(text).toContain("AI 流量");
+    expect(text).toContain("健康探测");
     expect(text).toContain("五重保障");
     expect(text).toContain("工作原理");
     expect(text).toContain("智能分流");
