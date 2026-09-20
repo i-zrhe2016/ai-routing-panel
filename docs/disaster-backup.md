@@ -66,7 +66,7 @@ node-recovery-manifest.json
 
 归档里的 `nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`），例如普通数据面主配置落在 `nodes/normal-data-plane/root/xray-routing-panel/app/xray/runtime/config.json`；`node-recovery-manifest.json` 再按部署根把同一文件映射成便携恢复路径。AI 数据面的默认远端路径是 `/etc/xray/config.json` 和 `/etc/xray/.env`，因此实际部署必须用 `DB_BACKUP_AI_NODE_REMOTE_PATHS` 覆盖为节点上的真实宿主机路径。
 
-普通数据面通过控制面内网 SSH `root@redacted-ip-003:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 数据面节点是远端台湾主机，主配置 `config-ai-node.json` 和 `.env` 通过独立 known_hosts 的只读 SSH 采集。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
+普通数据面通过控制面内网 SSH `root@<normal-data-plane-host>:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 数据面节点是远端台湾主机，主配置 `config-ai-node.json` 和 `.env` 通过独立 known_hosts 的只读 SSH 采集。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
 
 ## 配置
 

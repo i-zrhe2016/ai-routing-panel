@@ -38,7 +38,7 @@ node-recovery-manifest.json
 
 | 节点 | SSH 目标 | 主配置路径 | 配置环境文件 |
 | --- | --- | --- | --- |
-| 普通数据面 | `root@redacted-ip-003:22` | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
+| 普通数据面 | `root@<normal-data-plane-host>:22`（独立脚本另有内置回退目标，生产必须显式覆盖） | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
 | AI 数据面 | `root@<ai-node-host>:22` | 默认 `/etc/xray/config.json`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/runtime/config-ai-node.json` | 默认 `/etc/xray/.env`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/.env` |
 
 `nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再把同一文件映射成便携恢复路径，所以归档路径和恢复路径看起来不同。映射规则是：远端路径位于该角色的部署根之下时去掉部署根前缀；否则按文件名回退到固定的便携路径（`config.json` → `app/xray/runtime/config.json`，`.env` → `app/xray/.env`，其余归到 `remote/`）。AI 数据面的默认路径 `/etc/xray/*` 不在任何部署根之下，因此必须用 `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 指向真实部署根，否则它的恢复路径会和普通数据面重名。
@@ -49,7 +49,7 @@ node-recovery-manifest.json
 
 ## 认证与主机校验
 
-- 普通数据面目标：`root@redacted-ip-003:22`；控制面直接通过内网连接。
+- 普通数据面目标：`root@<normal-data-plane-host>:22`；控制面直接通过内网连接。独立脚本在变量缺失时会回退到内置目标，生产必须显式设置 `DB_BACKUP_DATAPLANE_SSH_TARGET`，否则可能备份到非预期主机。
 - SSH 命令不包含 `-i`/`IdentityFile`，也不挂载任何私钥；公钥认证被显式关闭，只允许密码和键盘交互认证，并且不提供 TTY 或密码输入来源。因此目标节点必须已经授权控制面免密登录（例如 Tailscale SSH 的 ACL 授权）；否则定时采集会认证失败或一直等到超时。
 - 普通数据面 known_hosts：`/root/.ssh/known_hosts`。
 - AI 数据面目标：`root@<ai-node-host>:22`；使用独立 known_hosts 文件，不复用普通数据面的主机密钥清单。
@@ -87,14 +87,14 @@ node-recovery-manifest.json
 - `configCollected`：主配置路径是否确实成功写入 staging。
 - `requiredPaths` / `recoveryReady`：恢复必需路径和该节点是否具备完整恢复材料。
 
-归档根部 `backup-manifest.json` 再记录所有文件的 SHA-256，`node-recovery-manifest.json` 将远端路径映射到便携恢复目录。灾难阶段先验证两层 manifest，再使用 `scripts/node_recovery.py prepare --node normal-data-plane` 将 `nodes/` 下的配置复制到隔离目录并启动 Xray；不要直接覆盖运行中的配置。
+归档根部 `backup-manifest.json` 再记录所有文件的 SHA-256，`node-recovery-manifest.json` 将远端路径映射到便携恢复目录。灾难阶段先验证两层 manifest，再用 `scripts/node_recovery.py prepare --bundle <bundle> --node normal-data-plane --output-dir <dir>` 把 `nodes/` 下的配置复制到隔离目录并启动 Xray（`--bundle` 和 `--output-dir` 都是必填）；不要直接覆盖运行中的配置。完整流程见[节点恢复](node-recovery.md)。
 
 ## 只读验证命令
 
 在控制面上执行采集器（不会触碰远端状态）：
 
 ```bash
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@redacted-ip-003 \
+DB_BACKUP_DATAPLANE_SSH_TARGET=root@<normal-data-plane-host> \
 DB_BACKUP_DATAPLANE_SSH_PORT=22 \
 DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts \
 DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json \
@@ -105,7 +105,7 @@ python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-stagi
 
 ## 排障顺序
 
-1. `Permission denied`：确认控制面可以通过内网访问 `root@redacted-ip-003:22`，并确认目标允许密码/键盘交互认证；不要关闭严格主机校验。
+1. `Permission denied`：采集器禁用公钥认证，且定时任务没有密码输入来源，因此需要确认目标已经按非交互方式授权控制面（例如 Tailscale SSH 的 ACL 授权），而不是临时打开密码认证；同时不要关闭严格主机校验。
 2. `Host key verification failed`：更新受控的对应 known_hosts 文件，先人工核对指纹，再重新执行。
 3. `missing`：通过只读 `docker inspect`、`systemctl cat` 或部署清单确认宿主机真实路径，再覆盖节点的 `*_REMOTE_PATHS`。
 4. `partial`：查看文件级 status；主配置缺失时不要把 `.env` 采集成功误判为完整配置。

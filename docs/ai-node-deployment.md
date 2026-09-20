@@ -182,7 +182,7 @@ AI_NODE_IDS=ai-node-a,ai-node-b
 AI_NODE_LABELS=AI 节点 A,AI 节点 B
 AI_NODE_CONTAINER_NAMES=xray,xray-ai-node
 AI_NODE_API_SERVERS=127.0.0.1:27166,127.0.0.1:27166
-AI_NODE_ACCESS_LOG_PATH=/root/ai-routing-panel/app/xray/logs/ai-access.log
+AI_NODE_ACCESS_LOG_PATH=<shared-ai-node-host-log-dir>/ai-access.log
 AI_NODE_CONFIG_PATHS=
 ```
 
