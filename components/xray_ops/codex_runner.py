@@ -26,12 +26,11 @@ MODEL_PROMPT = (
     "必须引用存在的 evidence_ids。任何输出项的 evidence_ids 都必须非空且来自输入；如果没有对应证据，"
     "省略该输出项，不能返回空数组。不要执行命令，不要访问文件，不要输出 Markdown。"
 )
-# Providers that reject the Responses API constrained output still need a single
-# machine-readable object; this suffix replaces the schema as the format contract.
+# Providers that reject the Responses API constrained output still need the exact
+# format contract, so the packaged schema document is appended to the prompt.
 PLAIN_JSON_PROMPT_SUFFIX = (
-    " 只输出一个 JSON 对象，字段为 executive_summary、node_explanations、probable_causes、"
-    "recommended_actions、uncertainties，且每个数组项都带非空 evidence_ids；"
-    "不要输出任何解释文字、标题、注释或 Markdown 代码块。"
+    "\n\n只输出一个 JSON 对象，不要输出任何解释文字、标题、注释或 Markdown 代码块；"
+    "该对象必须严格符合以下 JSON Schema：\n"
 )
 DEFAULT_MAX_INPUT_BYTES = 64 * 1024
 RETRYABLE_ERRORS = {"codex_timeout", "codex_rate_limited", "codex_process_failed", "codex_exec_failed", "codex_invalid_output"}
@@ -396,7 +395,7 @@ class CodexRunner:
             raise CodexAnalysisError("codex_config_invalid", 0, "Codex timeout and attempts must be positive and backoff non-negative")
         _seed_runtime_home(self.config)
         command_base = _resolve_cli(self.config)
-        if self.config.output_schema_enabled and not self.schema_path.is_file():
+        if not self.schema_path.is_file():
             raise CodexAnalysisError("codex_schema_missing", 0, "model output schema is unavailable")
         self.config.workdir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.config.workdir, 0o700)
@@ -413,7 +412,11 @@ class CodexRunner:
         }
         prompt = MODEL_PROMPT
         if not self.config.output_schema_enabled:
-            prompt = f"{MODEL_PROMPT}{PLAIN_JSON_PROMPT_SUFFIX}"
+            try:
+                schema_document = self.schema_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise CodexAnalysisError("codex_schema_missing", 0, "model output schema is unavailable") from exc
+            prompt = f"{MODEL_PROMPT}{PLAIN_JSON_PROMPT_SUFFIX}{schema_document}"
         provider_config_args = _provider_config_args(self.config)
         if not provider_config_args:
             provider_config_args = ["-c", 'model_provider="openai"']
