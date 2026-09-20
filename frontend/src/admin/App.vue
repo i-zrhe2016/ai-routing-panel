@@ -225,10 +225,10 @@ export default {
           </div>
 
           <n-spin :show="loading">
-            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'overview' }" :aria-hidden="activeWorkspace !== 'overview'">
+            <section v-if="activeWorkspace === 'overview'" class="workspace-view">
               <overview-section />
             </section>
-            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'routing' }" :aria-hidden="activeWorkspace !== 'routing'">
+            <section v-if="activeWorkspace === 'routing'" class="workspace-view">
               <ai-routing-section />
             </section>
             <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'traffic' }" :aria-hidden="activeWorkspace !== 'traffic'">
