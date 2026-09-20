@@ -14,7 +14,7 @@ Last verified: 2026-09-20 @ c733bc1
 - 远端 AI 节点的指标和访问日志通过受管 SSH 通道读取；本地节点继续使用本地 endpoint/file 路径。远端日志读取具备有界读取、超长记录丢弃和跨轮次续传状态。控制面运行镜像已于 2026-09-20 从当前 `main` 重建部署，`ai_node_metrics_available`、`ai_destination_log_available` 和 `ai_node_running` 均为 1。
 - 运维日报器支持第三方 OpenAI 兼容 provider：`OPS_CODEX_MODEL_PROVIDER`、`OPS_CODEX_PROVIDER_BASE_URL`、`OPS_CODEX_PROVIDER_WIRE_API`、`OPS_CODEX_MODEL_REASONING_SUMMARY` 通过 `-c` 显式覆盖 Codex 配置，仍不读取任何用户 `config.toml`。
 - 控制面 Loki 与 Fluent Bit Agent 组成集中日志链路，控制面和普通数据面 Agent 通过 Tailscale 推送；Grafana 通过 `GRAFANA_LOKI_URL` 查询。
-- 灾备 SSH 采集已启用，覆盖普通数据面和 AI 节点；AI 节点采集其 Xray 配置和 `.env`，采集周期结果 `recoveryReady=true`。
+- 灾备 SSH 采集已启用，覆盖普通数据面和 AI 节点；AI 节点采集其 Xray 配置和 `.env`。2026-09-20 手工执行 `run_db_backup_cycle.py`（关闭 R2）验证两个角色均为 `ok`、`recoveryReady=true`。
 - Prometheus 目标保留控制面、普通数据面和台湾 AI 节点的当前拓扑，旧 AI 主节点目标已移除。
 - `scripts/restore_backup.py` 可校验明文/AES-256-GCM 灾备包，并把面板数据库、可选运维数据库、用户附件、控制面文件和普通/AI 节点文件准备到隔离恢复树；默认不写 SSH、Docker 或线上服务。
 - `scripts/configure_backup_secrets.py` 提供中文交互配置和 `--check`，只管理灾备加密密码及可选 R2 字段；输入不回显，生成值不打印，目标 dotenv 文件原子更新并保持 `0600`。使用边界见 [灾备上传](db-backup-uploader.md)。
@@ -26,7 +26,7 @@ Last verified: 2026-09-20 @ c733bc1
 ## Known Issues / Failing Checks
 
 - 全量 `PYTHONPATH=. .venv/bin/pytest -q`：370 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
-- 真实目标环境的 `DB_BACKUP_*` 密钥状态尚未由本次离线验证确认；本次没有写入真实 `.env`、访问 R2 或重启备份容器。
+- 手工采集周期使用 `DB_BACKUP_R2_ENABLED=0`，因此本次未验证 R2 上传链路；定时 `03:00 UTC` 任务在本次会话中未被观察。
 - 日报器在第三方 provider 拒绝推理 `summary` 字段时以 `codex_process_failed` 失败；需要 `OPS_CODEX_MODEL_REASONING_SUMMARY=none`，且必须运行包含该配置项的镜像。
 - AI 节点自建的控制面栈（`prometheus` 重启循环、`xray-routing-panel` `/healthz` 非 200）是遗留部署；本仓库当前只对其做灾备采集，不接管其运行时。
 
