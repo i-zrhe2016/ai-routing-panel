@@ -17,6 +17,7 @@ from .redaction import redact_value
 
 MODEL_OUTPUT_SCHEMA_VERSION = "1.0"
 PROMPT_VERSION = "2.0"
+REASONING_SUMMARY_VALUES = ("auto", "concise", "detailed", "none")
 MODEL_PROMPT = (
     "分析标准输入中的 Xray 每日运维证据。规则状态、规则编号、规则阈值、事件时间和证据 ID 已由程序冻结，"
     "不得修改、删除或重新定性。仅用中文解释已确定的结果，区分事实与推测；原因、建议和不确定项"
@@ -59,6 +60,7 @@ class CodexRunnerConfig:
     model_provider: str = ""
     provider_base_url: str = ""
     provider_wire_api: str = "responses"
+    provider_reasoning_summary: str = ""
     provider_requires_openai_auth: bool = True
 
     @classmethod
@@ -76,6 +78,7 @@ class CodexRunnerConfig:
             model_provider=os.environ.get("OPS_CODEX_MODEL_PROVIDER", "").strip(),
             provider_base_url=os.environ.get("OPS_CODEX_PROVIDER_BASE_URL", "").strip(),
             provider_wire_api=os.environ.get("OPS_CODEX_PROVIDER_WIRE_API", "responses").strip(),
+            provider_reasoning_summary=os.environ.get("OPS_CODEX_MODEL_REASONING_SUMMARY", "").strip(),
             provider_requires_openai_auth=os.environ.get(
                 "OPS_CODEX_PROVIDER_REQUIRES_OPENAI_AUTH", "1"
             ).strip().lower()
@@ -98,6 +101,8 @@ def _provider_config_args(config: CodexRunnerConfig) -> list[str]:
         raise CodexAnalysisError("codex_provider_invalid", 0, "provider base URL must be an HTTPS URL")
     if config.provider_wire_api not in {"responses", "chat"}:
         raise CodexAnalysisError("codex_provider_invalid", 0, "provider wire API is invalid")
+    if config.provider_reasoning_summary and config.provider_reasoning_summary not in REASONING_SUMMARY_VALUES:
+        raise CodexAnalysisError("codex_provider_invalid", 0, "provider reasoning summary is invalid")
     provider = config.model_provider
     settings = {
         "model_provider": provider,
@@ -106,6 +111,8 @@ def _provider_config_args(config: CodexRunnerConfig) -> list[str]:
         f"model_providers.{provider}.wire_api": config.provider_wire_api,
         f"model_providers.{provider}.requires_openai_auth": config.provider_requires_openai_auth,
     }
+    if config.provider_reasoning_summary:
+        settings["model_reasoning_summary"] = config.provider_reasoning_summary
     if config.model:
         settings["model"] = config.model
     args: list[str] = []

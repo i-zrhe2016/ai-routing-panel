@@ -11,6 +11,7 @@ from components.xray_ops.codex_runner import (
     CodexRunner,
     CodexRunnerConfig,
     _extract_usage,
+    _provider_config_args,
     _resolve_cli,
     _select_model_input,
     validate_model_analysis,
@@ -81,6 +82,18 @@ def _frozen():
             }
         ],
     }
+
+
+def _provider_config(tmp_path, **overrides):
+    config = _config(tmp_path)
+    return CodexRunnerConfig(
+        source_home=config.source_home,
+        runtime_home=config.runtime_home,
+        workdir=config.workdir,
+        model_provider="bai",
+        provider_base_url="https://api.b.ai/v1",
+        **overrides,
+    )
 
 
 def test_validate_model_analysis_rejects_non_string_and_unknown_evidence():
@@ -284,3 +297,33 @@ def test_extract_usage_from_codex_json_events():
         "total_tokens": 7473,
     }
     assert _extract_usage("not json") is None
+
+
+def test_provider_config_args_include_reasoning_summary_when_configured(tmp_path):
+    args = _provider_config_args(_provider_config(tmp_path, provider_reasoning_summary="none"))
+
+    assert 'model_reasoning_summary="none"' in args
+    assert 'model_provider="bai"' in args
+
+
+def test_provider_config_args_omit_reasoning_summary_when_unset(tmp_path):
+    args = _provider_config_args(_provider_config(tmp_path))
+
+    assert not any(argument.startswith("model_reasoning_summary=") for argument in args)
+
+
+def test_provider_config_args_reject_invalid_reasoning_summary(tmp_path):
+    with pytest.raises(CodexAnalysisError) as caught:
+        _provider_config_args(_provider_config(tmp_path, provider_reasoning_summary="verbose"))
+
+    assert caught.value.error_class == "codex_provider_invalid"
+
+
+def test_reasoning_summary_is_read_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPS_CODEX_MODEL_REASONING_SUMMARY", "none")
+
+    assert CodexRunnerConfig.from_env().provider_reasoning_summary == "none"
+
+    monkeypatch.delenv("OPS_CODEX_MODEL_REASONING_SUMMARY")
+
+    assert CodexRunnerConfig.from_env().provider_reasoning_summary == ""

@@ -25,7 +25,7 @@
 
 ## 部署、凭据与迁移
 
-- [AI 节点部署与 SSH 纳管](ai-node-deployment.md) — 本机 AI 备用、独立 AI 数据面部署、状态检查和同步保护。
+- [AI 节点部署与 SSH 纳管](ai-node-deployment.md) — 远端 AI 数据面部署、状态检查和同步保护。
 - [AI 节点独立凭据](ai-node-credentials.md) — AI inbound/outbound 凭据契约和轮换边界。
 - [Cloudflare Access 邮箱登录](cloudflare-access-email-login.md) — 控制面 Email OTP 登录、Access 策略和源站边界。
 - [内网 SSH 纳管](ssh-key-access.md) — 控制面直连普通数据面的认证、主机指纹校验与验证。

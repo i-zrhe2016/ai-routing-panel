@@ -18,7 +18,7 @@ flowchart LR
     U[data/uploads<br/>业务附件] --> D
     B --> D
     N[普通数据面<br/>只读 SSH] --> D
-    I[本机 AI 备用<br/>运行时目录] --> D
+    I[AI 数据面节点<br/>只读 SSH] --> D
     D --> E[AES-256-GCM 加密]
     E --> F[Cloudflare R2<br/>异地灾备通道]
     D --> H[本地 backups 保留期]
@@ -27,7 +27,7 @@ flowchart LR
 任务入口是 `scripts/run_db_backup_cycle.py`：
 
 1. 调用 `scripts/backup_db.py`，通过 SQLite 在线备份 API 生成 `backups/<prefix>-<UTC 时间戳>.db`。
-2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，以严格只读 SSH 采集普通数据面的主配置与可选环境文件；本机 AI 备用由 `DB_BACKUP_EXTRA_PATHS` 归档，不发起 AI SSH。
+2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，以严格只读 SSH 采集普通数据面和 AI 数据面节点的主配置与环境文件。普通数据面在 `DB_BACKUP_DATAPLANE_SSH_TARGET`/`DATAPLANE_SSH_TARGET` 都未设置时会回退到内置目标，因此该角色总会尝试采集；AI 数据面只在 `DB_BACKUP_AI_NODE_SSH_TARGET` 已设置时执行（直接运行脚本时该变量为空也会回退到 `AI_NODE_SSH_TARGET`），否则记录为 `skipped_no_target`，此时 AI 角色由 `DB_BACKUP_EXTRA_PATHS` 归档的控制面本机运行时目录提供恢复材料。远端路径留空时使用该角色的内置默认路径。
 3. 调用 `scripts/build_backup_bundle.py`，把数据库快照放在 `database/`、控制面额外路径放在 `config/`、远端 staging 放在 `nodes/`，并写入 `backup-manifest.json` 和 `node-recovery-manifest.json`。
 4. 重新校验归档内所有文件的大小和 SHA-256，并把节点恢复状态写入 `node-recovery-status.json`。
 5. `DB_BACKUP_R2_ENABLED=1` 时，使用 R2 S3 兼容 API 上传加密归档。
@@ -58,13 +58,15 @@ database/
 config/                       # 控制面 DB_BACKUP_EXTRA_PATHS
 nodes/
   normal-data-plane/...       # 普通数据面主机实际路径
-  app/xray/runtime/config-ai-node.json
+  ai-data-plane/...           # AI 数据面主机实际路径
   remote-node-collection.json
 backup-manifest.json
 node-recovery-manifest.json
 ```
 
-普通数据面通过控制面内网 SSH `root@100.116.187.106:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 备用运行在控制面本机 `redacted-ip-004`，配置 `config-ai-node.json` 随控制面运行时目录归档。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
+归档里的 `nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`），例如普通数据面主配置落在 `nodes/normal-data-plane/root/xray-routing-panel/app/xray/runtime/config.json`；`node-recovery-manifest.json` 再按部署根把同一文件映射成便携恢复路径。AI 数据面的默认远端路径是 `/etc/xray/config.json` 和 `/etc/xray/.env`，因此实际部署必须用 `DB_BACKUP_AI_NODE_REMOTE_PATHS` 覆盖为节点上的真实宿主机路径。
+
+普通数据面通过控制面内网 SSH `root@<normal-data-plane-host>:22` 管理，主配置是 `/root/xray-routing-panel/app/xray/runtime/config.json`；AI 数据面节点是远端台湾主机，主配置 `config-ai-node.json` 和 `.env` 通过独立 known_hosts 的只读 SSH 采集。远端采集结果记录在 `nodes/remote-node-collection.json`。完整 SSH 边界见[远端节点配置采集](remote-node-backup.md)。
 
 ## 配置
 
@@ -76,15 +78,17 @@ node-recovery-manifest.json
 | `DB_BACKUP_BUNDLE_DIR` | `DB_BACKUP_DIR` | 灾备归档本地目录 |
 | `DB_BACKUP_BUNDLE_KEEP_DAYS` | `DB_BACKUP_KEEP_DAYS` | 本地灾备归档保留天数，`0` 表示不清理 |
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前通过 SSH 读取普通数据面 |
+| `DB_BACKUP_SSH_COLLECTION_ENABLED` | Compose 为 `1`，脚本默认 `0` | 是否在打包前启用远端配置采集；开关作用于采集器整体，每个角色只在其 SSH 目标已配置时执行 |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `1` 时所有已配置远端节点的必需恢复文件必须成功；`0` 时记录失败但继续保留控制面归档 |
-| `DB_BACKUP_DATAPLANE_SSH_TARGET` | `root@100.116.187.106` | 普通数据面内网 SSH 目标；采集器不使用私钥 |
+| `DB_BACKUP_DATAPLANE_SSH_TARGET` | Compose 为 `root@<normal-data-plane-host>`；独立脚本另有内置回退目标 | 普通数据面内网 SSH 目标；生产必须显式设置为实际目标，采集器不使用私钥 |
 | `DB_BACKUP_SSH_OPTIONS` | 空 | 仅允许 `-4`/`-6`、日志级别和连接超时/keepalive 等安全选项 |
 | `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号/换行分隔；配置和 `.env` 是恢复必需文件，其余为可选 |
 | `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
-| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | 仅在显式启用远端 AI 节点 SSH 采集时使用 |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | 空 | 当前本机 AI 备用不使用远端采集 |
-| `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 远端 AI 节点的部署根 |
+| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | AI 数据面节点 SSH 采集端口 |
+| `DB_BACKUP_AI_NODE_SSH_TARGET` | 空 | AI 数据面节点的 SSH 目标；必须显式设置，Compose 会把未设置的变量传成空值，因此不依赖 `AI_NODE_SSH_TARGET` 回退 |
+| `DB_BACKUP_AI_NODE_KNOWN_HOSTS` | `/root/.ssh/known_hosts_ai` | AI 数据面节点的 known_hosts 文件；必须是备份容器内可见的路径，Compose 只挂载 `/root/.ssh/known_hosts_ai`，改到其他路径必须同时改挂载 |
+| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json`、`/etc/xray/.env` | AI 数据面节点的配置和 `.env`；默认值只适用于标准部署，实际宿主机路径不同时必须覆盖 |
+| `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | AI 数据面节点的部署根；该节点的实际部署根不同时必须显式覆盖 |
 | `DB_BACKUP_RECOVERY_REQUIRED` | `0` | `1` 时不完整节点恢复包阻止后续上传；默认保留数据库备份并记录状态 |
 | `DB_BACKUP_RECOVERY_STATUS_PATH` | 归档目录下的 `node-recovery-status.json` | 最近一次节点恢复完整性报告 |
 | `DB_BACKUP_R2_ENABLED` | `1`（Compose） | 是否将加密灾备归档上传到 R2；直接执行脚本时需显式设置并注入凭据 |

@@ -24,6 +24,18 @@ Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注
 
 官方登录 token 配套的 Codex 配置使用 `model_provider = "openai"`。日报器执行时仍忽略任意用户配置以保持隔离，但在未配置自定义 provider 时会显式传入这个内置 provider，避免把官方 token 发到错误的默认 provider；运行时 `auth.json` 和 `config.toml` 均应由宿主机以只读方式提供。
 
+接入第三方 OpenAI 兼容 provider 时使用以下变量，日报器会用 `-c` 显式覆盖对应的 Codex 配置项，仍不读取任何用户 `config.toml`：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `OPS_CODEX_MODEL_PROVIDER` | 空 | 自定义 provider 名称；必须与 `OPS_CODEX_PROVIDER_BASE_URL` 同时设置。 |
+| `OPS_CODEX_PROVIDER_BASE_URL` | 空 | provider 的 HTTPS base URL，例如 `https://api.b.ai/v1`。 |
+| `OPS_CODEX_PROVIDER_WIRE_API` | `responses` | provider 线上协议；仅支持 `responses`。 |
+| `OPS_CODEX_MODEL_REASONING_SUMMARY` | 空 | 覆盖 `model_reasoning_summary`；留空则不下发该配置项。可选 `auto`、`concise`、`detailed`、`none`。 |
+| `OPS_CODEX_MODEL` | 空 | 覆盖 `model`；留空则使用 provider 默认模型。 |
+
+部分第三方 provider 会拒绝 `summary` 字段并返回 `InvalidParameter`，此时应设为 `OPS_CODEX_MODEL_REASONING_SUMMARY=none`。日报器本身接受 `responses` 和 `chat` 两个取值，但当前固定版本的 Codex CLI 会在启动时拒绝 `wire_api=chat`，因此实际只能使用 `responses`。
+
 ## 数据面流量
 
 每个节点段落都会展示普通数据面和 AI 数据面的日总流量、入站流量、出站流量、网络流量覆盖率和计入接口列表。流量来源为 Prometheus 中 `job="data-plane-node"` 的 `node_network_receive_bytes_total` 与 `node_network_transmit_bytes_total`，按 `node_role` 分别汇总。
@@ -90,7 +102,7 @@ ops-daily-reports/
 | `OPS_GITHUB_REPORTS_BRANCH` | 当前分支 | 推送目标分支；留空使用当前分支。 |
 | `OPS_GITHUB_REPORTS_PUSH_ENABLED` | `1` | 是否执行 `git push`；设为 `0` 时只提交不推送。 |
 | `OPS_GITHUB_REPORTS_AUTHOR_NAME` | `i-zrhe2016` | 自动提交作者。 |
-| `OPS_GITHUB_REPORTS_AUTHOR_EMAIL` | `redacted-email-001 [at] example.invalid` | 自动提交邮箱。 |
+| `OPS_GITHUB_REPORTS_AUTHOR_EMAIL` | Compose 为 `ops-reporter@example.com`；非 Compose 运行时回退到维护者地址 | 自动提交邮箱；生产部署必须显式覆盖为实际归档身份。 |
 | `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` | `/dev/null` | 宿主机上的 GitHub token 文件路径；通过只读挂载进入容器。 |
 | `OPS_GITHUB_REPORTS_TOKEN_FILE` | `/run/secrets/github_reports_token` | 容器内 GitHub token 文件路径；HTTPS remote 推送时使用。 |
 

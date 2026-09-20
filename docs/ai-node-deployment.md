@@ -117,8 +117,9 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 远端 AI 模式下，面板通过同一条已纳管的 SSH 连接在 AI 节点回环读取 Xray
 `/debug/vars`，并增量读取 AI access log；不需要为面板指标开放 AI 业务端口或公网
 指标端口。`AI_NODE_METRICS_URL` 默认使用 `http://127.0.0.1:31097/debug/vars`，
-`AI_NODE_ACCESS_LOG_PATH` 默认使用远端主机的 `/var/log/xray/ai-access.log`；若远端
-容器把日志映射到其他宿主机路径，必须显式填写实际宿主机路径。远端 AI 模式仍在
+`AI_NODE_ACCESS_LOG_PATH` 在远端模式下有一个内置回退值 `/var/log/xray/ai-access.log`，
+但远端容器通常把日志目录 bind mount 到容器内 `/var/log/xray`，宿主机上并不存在该路径；
+必须显式填写该目录在宿主机上的实际路径，否则面板会一直读不到日志而相关指标保持为 0。远端 AI 模式仍在
 `monitoring/prometheus/prometheus.yml` 中为节点配置独立 target；当前仅保留
 台湾的 `9100/18081`。Grafana 的 AI 主机面板按
 `node_role="ai_data_plane"` 和 `node_id` 区分节点，容器面板按 `host` 和 `name` 区分容器。
@@ -159,14 +160,14 @@ AI_NODE_CONTAINER_NAMES=xray-ai-node
 AI_NODE_API_SERVERS=127.0.0.1:27166
 AI_NODE_CONFIG_PATHS=
 AI_NODE_METRICS_URL=http://127.0.0.1:31097/debug/vars
-AI_NODE_ACCESS_LOG_PATH=/var/log/xray/ai-access.log
+AI_NODE_ACCESS_LOG_PATH=<ai-node-host-log-dir>/ai-access.log
 ```
 
 关键语义：
 
 - `AI_NODE_API_SERVERS=127.0.0.1:27166`：远端 AI 节点通过 SSH 执行本机 TCP 业务端口检查。
 - `AI_NODE_METRICS_URL`：面板读取 AI Xray expvar 的地址；远端 SSH 模式由面板在 AI 节点回环读取，不得改成公网监听。
-- `AI_NODE_ACCESS_LOG_PATH`：面板读取 AI access log 的远端宿主机路径；远端默认是 `/var/log/xray/ai-access.log`，本机 Docker 默认使用控制面挂载路径。
+- `AI_NODE_ACCESS_LOG_PATH`：面板读取 AI access log 的远端宿主机路径，必须填节点宿主机上的实际文件，而不是容器内路径；远端 AI 节点常把日志目录 bind mount 到容器，此时要写宿主机的部署目录。
 - `AI_NODE_CONFIG_PATH=`：显式留空会使 `supports_sync=false`，禁止控制面上传配置。
 - `AI_NODE_CONTAINER_NAMES=xray-ai-node` 提供远端容器状态检查和重启能力。
 
@@ -176,16 +177,18 @@ AI_NODE_ACCESS_LOG_PATH=/var/log/xray/ai-access.log
 面板会在 Dashboard 和“基础设施”页分别展示每台节点，并允许单独重启：
 
 ```env
-AI_NODE_SSH_TARGETS=root@<hawaii-ai-host>,root@<taiwan-ai-host>
-AI_NODE_IDS=hawaii,taiwan
-AI_NODE_LABELS=AI 夏威夷,AI 台湾
+AI_NODE_SSH_TARGETS=root@<ai-node-a-host>,root@<ai-node-b-host>
+AI_NODE_IDS=ai-node-a,ai-node-b
+AI_NODE_LABELS=AI 节点 A,AI 节点 B
 AI_NODE_CONTAINER_NAMES=xray,xray-ai-node
 AI_NODE_API_SERVERS=127.0.0.1:27166,127.0.0.1:27166
+AI_NODE_ACCESS_LOG_PATH=<shared-ai-node-host-log-dir>/ai-access.log
 AI_NODE_CONFIG_PATHS=
 ```
 
 `AI_NODE_CONFIG_PATHS=` 保持为空时，控制面只做 SSH 状态检查和容器重启，不上传共享配置；两台远端
-Xray 的独立凭据和配置仍由各自节点负责。旧的单节点变量仍可用于兼容部署。逐节点重启 API 为
+Xray 的独立凭据和配置仍由各自节点负责。`AI_NODE_ACCESS_LOG_PATH` 是单值变量，所有节点必须使用
+相同的宿主机日志路径；路径不同时无法逐节点覆盖。旧的单节点变量仍可用于兼容部署。逐节点重启 API 为
 `POST /api/ai-nodes/<node_id>/restart`。
 
 ## `app/xray/.env` 上游配置
