@@ -1,0 +1,8 @@
+/* Portal-specific spacing is defined in shared/control-center.css.
+ * This file is intentionally small so customer pages can add local rules
+ * without diverging from the shared shell. */
+.portal-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
