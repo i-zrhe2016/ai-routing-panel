@@ -66,7 +66,7 @@ onBeforeUnmount(() => {
       <div class="wrap nav-inner">
         <a class="brand" href="#top">
           <span class="brand-mark" aria-hidden="true"></span>
-          <span class="brand-name">AI 家宽<i>·</i>防降智</span>
+          <span class="brand-name">AI Routing<i>·</i>Network</span>
         </a>
 
         <nav class="nav-links" aria-label="主导航">
@@ -74,7 +74,7 @@ onBeforeUnmount(() => {
         </nav>
 
         <div class="nav-actions">
-          <a class="btn-text nav-login" href="/portal">订阅中心</a>
+          <a class="btn-text nav-login" href="/portal">Customer Portal</a>
           <a class="btn btn-primary btn-sm" href="/plans">查看套餐</a>
         </div>
 
@@ -90,7 +90,7 @@ onBeforeUnmount(() => {
 
       <div v-show="menuOpen" class="nav-drawer">
         <a v-for="l in navLinks" :key="l.href" :href="l.href" @click="closeMenu">{{ l.label }}</a>
-        <a href="/portal" @click="closeMenu">订阅中心</a>
+        <a href="/portal" @click="closeMenu">Customer Portal</a>
         <a class="btn btn-primary" href="/plans" @click="closeMenu">查看套餐</a>
       </div>
     </header>
@@ -112,16 +112,16 @@ onBeforeUnmount(() => {
         <div class="footer-brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <div>
-            <p class="footer-name">AI 家宽 · ChatGPT 防降智节点</p>
-            <p class="footer-tag">原生家宽 · 自动分流 · 不超售 · 高可用 · 数据安全</p>
+            <p class="footer-name">AI Routing Network</p>
+            <p class="footer-tag">AI traffic routing · Health detection · Failover · Encrypted transport</p>
           </div>
         </div>
         <div class="footer-cta">
           <a class="btn btn-primary" href="/plans">查看套餐</a>
-          <a class="btn-text" href="/portal">订阅中心</a>
+          <a class="btn-text" href="/portal">Customer Portal</a>
         </div>
       </div>
-      <p class="footer-fine wrap">© AI 家宽 · ChatGPT 防降智节点 · 仅供合法合规用途</p>
+      <p class="footer-fine wrap">© AI Routing Network · 仅供合法合规用途</p>
     </footer>
   </div>
 </template>
