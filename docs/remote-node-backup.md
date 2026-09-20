@@ -1,6 +1,6 @@
 # 远端节点配置采集
 
-本模块只说明控制面如何通过 SSH 读取远端数据面实际配置，并把结果交给灾备归档器。启用远端 AI 数据面节点后，普通数据面和 AI 数据面节点的 Xray 配置与 `.env` 都通过同一套只读 SSH 采集归档；AI 角色只有在 `DB_BACKUP_AI_NODE_SSH_TARGET` 已配置时才会执行。
+本模块只说明控制面如何通过 SSH 读取远端数据面实际配置，并把结果交给灾备归档器。启用远端 AI 数据面节点后，普通数据面和 AI 数据面节点的 Xray 配置与 `.env` 都通过同一套只读 SSH 采集归档。AI 角色在 `DB_BACKUP_AI_NODE_SSH_TARGET` 已配置时执行；直接运行采集脚本时它也兼容 `AI_NODE_SSH_TARGET`，而 Compose 会显式传入 DB 前缀变量（空值不会回退）。
 
 ![远端节点只读配置采集流程](diagrams/remote-backup-flow.svg)
 
@@ -87,7 +87,7 @@ node-recovery-manifest.json
 - `configCollected`：主配置路径是否确实成功写入 staging。
 - `requiredPaths` / `recoveryReady`：恢复必需路径和该节点是否具备完整恢复材料。
 
-归档根部 `backup-manifest.json` 再记录所有文件的 SHA-256，`node-recovery-manifest.json` 将远端路径映射到便携恢复目录。灾难阶段先验证两层 manifest，再用 `scripts/node_recovery.py prepare --bundle <bundle> --node normal-data-plane --output-dir <dir>` 把 `nodes/` 下的配置复制到隔离目录并启动 Xray（`--bundle` 和 `--output-dir` 都是必填）；不要直接覆盖运行中的配置。完整流程见[节点恢复](node-recovery.md)。
+归档根部 `backup-manifest.json` 再记录所有文件的 SHA-256，`node-recovery-manifest.json` 将远端路径映射到便携恢复目录。灾难阶段先验证两层 manifest，再用 `scripts/node_recovery.py prepare --bundle <bundle> --node normal-data-plane --output-dir <dir>` 把 `nodes/` 下的配置复制到隔离目录（`--bundle` 和 `--output-dir` 都是必填）；该命令不启动 Xray、不重启 Docker，随后的人工启动和验收步骤见[节点恢复](node-recovery.md)。不要直接覆盖运行中的配置。
 
 ## 只读验证命令
 
