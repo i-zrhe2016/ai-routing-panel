@@ -38,10 +38,10 @@ node-recovery-manifest.json
 
 | 节点 | SSH 目标 | 主配置路径 | 配置环境文件 |
 | --- | --- | --- | --- |
-| 普通数据面 | `root@<normal-data-plane-host>:22`（独立脚本另有内置回退目标，生产必须显式覆盖） | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
+| 普通数据面 | `root@YOUR_NORMAL_DATA_PLANE_HOST:22`（独立脚本另有内置回退目标，生产必须显式覆盖） | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
 | AI 数据面 | `root@<ai-node-host>:22` | 默认 `/etc/xray/config.json`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/runtime/config-ai-node.json` | 默认 `/etc/xray/.env`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/.env` |
 
-`nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再把同一文件映射成便携恢复路径，所以归档路径和恢复路径看起来不同。映射规则是：远端路径位于该角色的部署根之下时去掉部署根前缀；否则按文件名回退到固定的便携路径（`config.json` → `app/xray/runtime/config.json`，`.env` → `app/xray/.env`，其余归到 `remote/`）。AI 数据面的默认路径 `/etc/xray/*` 不在任何部署根之下，因此必须用 `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 指向真实部署根，否则它的恢复路径会和普通数据面重名。
+`nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再把同一文件映射成便携恢复路径，所以归档路径和恢复路径看起来不同。映射规则是：远端路径位于该角色的部署根之下时去掉部署根前缀；否则按文件名回退到固定的便携路径（`config.json` → `app/xray/runtime/config.json`，`.env` → `app/xray/.env`，其余归到 `remote/`）。每个角色仍保存在各自的 `nodes/<role>/` 树下，因此回退路径不会跨节点互相覆盖；但 AI 数据面的默认路径 `/etc/xray/*` 不在部署根之下，回退后只能得到通用路径，要用 `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 指向真实部署根才能保留远端目录结构。
 
 普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
 
@@ -49,7 +49,7 @@ node-recovery-manifest.json
 
 ## 认证与主机校验
 
-- 普通数据面目标：`root@<normal-data-plane-host>:22`；控制面直接通过内网连接。独立脚本在变量缺失时会回退到内置目标，生产必须显式设置 `DB_BACKUP_DATAPLANE_SSH_TARGET`，否则可能备份到非预期主机。
+- 普通数据面目标：`root@YOUR_NORMAL_DATA_PLANE_HOST:22`；控制面直接通过内网连接。独立脚本在变量缺失时会回退到内置目标，生产必须显式设置 `DB_BACKUP_DATAPLANE_SSH_TARGET`，否则可能备份到非预期主机。
 - SSH 命令不包含 `-i`/`IdentityFile`，也不挂载任何私钥；公钥认证被显式关闭，只允许密码和键盘交互认证，并且不提供 TTY 或密码输入来源。因此目标节点必须已经授权控制面免密登录（例如 Tailscale SSH 的 ACL 授权）；否则定时采集会认证失败或一直等到超时。
 - 普通数据面 known_hosts：`/root/.ssh/known_hosts`。
 - AI 数据面目标：`root@<ai-node-host>:22`；使用独立 known_hosts 文件，不复用普通数据面的主机密钥清单。
@@ -94,7 +94,7 @@ node-recovery-manifest.json
 在控制面上执行采集器（不会触碰远端状态）：
 
 ```bash
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@<normal-data-plane-host> \
+DB_BACKUP_DATAPLANE_SSH_TARGET=root@YOUR_NORMAL_DATA_PLANE_HOST \
 DB_BACKUP_DATAPLANE_SSH_PORT=22 \
 DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts \
 DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json \
