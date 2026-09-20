@@ -19,7 +19,7 @@
 
 ## 各节点的配置来源
 
-灾备归档包含控制面本地文件，以及每个已启用角色的远端宿主机文件；AI 目标未配置时只包含普通数据面：
+灾备归档包含控制面本地文件，以及每个已启用角色的远端宿主机文件。AI 目标未配置时不会产生 AI 远端采集结果，但 `DB_BACKUP_EXTRA_PATHS` 仍会归档控制面的 `app/xray/runtime`，`node_recovery.py` 会把其中的 `config-ai-node.json` 当作控制面本机 Docker AI 节点的恢复材料（`source=control-plane-local`）：
 
 ```text
 database/
@@ -50,7 +50,7 @@ node-recovery-manifest.json
 ## 认证与主机校验
 
 - 普通数据面目标：`root@redacted-ip-003:22`；控制面直接通过内网连接。
-- SSH 命令不包含 `-i`/`IdentityFile`，也不挂载任何私钥；公钥认证关闭，允许密码和键盘交互认证。
+- SSH 命令不包含 `-i`/`IdentityFile`，也不挂载任何私钥；公钥认证被显式关闭，只允许密码和键盘交互认证，并且不提供 TTY 或密码输入来源。因此目标节点必须已经授权控制面免密登录（例如 Tailscale SSH 的 ACL 授权）；否则定时采集会认证失败或一直等到超时。
 - 普通数据面 known_hosts：`/root/.ssh/known_hosts`。
 - AI 数据面目标：`root@<ai-node-host>:22`；使用独立 known_hosts 文件，不复用普通数据面的主机密钥清单。
 - SSH 仍强制 `StrictHostKeyChecking=yes`，并设置连接和存活超时。

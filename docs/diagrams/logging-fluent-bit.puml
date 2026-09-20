@@ -20,12 +20,18 @@ actor "Operator" as operator
 panel --> fluentbit : stdout/stderr\nJSON + X-Request-ID
 control --> fluentbit : Docker JSON / Xray error
 data --> fluentbit_data : Docker JSON / Xray error
-ai --> fluentbit_ai : Docker JSON / Xray error
+ai ..> fluentbit_ai : Docker JSON / Xray error
 fluentbit --> loki : Tailscale\nLoki HTTP push
 fluentbit_data --> loki : Tailscale\nLoki HTTP push
-fluentbit_ai --> loki : Tailscale\nLoki HTTP push
+fluentbit_ai ..> loki : Tailscale\nLoki HTTP push
 grafana --> loki : LogQL queries
 operator --> grafana : Explore / dashboards
+
+note bottom of fluentbit_ai
+  Supported role, not deployed today.
+  The AI node keeps its logs locally;
+  the panel reads them over managed SSH.
+end note
 
 note bottom of fluentbit
   Filesystem buffer per node.

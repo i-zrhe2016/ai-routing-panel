@@ -54,7 +54,7 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 - `PANEL_HEALTH_REQUIRES_XRAY`
 - `PANEL_INTERNAL_HOSTS`：免管理员登录和 CSRF 的内网 Host 列表；默认仅允许回环地址，部署时需显式加入受控的控制面内网地址
 
-Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 `monitoring/loki/.env`，Grafana 使用 `monitoring/.env` 中的 `GRAFANA_LOKI_URL`。三节点生产路径和实际主机角色见 [Fluent Bit 日志采集](logging-fluent-bit.md#当前生产部署)。
+Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 `monitoring/loki/.env`，Grafana 使用 `monitoring/.env` 中的 `GRAFANA_LOKI_URL`。当前生产采集路径和实际主机角色见 [Fluent Bit 日志采集](logging-fluent-bit.md#当前生产部署)。
 
 ## AI 节点纳管变量
 
