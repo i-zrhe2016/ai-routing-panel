@@ -42,7 +42,7 @@ Last verified: 2026-09-20 @ 63935d3
 - AI 节点的访问日志位于远端宿主机路径，不是容器内路径；`AI_NODE_ACCESS_LOG_PATH` 必须指向宿主机上的实际文件。
 - 第三方 provider 不支持 `wire_api=chat`，Codex CLI 会拒绝启动；`model_reasoning_summary` 只接受 `auto`、`concise`、`detailed`、`none`。
 - 固定版本的 Codex CLI 总会发送 `update_plan`、`view_image`、`request_user_input` 等工具且无法全部关闭，因此拒绝“约束输出 + 工具”组合的 provider 必须关闭 `OPS_CODEX_OUTPUT_SCHEMA`；此时契约只能靠提示词中的 schema 文档加本地校验保证。
-- 归档检出必须是独立仓库：`git worktree` 的 `.git` 是指向主仓库 `.git/worktrees/<name>` 的文件，容器内不可用，会报 `fatal: not a git repository`。归档检出与 upstream 的同步规则：启用推送时发布器先 fetch，工作树干净则以 `--ff-only` 自动快进；工作树有未提交改动时以 `github_reports_branch_behind_upstream` 报错；与 upstream 分叉时 `--ff-only` 无法快进，以 `fatal: Not possible to fast-forward` 报错，需要先人工把该检出理顺。关闭推送时不做 fetch，落后即直接以 `github_reports_branch_behind_upstream` 拒绝提交。
+- 归档检出必须是独立仓库：`git worktree` 的 `.git` 是指向主仓库 `.git/worktrees/<name>` 的文件，容器内不可用，会报 `fatal: not a git repository`。归档检出与 upstream 的同步规则：启用推送时发布器先 fetch，且只在检出落后时才处理同步——工作树干净则以 `--ff-only` 自动快进，工作树有未提交改动则以 `github_reports_branch_behind_upstream` 报错，同时领先（分叉）导致无法快进则以 `fatal: Not possible to fast-forward` 报错，需要先人工理顺该检出；未落后时不做这些检查。关闭推送时不做 fetch，落后即直接以 `github_reports_branch_behind_upstream` 拒绝提交。
 
 ## Architecture Snapshot
 
