@@ -28,7 +28,7 @@ Last verified: 2026-09-20 @ 63935d3
 - 全量 `PYTHONPATH=. .venv/bin/pytest -q`：375 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
 - 手工采集周期使用 `DB_BACKUP_R2_ENABLED=0`，因此本次未验证 R2 上传链路；定时 `03:00 UTC` 任务在本次会话中未被观察。
 - 日报归档已启用推送：`OPS_GITHUB_REPORTS_PUSH_ENABLED=1` 且通过 `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` 只读挂载 token；2026-09-20 实测调度周期把归档提交推到 `origin/main`，日志为 `push_status=pushed`、`ahead_after=0`。
-- 归档日期存在缺口：2026-09-10 至 2026-09-18 因日报器故障未生成，本仓库不计划回补；`ops-daily-reports/` 已含 2026-09-19。
+- 归档日期存在缺口：`ops-daily-reports/` 在 `origin/main` 上从 2026-09-08 直接跳到 2026-09-19；2026-09-09 的报告只提交在本地 `main` 分支且未推送，2026-09-10 至 2026-09-18 因日报器故障未生成。本仓库不计划回补。
 - AI 节点自建的控制面栈（`prometheus` 重启循环、`xray-routing-panel` `/healthz` 非 200）是遗留部署；本仓库当前只对其做灾备采集，不接管其运行时。
 
 ## Constraints
