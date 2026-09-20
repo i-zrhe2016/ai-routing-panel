@@ -152,15 +152,15 @@ Grafana 通过 proxy 模式访问 Loki，浏览器不需要直接访问 Loki 端
 在控制面执行：
 
 ```bash
-curl -fsS http://redacted-ip-007:18080/healthz
-curl -fsS http://redacted-ip-004:3100/ready
-curl -fsS http://redacted-ip-007:2020/api/v1/metrics
+curl -fsS http://YOUR_CONTROL_PLANE_HOST:18080/healthz
+curl -fsS http://YOUR_LOKI_HOST:3100/ready
+curl -fsS http://YOUR_CONTROL_PLANE_HOST:2020/api/v1/metrics
 ```
 
 查询控制面业务日志：
 
 ```bash
-curl -G http://redacted-ip-004:3100/loki/api/v1/query_range \
+curl -G http://YOUR_LOKI_HOST:3100/loki/api/v1/query_range \
   --data-urlencode 'query={job="platform-logs",node_role="control_plane",category="business"}' \
   --data-urlencode 'limit=100'
 ```
@@ -254,7 +254,7 @@ Grafana 已预置 `Control Plane Business Logs` dashboard；也可以在 Explore
 Agent 健康检查：
 
 ```bash
-curl -s http://redacted-ip-007:2020/api/v1/metrics
+curl -s http://YOUR_AGENT_HOST:2020/api/v1/metrics
 docker compose -f docker-compose.agent.yml logs --tail=200 fluent-bit
 ```
 
@@ -267,7 +267,7 @@ curl -fsS http://loki.tailnet.example:3100/ready
 
 如果 Grafana 查不到日志，按顺序检查：
 
-1. Loki 绑定地址是日志中心的 Tailscale 地址，而不是 `redacted-ip-007`。
+1. Loki 绑定地址是日志中心主机的 Tailscale 地址，而不是控制面回环地址。
 2. Tailscale ACL 允许对应 Agent 到 `tag:log-store:3100`。
 3. Agent `.env` 的 `FLUENT_BIT_LOKI_HOST`、节点角色和 Xray 日志目录正确。
 4. `/var/lib/docker/containers` 和 Xray 日志目录以只读方式挂载成功。

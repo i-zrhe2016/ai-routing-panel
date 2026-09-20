@@ -101,7 +101,7 @@ DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/confi
 python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-staging --required
 ```
 
-上面的命令只验证普通数据面：它没有设置 AI 目标，因此 `remote-node-collection.json` 里 AI 角色会是 `skipped_no_target`，不会出现 `configCollected=true`。采集器没有角色选择器，一次调用始终处理两个角色——普通数据面目标未提供时回退到内置目标，AI 角色只在配置了 `DB_BACKUP_AI_NODE_SSH_TARGET` 时才执行。要在同一次验证里也检查 AI 数据面，需要在同一命令上追加该角色的目标、known_hosts 和远端路径变量，并确认它同样得到 `configCollected=true` 和 `recoveryReady=true`。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
+上面的命令只验证普通数据面：它没有设置 AI 目标，因此 `remote-node-collection.json` 里 AI 角色会是 `skipped_no_target`，不会出现 `configCollected=true`。这个结论只在 `AI_NODE_SSH_TARGET` 也没有继承到当前环境时成立——采集器会回退到该变量，存在时仍会采集 AI 节点。采集器没有角色选择器，一次调用始终处理两个角色：普通数据面目标未提供时回退到内置目标，AI 角色只在 `DB_BACKUP_AI_NODE_SSH_TARGET` 或 `AI_NODE_SSH_TARGET` 已配置时执行。要在同一次验证里也检查 AI 数据面，需要在同一命令上追加该角色的目标、known_hosts 和远端路径变量，并确认它同样得到 `configCollected=true` 和 `recoveryReady=true`。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
 
 ## 排障顺序
 
