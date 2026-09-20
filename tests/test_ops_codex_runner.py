@@ -18,6 +18,12 @@ from components.xray_ops.codex_runner import (
 )
 
 
+def _schema_document() -> str:
+    return (Path(codex_runner.__file__).with_name("schemas") / "model-analysis.schema.json").read_text(
+        encoding="utf-8"
+    )
+
+
 def _analysis(evidence_id="ev-1"):
     return {
         "executive_summary": "规则结果已完成。",
@@ -373,7 +379,10 @@ def test_output_schema_can_be_disabled(tmp_path, monkeypatch):
 
     command = captured["command"]
     assert "--output-schema" not in command
-    assert command[-1].endswith(codex_runner.PLAIN_JSON_PROMPT_SUFFIX)
+    prompt = command[-1]
+    assert codex_runner.PLAIN_JSON_PROMPT_SUFFIX in prompt
+    assert '"executive_summary"' in prompt
+    assert prompt.endswith(_schema_document())
     assert result.analysis["executive_summary"] == "规则结果已完成。"
 
 
@@ -418,3 +427,27 @@ def test_output_schema_flag_is_read_from_env(monkeypatch):
 
     monkeypatch.setenv("OPS_CODEX_OUTPUT_SCHEMA", "disabled")
     assert CodexRunnerConfig.from_env().output_schema_enabled is True
+
+
+def test_missing_schema_file_fails_in_both_modes(tmp_path, monkeypatch):
+    base = _config(tmp_path)
+    runner = codex_runner.CodexRunner(base)
+    monkeypatch.setattr(
+        codex_runner.CodexRunner, "schema_path", property(lambda self: tmp_path / "missing.json")
+    )
+    with pytest.raises(codex_runner.CodexAnalysisError) as excinfo:
+        runner.analyze(_frozen())
+    assert excinfo.value.error_class == "codex_schema_missing"
+
+    disabled = codex_runner.CodexRunner(
+        codex_runner.CodexRunnerConfig(
+            source_home=base.source_home,
+            runtime_home=base.runtime_home,
+            workdir=base.workdir,
+            codex_bin=base.codex_bin,
+            output_schema_enabled=False,
+        )
+    )
+    with pytest.raises(codex_runner.CodexAnalysisError) as excinfo:
+        disabled.analyze(_frozen())
+    assert excinfo.value.error_class == "codex_schema_missing"

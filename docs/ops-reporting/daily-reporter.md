@@ -32,12 +32,12 @@ Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注
 | `OPS_CODEX_PROVIDER_BASE_URL` | 空 | provider 的 HTTPS base URL，例如 `https://api.b.ai/v1`。 |
 | `OPS_CODEX_PROVIDER_WIRE_API` | `responses` | provider 线上协议；仅支持 `responses`。 |
 | `OPS_CODEX_MODEL_REASONING_SUMMARY` | 空 | 覆盖 `model_reasoning_summary`；留空则不下发该配置项。可选 `auto`、`concise`、`detailed`、`none`。 |
-| `OPS_CODEX_OUTPUT_SCHEMA` | `1` | 是否用 Responses API 的约束输出（`text.format = json_schema`）约束模型。`1`、`true`、`yes` 视为启用，`0`、`false`、`no`、`off` 视为关闭，其他取值仍按默认启用处理。设为关闭时不下发 `--output-schema`，改为在提示词里要求只输出一个 JSON 对象；本地契约校验和无效输出重试保持不变。 |
+| `OPS_CODEX_OUTPUT_SCHEMA` | `1` | 是否用 Responses API 的约束输出（`text.format = json_schema`）约束模型。`1`、`true`、`yes` 视为启用，`0`、`false`、`no`、`off` 视为关闭，其他取值仍按默认启用处理。设为关闭时不下发 `--output-schema`，改为把同一份 JSON Schema 文档写进提示词；本地契约校验和无效输出重试保持不变。 |
 | `OPS_CODEX_MODEL` | 空 | 覆盖 `model`；留空则使用 provider 默认模型。 |
 
 部分第三方 provider 会拒绝 `summary` 字段并返回 `InvalidParameter`，此时应设为 `OPS_CODEX_MODEL_REASONING_SUMMARY=none`。日报器本身接受 `responses` 和 `chat` 两个取值，但当前固定版本的 Codex CLI 会在启动时拒绝 `wire_api=chat`，因此实际只能使用 `responses`。
 
-部分 provider 会同时拒绝约束输出和工具定义（`Constrained response_format/guided_grammar cannot be combined with active tools`）。固定版本的 Codex CLI 总会发送 `update_plan`、`view_image`、`request_user_input` 等工具，且无法全部关闭，这类 provider 必须设置 `OPS_CODEX_OUTPUT_SCHEMA=0`；此时格式约束由提示词和本地校验共同保证，模型返回非 JSON 或不符合契约时仍按 `codex_invalid_output` 重试。
+部分 provider 会同时拒绝约束输出和工具定义（`Constrained response_format/guided_grammar cannot be combined with active tools`）。固定版本的 Codex CLI 总会发送 `update_plan`、`view_image`、`request_user_input` 等工具，且无法全部关闭，这类 provider 必须设置 `OPS_CODEX_OUTPUT_SCHEMA=0`；此时格式约束由提示词中的 schema 文档和本地校验共同保证，模型返回非 JSON 或不符合契约时仍按 `codex_invalid_output` 重试。只用自然语言描述契约不足以约束模型，实测会返回结构不同的对象（例如把 `executive_summary` 输出成数组）。
 
 ## 数据面流量
 
