@@ -327,3 +327,94 @@ def test_reasoning_summary_is_read_from_env(tmp_path, monkeypatch):
     monkeypatch.delenv("OPS_CODEX_MODEL_REASONING_SUMMARY")
 
     assert CodexRunnerConfig.from_env().provider_reasoning_summary == ""
+
+
+def test_output_schema_is_used_by_default(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            json.dumps(_analysis()), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+
+    CodexRunner(config).analyze(_frozen())
+
+    command = captured["command"]
+    assert "--output-schema" in command
+    assert codex_runner.PLAIN_JSON_PROMPT_SUFFIX not in command[-1]
+
+
+def test_output_schema_can_be_disabled(tmp_path, monkeypatch):
+    base = _config(tmp_path)
+    config = CodexRunnerConfig(
+        source_home=base.source_home,
+        runtime_home=base.runtime_home,
+        workdir=base.workdir,
+        codex_bin=base.codex_bin,
+        output_schema_enabled=False,
+    )
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            json.dumps(_analysis()), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+
+    result = CodexRunner(config).analyze(_frozen())
+
+    command = captured["command"]
+    assert "--output-schema" not in command
+    assert command[-1].endswith(codex_runner.PLAIN_JSON_PROMPT_SUFFIX)
+    assert result.analysis["executive_summary"] == "规则结果已完成。"
+
+
+def test_disabled_output_schema_still_retries_invalid_output(tmp_path, monkeypatch):
+    base = _config(tmp_path)
+    config = CodexRunnerConfig(
+        source_home=base.source_home,
+        runtime_home=base.runtime_home,
+        workdir=base.workdir,
+        codex_bin=base.codex_bin,
+        output_schema_enabled=False,
+    )
+    calls = 0
+
+    def fake_run(command, **_kwargs):
+        nonlocal calls
+        calls += 1
+        evidence_id = "ev-unknown" if calls == 1 else "ev-1"
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            json.dumps(_analysis(evidence_id)), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+
+    result = CodexRunner(config).analyze(_frozen())
+
+    assert result.attempts == 2
+
+
+def test_output_schema_flag_is_read_from_env(monkeypatch):
+    for disabled in ("0", "false", "no", "off", " FALSE "):
+        monkeypatch.setenv("OPS_CODEX_OUTPUT_SCHEMA", disabled)
+        assert CodexRunnerConfig.from_env().output_schema_enabled is False
+
+    for enabled in ("1", "true", "yes"):
+        monkeypatch.setenv("OPS_CODEX_OUTPUT_SCHEMA", enabled)
+        assert CodexRunnerConfig.from_env().output_schema_enabled is True
+
+    monkeypatch.delenv("OPS_CODEX_OUTPUT_SCHEMA")
+    assert CodexRunnerConfig.from_env().output_schema_enabled is True
+
+    monkeypatch.setenv("OPS_CODEX_OUTPUT_SCHEMA", "disabled")
+    assert CodexRunnerConfig.from_env().output_schema_enabled is True

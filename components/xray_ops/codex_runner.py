@@ -18,11 +18,20 @@ from .redaction import redact_value
 MODEL_OUTPUT_SCHEMA_VERSION = "1.0"
 PROMPT_VERSION = "2.0"
 REASONING_SUMMARY_VALUES = ("auto", "concise", "detailed", "none")
+# Same disabled tokens as the other boolean settings in this component.
+DISABLED_BOOL_TOKENS = {"0", "false", "no", "off"}
 MODEL_PROMPT = (
     "分析标准输入中的 Xray 每日运维证据。规则状态、规则编号、规则阈值、事件时间和证据 ID 已由程序冻结，"
     "不得修改、删除或重新定性。仅用中文解释已确定的结果，区分事实与推测；原因、建议和不确定项"
     "必须引用存在的 evidence_ids。任何输出项的 evidence_ids 都必须非空且来自输入；如果没有对应证据，"
     "省略该输出项，不能返回空数组。不要执行命令，不要访问文件，不要输出 Markdown。"
+)
+# Providers that reject the Responses API constrained output still need a single
+# machine-readable object; this suffix replaces the schema as the format contract.
+PLAIN_JSON_PROMPT_SUFFIX = (
+    " 只输出一个 JSON 对象，字段为 executive_summary、node_explanations、probable_causes、"
+    "recommended_actions、uncertainties，且每个数组项都带非空 evidence_ids；"
+    "不要输出任何解释文字、标题、注释或 Markdown 代码块。"
 )
 DEFAULT_MAX_INPUT_BYTES = 64 * 1024
 RETRYABLE_ERRORS = {"codex_timeout", "codex_rate_limited", "codex_process_failed", "codex_exec_failed", "codex_invalid_output"}
@@ -61,6 +70,7 @@ class CodexRunnerConfig:
     provider_base_url: str = ""
     provider_wire_api: str = "responses"
     provider_reasoning_summary: str = ""
+    output_schema_enabled: bool = True
     provider_requires_openai_auth: bool = True
 
     @classmethod
@@ -79,6 +89,8 @@ class CodexRunnerConfig:
             provider_base_url=os.environ.get("OPS_CODEX_PROVIDER_BASE_URL", "").strip(),
             provider_wire_api=os.environ.get("OPS_CODEX_PROVIDER_WIRE_API", "responses").strip(),
             provider_reasoning_summary=os.environ.get("OPS_CODEX_MODEL_REASONING_SUMMARY", "").strip(),
+            output_schema_enabled=os.environ.get("OPS_CODEX_OUTPUT_SCHEMA", "1").strip().lower()
+            not in DISABLED_BOOL_TOKENS,
             provider_requires_openai_auth=os.environ.get(
                 "OPS_CODEX_PROVIDER_REQUIRES_OPENAI_AUTH", "1"
             ).strip().lower()
@@ -384,7 +396,7 @@ class CodexRunner:
             raise CodexAnalysisError("codex_config_invalid", 0, "Codex timeout and attempts must be positive and backoff non-negative")
         _seed_runtime_home(self.config)
         command_base = _resolve_cli(self.config)
-        if not self.schema_path.is_file():
+        if self.config.output_schema_enabled and not self.schema_path.is_file():
             raise CodexAnalysisError("codex_schema_missing", 0, "model output schema is unavailable")
         self.config.workdir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.config.workdir, 0o700)
@@ -400,6 +412,8 @@ class CodexRunner:
             if isinstance(item, dict) and item.get("evidence_id")
         }
         prompt = MODEL_PROMPT
+        if not self.config.output_schema_enabled:
+            prompt = f"{MODEL_PROMPT}{PLAIN_JSON_PROMPT_SUFFIX}"
         provider_config_args = _provider_config_args(self.config)
         if not provider_config_args:
             provider_config_args = ["-c", 'model_provider="openai"']
@@ -423,8 +437,7 @@ class CodexRunner:
                 "-c",
                 'web_search="disabled"',
                 *(item for feature in DISABLED_CODEX_FEATURES for item in ("--disable", feature)),
-                "--output-schema",
-                str(self.schema_path),
+                *(["--output-schema", str(self.schema_path)] if self.config.output_schema_enabled else []),
                 "--output-last-message",
                 str(output_path),
                 prompt,
