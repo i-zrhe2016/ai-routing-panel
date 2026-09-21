@@ -1,0 +1,63 @@
+name: CI
+
+# The daily reporter pushes archive commits straight to main, so main itself
+# needs the same verification a pull request gets.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      # tests/ has no __init__.py, so the `pytest` console script puts tests/ on
+      # sys.path instead of the repository root and 28 files fail to collect.
+      # `python -m pytest` adds the cwd itself, so it collects either way; the
+      # prefix is kept so CI runs the documented command verbatim.
+      #
+      # app/bootstrap.py mkdirs DATA_DIR, which defaults to /data. That path
+      # exists on the runner but is not writable, so the two architecture tests
+      # that call build_application() directly would fail with PermissionError.
+      # Point it at a writable scratch path, as the container does via ENV.
+      # The `runner` context is only available at step level, not job level.
+      - name: Run backend tests
+        env:
+          DATA_DIR: ${{ runner.temp }}/xray-panel-data
+        run: PYTHONPATH=. python -m pytest tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+      - name: Build admin bundle
+        working-directory: frontend
+        run: npm run build
+      # SPA bundles are deployment inputs: the Dockerfile copies app/static and
+      # installs no Node, so a source change without a committed rebuild never
+      # reaches the running service. Only app/static/admin is checked here —
+      # the portal and landing bundles have no build path in this repository.
+      - name: Verify committed bundle matches source
+        run: git diff --exit-code -- app/static/admin

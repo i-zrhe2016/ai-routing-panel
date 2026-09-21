@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-09-20 @ 63935d3
+Last verified: 2026-09-21 @ 68cf90e
 
 ## Current Focus
 
@@ -18,6 +18,7 @@ Last verified: 2026-09-20 @ 63935d3
 - Prometheus 目标保留控制面、普通数据面和台湾 AI 节点的当前拓扑，旧 AI 主节点目标已移除。
 - `scripts/restore_backup.py` 可校验明文/AES-256-GCM 灾备包，并把面板数据库、可选运维数据库、用户附件、控制面文件和普通/AI 节点文件准备到隔离恢复树；默认不写 SSH、Docker 或线上服务。
 - `scripts/configure_backup_secrets.py` 提供中文交互配置和 `--check`，只管理灾备加密密码及可选 R2 字段；输入不回显，生成值不打印，目标 dotenv 文件原子更新并保持 `0600`。使用边界见 [灾备上传](db-backup-uploader.md)。
+- 仓库具备首个 CI 门禁：`.github/workflows/ci.yml` 在**指向 `main` 的 PR**和**推送到 `main`**时运行 `backend`（Python 3.12 跑 `python -m pytest`）和 `frontend`（Node 22 跑 `npm test`、`npm run build`，再阻塞比对产物与 `app/static/admin`）两个 job，均只申请 `contents: read`。检查清单见 [开发流程](development.md)。
 
 ## In Progress
 
