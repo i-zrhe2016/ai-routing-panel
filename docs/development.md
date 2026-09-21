@@ -233,6 +233,11 @@ PYTHONPATH=. .venv/bin/python -m pytest tests -q
 PYTHONPATH=. python -m pytest tests -q
 ```
 
+该 job 额外设置 `DATA_DIR` 指向 runner 的临时目录。`app/bootstrap.py` 会对 `DATA_DIR`
+执行 `mkdir`，而它的默认值 `/data` 在 GitHub runner 上存在但不可写，两个直接调用
+`build_application()` 的架构测试会因此以 `PermissionError` 失败；容器内由 `ENV` 指定该
+变量，CI 里需要等价处理。
+
 `frontend` job 使用 Node 22，从提交的 lockfile 安装后依次执行 `npm ci`、`npm test`、
 `npm run build`，最后比对构建产物：
 
