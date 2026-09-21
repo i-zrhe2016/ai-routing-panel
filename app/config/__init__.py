@@ -11,9 +11,9 @@ re-exported here so existing ``from app.config import parse_bool_env`` style
 imports keep working.
 """
 
-import hashlib
 import os
 from datetime import datetime, timezone
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 from .parsers import (
@@ -157,21 +157,60 @@ AI_DOMAIN_MANAGER_EXECUTION_MODE = os.environ.get(
 
 PANEL_HOST = os.environ.get("PANEL_HOST", "0.0.0.0")
 PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))
-PANEL_INTERNAL_HOSTS = frozenset(
-    item.strip().lower().strip("[]")
-    for item in (
-        _parse_csv_env("PANEL_INTERNAL_HOSTS")
-        or ("127.0.0.1",)
-    )
-    if item.strip()
+# The panel has no login: access is decided by the client source address. The
+# default covers loopback, RFC1918, link-local, and the Tailscale CGNAT range so
+# a tailnet client or a local container reaches the console directly.
+DEFAULT_PANEL_ALLOWED_NETWORKS = (
+    "127.0.0.0/8",
+    "::1/128",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "100.64.0.0/10",
+    "fc00::/7",
+    "fe80::/10",
 )
+
+
+def _parse_allowed_networks(value, key):
+    networks = []
+    for item in value:
+        candidate = item.strip()
+        if not candidate:
+            continue
+        try:
+            networks.append(ip_network(candidate, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"{key} 包含无效的 CIDR：{candidate}") from exc
+    return tuple(networks)
+
+
+PANEL_ALLOWED_NETWORKS = _parse_allowed_networks(
+    _parse_csv_env("PANEL_ALLOWED_NETWORKS") or DEFAULT_PANEL_ALLOWED_NETWORKS,
+    "PANEL_ALLOWED_NETWORKS",
+)
+
+
+def is_allowed_panel_source(value):
+    """Return whether a client address may reach the panel."""
+    candidate = str(value or "").strip()
+    if not candidate:
+        return False
+    try:
+        address = ip_address(candidate)
+    except ValueError:
+        return False
+    if address.version == 6 and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return any(address in network for network in PANEL_ALLOWED_NETWORKS if network.version == address.version)
+
+
 PANEL_PUBLIC_URL = os.environ.get("PANEL_PUBLIC_URL", "").strip().rstrip("/")
 PANEL_SUBSCRIPTION_PUBLIC_URL = (
     os.environ.get("PANEL_SUBSCRIPTION_PUBLIC_URL", "").strip().rstrip("/")
     or PANEL_PUBLIC_URL
 )
-PANEL_USERNAME = os.environ.get("PANEL_USERNAME", "")
-PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
 PANEL_SECRET_KEY = os.environ.get("PANEL_SECRET_KEY", "").strip()
 PANEL_LOG_LEVEL = os.environ.get("PANEL_LOG_LEVEL", "INFO").strip().upper() or "INFO"
 PANEL_SLOW_REQUEST_MS = parse_nonnegative_env_int(
@@ -263,9 +302,6 @@ CONTROL_PLANE_BACKUP_UPSTREAM_URL = os.environ.get(
 ).strip()
 AI_ROUTING_ENABLED = parse_bool_env(os.environ.get("AI_ROUTING_ENABLED"), default=True)
 PANEL_HEALTH_REQUIRES_XRAY = parse_bool_env(os.environ.get("PANEL_HEALTH_REQUIRES_XRAY"), default=True)
-AUTH_ENABLED = bool(PANEL_USERNAME or PANEL_PASSWORD)
-AUTH_SESSION_KEY = "panel_auth_marker"
-AUTH_SESSION_MARKER = hashlib.sha256(f"{PANEL_USERNAME}\0{PANEL_PASSWORD}".encode("utf-8")).hexdigest()
 TENANT_SESSION_TOKEN_KEY = "tenant_auth_token"
 TENANT_SESSION_MARKER_KEY = "tenant_auth_marker"
 PROBE_DASHBOARD_RANGES = {

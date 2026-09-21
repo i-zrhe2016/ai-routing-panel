@@ -117,6 +117,8 @@ docker compose up -d --build xray-routing-panel-db-backup
 
 ### 默认访问地址
 
+控制台没有登录，只有内网和 Tailscale 来源可访问（见[控制面访问与来源白名单](docs/panel-access.md)）；下表地址均按控制面内网或 Tailscale 地址访问。
+
 | 功能 | 地址 |
 | --- | --- |
 | 管理后台 | `http://服务器IP:18080/` |
@@ -189,7 +191,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 
 - [AI 节点部署与 SSH 纳管](docs/ai-node-deployment.md) — 独立 AI 数据面的部署和控制面纳管。
 - [AI 节点独立凭据](docs/ai-node-credentials.md) — AI inbound/outbound 凭据边界和轮换要求。
-- [Cloudflare Access 邮箱登录](docs/cloudflare-access-email-login.md) — 控制面 Email OTP 登录、Access 策略和源站边界。
+- [控制面访问与来源白名单](docs/panel-access.md) — Tailscale/内网直连、无登录控制台和 403 边界。
 - [内网 SSH 纳管](docs/ssh-key-access.md) — 控制面直连普通数据面的认证、主机指纹校验与验证。
 - [面板迁移](docs/panel-migration.md) — 控制面数据、配置和服务迁移流程。
 - [AWS 普通数据面迁移与回退](docs/aws-normal-data-plane-migration.md) — 普通数据面灰度迁移、AWS 安全组门禁和回退步骤。

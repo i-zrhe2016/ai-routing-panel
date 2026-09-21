@@ -16,7 +16,7 @@ PNG_BYTES = (
 )
 
 
-def load_panel_module(temp_root, panel_username="", panel_password=""):
+def load_panel_module(temp_root):
     data_dir = temp_root / "data"
     xray_dir = temp_root / "xray"
     runtime_dir = xray_dir / "runtime"
@@ -96,8 +96,6 @@ def load_panel_module(temp_root, panel_username="", panel_password=""):
     os.environ["XRAY_CLIENT_CONFIG_PATH"] = str(client_config_path)
     os.environ["PANEL_PUBLIC_URL"] = "http://panel.example.com"
     os.environ["SEED_LISTEN_PORT"] = ""
-    os.environ["PANEL_USERNAME"] = panel_username
-    os.environ["PANEL_PASSWORD"] = panel_password
     os.environ["PANEL_SECRET_KEY"] = "test-secret-key"
     os.environ["PROBE_ENABLED"] = "0"
     os.environ["COMMERCE_AUTO_PORT_START"] = "35000"

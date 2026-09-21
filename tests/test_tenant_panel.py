@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
-def load_panel_module(temp_root, panel_username="", panel_password="", probe_enabled=False, probe_test_listen_port=""):
+def load_panel_module(temp_root, probe_enabled=False, probe_test_listen_port=""):
     data_dir = temp_root / "data"
     xray_dir = temp_root / "xray"
     runtime_dir = xray_dir / "runtime"
@@ -89,8 +89,6 @@ def load_panel_module(temp_root, panel_username="", panel_password="", probe_ena
     os.environ["XRAY_CLIENT_CONFIG_PATH"] = str(client_config_path)
     os.environ["PANEL_PUBLIC_URL"] = "http://panel.example.com"
     os.environ["SEED_LISTEN_PORT"] = ""
-    os.environ["PANEL_USERNAME"] = panel_username
-    os.environ["PANEL_PASSWORD"] = panel_password
     os.environ["PANEL_SECRET_KEY"] = "test-secret-key"
     os.environ["PROBE_ENABLED"] = "1" if probe_enabled else "0"
     os.environ["PROBE_TEST_LISTEN_PORT"] = str(probe_test_listen_port or "")
@@ -340,7 +338,7 @@ class TenantPanelTest(unittest.TestCase):
 
         login_page = self.client.get("/login")
         self.assertEqual(login_page.status_code, 200)
-        self.assertIn("统一登录入口", login_page.get_data(as_text=True))
+        self.assertIn("租户登录", login_page.get_data(as_text=True))
 
         # Wrong credentials via the per-port JSON login -> 401.
         wrong = self.client.post(
@@ -487,11 +485,13 @@ class TenantPanelTest(unittest.TestCase):
         self.assertIn("2026-06-18 00:00:00", body)
 
 
-class UnifiedAdminLoginTest(unittest.TestCase):
+class PanelAccessTest(unittest.TestCase):
+    """The console has no login; the source address is the authorization."""
+
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
-        self.panel = load_panel_module(self.root, panel_username="admin-user", panel_password="admin-pass-123")
+        self.panel = load_panel_module(self.root)
         self.client = self.panel.app.test_client()
 
     def tearDown(self):
@@ -505,77 +505,81 @@ class UnifiedAdminLoginTest(unittest.TestCase):
                 session["csrf_token"] = csrf_value
             return csrf_value
 
-    def test_admin_login_uses_unified_login_page(self):
+    def create_port(self, listen_port, note):
+        payload = self.panel.state.validate_port_payload(
+            {"listen_port": listen_port, "traffic_limit": "10G", "note": note}
+        )
+        self.panel.state.create_port(payload)
+        return next(item for item in self.panel.state.query_ports() if item["listen_port"] == listen_port)
+
+    def test_admin_console_requires_no_login(self):
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 303)
-        location = response.headers["Location"]
-        parsed = urlparse(location)
-        self.assertEqual(parsed.path, "/login")
-        self.assertEqual(parse_qs(parsed.query).get("next"), ["/"])
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("xray-routing-panel", response.get_data(as_text=True))
 
-        login_page = self.client.get("/login?next=/")
-        self.assertEqual(login_page.status_code, 200)
-        self.assertIn("统一登录入口", login_page.get_data(as_text=True))
-
-        failed = self.client.post(
-            "/login",
-            data={
-                "username": "admin-user",
-                "password": "wrong-password",
-                "next": "/",
-                "csrf_token": self.csrf_token(),
-            },
-        )
-        self.assertEqual(failed.status_code, 401)
-
-        logged_in = self.client.post(
-            "/login",
-            data={
-                "username": "admin-user",
-                "password": "admin-pass-123",
-                "next": "/",
-                "csrf_token": self.csrf_token(),
-            },
-            follow_redirects=True,
-        )
-        self.assertEqual(logged_in.status_code, 200)
-        self.assertIn("xray-routing-panel", logged_in.get_data(as_text=True))
-
-    def test_admin_login_rejects_missing_csrf_token(self):
-        response = self.client.post(
-            "/login",
-            data={"username": "admin-user", "password": "admin-pass-123", "next": "/"},
-        )
-        self.assertEqual(response.status_code, 400)
-
-    def test_internal_panel_host_bypasses_admin_auth_and_csrf(self):
-        headers = {"Host": "127.0.0.1:18080"}
-
-        index = self.client.get("/", headers=headers)
-        self.assertEqual(index.status_code, 200)
-
-        dashboard = self.client.get("/api/dashboard", headers=headers)
+        dashboard = self.client.get("/api/dashboard")
         self.assertEqual(dashboard.status_code, 200)
 
-        client_error = self.client.post(
-            "/api/client-errors",
-            json={"message": "internal test", "source": "test"},
-            headers=headers,
-        )
-        self.assertEqual(client_error.status_code, 202)
+    def test_logout_route_is_gone(self):
+        self.assertEqual(self.client.get("/logout").status_code, 404)
 
-    def test_admin_login_rejects_external_next_target(self):
+    def test_external_source_is_rejected(self):
+        for path in ("/", "/api/dashboard", "/healthz", "/probe-dashboard"):
+            response = self.client.get(path, environ_base={"REMOTE_ADDR": "203.0.113.9"})
+            self.assertEqual(response.status_code, 403, path)
+            self.assertNotIn("xray-routing-panel", response.get_data(as_text=True))
+
+    def test_external_source_json_denial_is_json(self):
+        response = self.client.get("/api/dashboard", environ_base={"REMOTE_ADDR": "203.0.113.9"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "forbidden_source")
+
+    def test_tailscale_source_reaches_admin(self):
+        response = self.client.get("/api/dashboard", environ_base={"REMOTE_ADDR": "100.100.100.100"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_state_changing_api_still_requires_csrf_token(self):
+        response = self.client.post("/api/client-errors", json={"message": "no token", "source": "test"})
+        self.assertEqual(response.status_code, 400)
+
+        accepted = self.client.post(
+            "/api/client-errors",
+            json={"message": "with token", "source": "test"},
+            headers={"X-CSRF-Token": self.csrf_token()},
+        )
+        self.assertEqual(accepted.status_code, 202)
+
+    def test_login_page_is_tenant_only_and_rejects_admin_credentials(self):
+        page = self.client.get("/login?next=/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("租户登录", page.get_data(as_text=True))
+
         response = self.client.post(
             "/login",
             data={
                 "username": "admin-user",
                 "password": "admin-pass-123",
+                "next": "/",
+                "csrf_token": self.csrf_token(),
+            },
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_tenant_login_ignores_external_next_target(self):
+        port = self.create_port(31011, "Tenant Next")
+        response = self.client.post(
+            "/login",
+            data={
+                "username": port["tenant_username"],
+                "password": port["tenant_password"],
                 "next": "https://attacker.example/phishing",
                 "csrf_token": self.csrf_token(),
             },
         )
         self.assertEqual(response.status_code, 303)
-        self.assertEqual(urlparse(response.headers["Location"]).path, "/")
+        location = response.headers["Location"]
+        self.assertNotIn("attacker.example", location)
+        self.assertEqual(urlparse(location).path, f"/tenant/{port['tenant_token']}")
 
 
 class ProbeDashboardRenderTest(unittest.TestCase):

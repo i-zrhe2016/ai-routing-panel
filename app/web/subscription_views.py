@@ -1,11 +1,10 @@
 from flask import abort, send_file
 
-from ..config import AUTH_ENABLED, PAYMENT_PROOFS_DIR
+from ..config import PAYMENT_PROOFS_DIR
 from .core import (
     build_port_token_subscription_response,
     build_subscription_response,
     get_authenticated_customer,
-    is_session_authenticated,
     message_redirect,
     route,
     log_business_event,
@@ -56,16 +55,11 @@ def payment_proof_file(submission_id):
     if record is None:
         abort(404)
 
-    allowed = False
-    if not AUTH_ENABLED:
-        allowed = True
-    elif is_session_authenticated():
-        allowed = True
-    else:
-        customer = get_authenticated_customer()
-        if customer is not None and int(record["customer_id"]) == int(customer["id"]):
-            allowed = True
-    if not allowed:
+    # Only reachable from an allowed internal/Tailscale source, so an operator
+    # without a customer session may open the proof; a signed-in customer may
+    # only open their own.
+    customer = get_authenticated_customer()
+    if customer is not None and int(record["customer_id"]) != int(customer["id"]):
         abort(403)
 
     path = PAYMENT_PROOFS_DIR.parent / str(record["proof_image_path"])

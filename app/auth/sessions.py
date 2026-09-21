@@ -1,8 +1,10 @@
-"""Session markers for the admin, tenant, and customer identities.
+"""Session markers for the tenant and customer identities.
 
-Each ``mark_*`` clears the other two so a session never holds more than one
-identity at a time. Markers are SHA256 hashes over the identity's stable fields
-so a credential or status change invalidates an existing session.
+The admin console has no login: it is reached only from allowed internal or
+Tailscale source addresses, so it holds no session marker. Each ``mark_*``
+clears the other identity so a session never holds more than one identity at a
+time. Markers are SHA256 hashes over the identity's stable fields so a
+credential or status change invalidates an existing session.
 """
 
 import hashlib
@@ -10,22 +12,11 @@ import hashlib
 from flask import session
 
 from ..config import (
-    AUTH_ENABLED,
-    AUTH_SESSION_KEY,
-    AUTH_SESSION_MARKER,
     CUSTOMER_SESSION_ID_KEY,
     CUSTOMER_SESSION_MARKER_KEY,
     TENANT_SESSION_MARKER_KEY,
     TENANT_SESSION_TOKEN_KEY,
 )
-
-
-def is_session_authenticated():
-    return AUTH_ENABLED and session.get(AUTH_SESSION_KEY) == AUTH_SESSION_MARKER
-
-
-def clear_admin_session():
-    session.pop(AUTH_SESSION_KEY, None)
 
 
 def clear_tenant_session():
@@ -36,12 +27,6 @@ def clear_tenant_session():
 def clear_customer_session():
     session.pop(CUSTOMER_SESSION_ID_KEY, None)
     session.pop(CUSTOMER_SESSION_MARKER_KEY, None)
-
-
-def mark_session_authenticated():
-    clear_customer_session()
-    clear_tenant_session()
-    session[AUTH_SESSION_KEY] = AUTH_SESSION_MARKER
 
 
 def tenant_session_marker(port):
@@ -59,7 +44,6 @@ def is_tenant_session_authenticated(port):
 
 
 def mark_tenant_session_authenticated(port):
-    clear_admin_session()
     clear_customer_session()
     clear_tenant_session()
     session[TENANT_SESSION_TOKEN_KEY] = str(port.get("tenant_token") or "")
@@ -81,7 +65,6 @@ def is_customer_session_authenticated(customer):
 
 
 def mark_customer_session_authenticated(customer):
-    clear_admin_session()
     clear_tenant_session()
     clear_customer_session()
     session[CUSTOMER_SESSION_ID_KEY] = int(customer.get("id") or 0)

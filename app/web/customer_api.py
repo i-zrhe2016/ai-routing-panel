@@ -15,13 +15,11 @@ from flask import request
 from ..auth import (
     clear_customer_session,
     customer_credentials_match,
-    is_session_authenticated,
     is_tenant_session_authenticated,
     mark_customer_session_authenticated,
     mark_tenant_session_authenticated,
     tenant_credentials_match,
 )
-from ..config import AUTH_ENABLED
 from ..errors import ValidationError
 from ..helpers import format_optional_display_time
 from ..subscriptions import parse_xray_client_profile
@@ -266,10 +264,8 @@ def api_customer_plans():
 
 
 def _tenant_authed(port):
-    # Same rule the old tenant page used: an admin session sees any port; otherwise
-    # a valid tenant session for THIS port is required.
-    if AUTH_ENABLED and is_session_authenticated():
-        return True
+    # The panel is operator-only at the network layer, but the tenant token view
+    # still requires a session for THIS port so one token cannot read another.
     return is_tenant_session_authenticated(port)
 
 

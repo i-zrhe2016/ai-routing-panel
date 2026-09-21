@@ -1,4 +1,9 @@
-"""Login-redirect helpers, safe next-target handling, and login page renderers."""
+"""Login-redirect helpers, safe next-target handling, and login page renderers.
+
+The admin console has no login: disallowed source addresses get a 403 from the
+access gate instead of a redirect, so only the tenant and customer login pages
+live here.
+"""
 
 from urllib.parse import urlsplit
 
@@ -26,7 +31,7 @@ def normalize_next_target(value, fallback=None):
             return fallback_target
 
     path = parsed.path or "/"
-    if not path.startswith("/") or path.startswith("//") or path in {url_for("login"), url_for("logout")}:
+    if not path.startswith("/") or path.startswith("//") or path == url_for("login"):
         return fallback_target
 
     if parsed.query:
@@ -34,37 +39,10 @@ def normalize_next_target(value, fallback=None):
     return path
 
 
-def login_next_target_for_request():
-    fallback_target = url_for("index")
-    if request.path.startswith("/api/"):
-        return normalize_next_target(request.referrer, fallback=fallback_target)
-    return normalize_next_target(current_request_target(), fallback=fallback_target)
-
-
-def login_url_for_request():
-    return url_for("login", next=login_next_target_for_request())
-
-
 def customer_login_url_for_request():
     if request.method != "GET":
         return url_for("customer_login", next=normalize_next_target(request.referrer, fallback=url_for("plans_page")))
     return url_for("customer_login", next=normalize_next_target(current_request_target(), fallback=url_for("plans_page")))
-
-
-def auth_required_response():
-    if request.path.startswith("/api/"):
-        response = jsonify(
-            {
-                "ok": False,
-                "code": "auth_required",
-                "message": "请先登录面板。",
-                "login_url": login_url_for_request(),
-            }
-        )
-        response.status_code = 401
-        response.headers["WWW-Authenticate"] = 'Basic realm="xray-routing-panel"'
-        return response
-    return redirect(login_url_for_request(), code=303)
 
 
 def customer_auth_required_response():

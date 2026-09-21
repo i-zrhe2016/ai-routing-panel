@@ -72,7 +72,7 @@ scrape_configs:
 1. 启动 `monitoring/` 监控栈（Prometheus + Grafana + node_exporter）。其中 Grafana 已开启匿名只读（`GF_AUTH_ANONYMOUS_ENABLED=true` + `Viewer`）与内嵌（`GF_SECURITY_ALLOW_EMBEDDING=true`），并通过 provisioning 自动加载内嵌专用 dashboard `monitoring/grafana/dashboards/xray-observability.json`（UID `xray-observability`，带显式 panel id）。
 2. 给面板设置 `GRAFANA_PUBLIC_URL=https://xray.zrhe2016.cc/grafana/`；该路径由 Cloudflare Access Email OTP 保护。
 3. Grafana 使用 `GF_SERVER_ROOT_URL=https://xray.zrhe2016.cc/grafana/` 和 `GF_SERVER_SERVE_FROM_SUB_PATH=true`，重新启动监控栈后访问 `/grafana/`。
-4. 重新部署包含 `app/static/` 发布资源的面板镜像，登录后台进入 Observability 工作区即可。顶部可切换 1h/6h/24h 时间范围。
+4. 重新部署包含 `app/static/` 发布资源的面板镜像，打开后台进入 Observability 工作区即可。顶部可切换 1h/6h/24h 时间范围。
 
 > ✅ **当前入口**：Grafana 通过 `https://xray.zrhe2016.cc/grafana/` 访问，Cloudflare Access 是公网认证边界；Grafana 的 `3001` 仅供本机 Nginx 反代使用。Cloudflare Access 邮箱会由 Nginx 转为 Grafana Auth Proxy 用户标识，认证后不再显示 Grafana 登录页。
 

@@ -11,7 +11,7 @@
 | 变量 | 说明 |
 | --- | --- |
 | `PANEL_PUBLIC_URL` | 面板对外地址；影响订阅链接和安全 Cookie |
-| `PANEL_USERNAME` / `PANEL_PASSWORD` | 管理员认证；任一设置后首页、探针页和 `/api/*` 都要求登录 |
+| `PANEL_ALLOWED_NETWORKS` | 允许访问控制面的来源 CIDR 列表，逗号分隔；留空使用默认的回环/私网/link-local/Tailscale 网段。控制台没有登录，来源地址即授权 |
 | `PANEL_SECRET_KEY` | Session 签名密钥；不设置则每次启动随机生成 |
 | `PANEL_LOG_LEVEL` | 控制面 JSON 日志最低级别，默认 `INFO` |
 | `PANEL_SLOW_REQUEST_MS` | 慢请求阈值（毫秒），默认 `1000`；普通成功 GET 仍不记录 |
@@ -52,7 +52,7 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 - `PROBE_INTERVAL`
 - `PROBE_TEST_LISTEN_PORT`
 - `PANEL_HEALTH_REQUIRES_XRAY`
-- `PANEL_INTERNAL_HOSTS`：免管理员登录和 CSRF 的内网 Host 列表；默认仅允许回环地址，部署时需显式加入受控的控制面内网地址
+- `PANEL_ALLOWED_NETWORKS`：控制面来源白名单（默认见上表）；控制台没有登录，非白名单来源在路由前返回 403
 
 Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 `monitoring/loki/.env`，Grafana 使用 `monitoring/.env` 中的 `GRAFANA_LOKI_URL`。当前生产采集路径和实际主机角色见 [Fluent Bit 日志采集](logging-fluent-bit.md#当前生产部署)。
 

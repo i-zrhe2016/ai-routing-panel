@@ -50,11 +50,6 @@
               <span class="status-pill-dot"></span>
               {{ '数据面运行中' if data_plane_running else '数据面未运行' }}
             </span>
-            {% if auth_enabled %}
-            <form method="post" action="{{ url_for('logout') }}" class="inline-form">
-              <button class="secondary" type="submit">退出登录</button>
-            </form>
-            {% endif %}
           </div>
         </header>
 

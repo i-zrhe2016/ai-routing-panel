@@ -10,37 +10,30 @@ from flask import Flask, Response, abort, current_app, g, jsonify, redirect, req
 from flask import cli as flask_cli
 
 from ..auth import (
-    auth_required_response,
     clear_customer_session,
     clear_tenant_session,
-    credentials_match,
     customer_auth_required_response,
     ensure_csrf_token,
-    extract_basic_credentials,
     is_customer_session_authenticated,
-    is_session_authenticated,
     is_tenant_session_authenticated,
-    mark_session_authenticated,
     mark_tenant_session_authenticated,
     tenant_credentials_match,
     validate_csrf_token,
 )
 from ..config import (
-    AUTH_ENABLED,
-    AUTH_SESSION_KEY,
     CUSTOMER_SESSION_ID_KEY,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
     GRAFANA_OBSERVABILITY_UID,
     GRAFANA_PUBLIC_URL,
     PANEL_HOST,
-    PANEL_INTERNAL_HOSTS,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
     PANEL_SECRET_KEY,
     PROBE_ENABLED,
     TENANT_SESSION_TOKEN_KEY,
     XRAY_CLIENT_CONFIG_PATH,
+    is_allowed_panel_source,
 )
 from ..helpers import format_optional_display_time, human_bytes
 from ..observability.logging import (
@@ -247,93 +240,40 @@ def initialize_observability():
     return None
 
 
-def is_internal_panel_request():
-    """Return whether the request used a configured private panel host.
+def panel_source_allowed():
+    """Return whether the client address may reach the panel.
 
-    The client source address is not suitable here because a remote Tailscale
-    client has its own address. The destination Host header identifies the
-    private control-plane entry point; public requests use the Cloudflare
-    hostname and do not match this set.
+    The panel has no login: a reachable source address *is* the authorization.
+    Only loopback, private, link-local, and Tailscale sources are allowed by
+    default, so the check is independent of any Host header or proxy header a
+    client could set.
     """
-    host = request.host.rsplit(":", 1)[0].strip("[]").lower()
-    return host in PANEL_INTERNAL_HOSTS
+    return is_allowed_panel_source(request.remote_addr)
+
+
+def panel_access_denied_response():
+    message = "面板仅允许内网或 Tailscale 来源访问。"
+    if request.path.startswith("/api/"):
+        response = jsonify({"ok": False, "code": "forbidden_source", "message": message})
+        response.status_code = 403
+        return response
+    return Response(f"{message}\n", status=403, mimetype="text/plain")
 
 
 @before_request
-def ensure_basic_auth():
-    if request.path in {"/healthz", "/metrics"}:
-        return None
-    if is_internal_panel_request():
-        if AUTH_ENABLED:
-            mark_session_authenticated()
-        return None
-    if not AUTH_ENABLED:
-        return None
-    access_email = request.environ.get("HTTP_CF_ACCESS_AUTHENTICATED_USER_EMAIL", "").strip()
-    if access_email:
-        if not is_session_authenticated():
-            mark_session_authenticated()
-        return None
-    if request.endpoint in {
-        "login",
-        "logout",
-        "static",
-        "landing_page",
-        "robots_txt",
-        "sitemap_xml",
-        "plans_page",
-        "customer_login",
-        "customer_register",
-        "customer_logout",
-        "customer_dashboard",
-        "customer_orders",
-        "customer_order_detail",
-        "customer_subscriptions",
-        "customer_subscription_detail",
-        "customer_subscription_renew",
-        "customer_submit_order_payment_proof",
-        "payment_proof_file",
-        "tenant_login",
-        "tenant_logout",
-        "subscription_default",
-        "subscription_clash",
-        "subscription_v2ray",
-        "tenant_panel",
-        "tenant_subscription_default",
-        "tenant_subscription_clash",
-        "tenant_subscription_v2ray",
-        # Subscriber portal shell + JSON API (self-gate via the customer session
-        # / are public). Allowlisted so admin Basic auth does not intercept them.
-        "portal_shell",
-        "portal_shell_path",
-        "api_customer_me",
-        "api_customer_overview",
-        "api_customer_subscriptions",
-        "api_customer_subscription_detail",
-        "api_customer_subscription_renew",
-        "api_customer_orders",
-        "api_customer_order_detail",
-        "api_customer_submit_payment_proof",
-        "api_customer_plans",
-        "api_customer_login",
-        "api_customer_register",
-        "api_customer_logout",
-        # Tokenized tenant deep-link: public shell + JSON API gated by tenant session.
-        "api_tenant_subscription",
-        "api_tenant_login",
-        "api_client_errors",
-    }:
-        return None
-    if session.get(AUTH_SESSION_KEY) and not is_session_authenticated():
-        session.clear()
-    if is_session_authenticated():
-        return None
+def ensure_allowed_panel_source():
+    """Reject clients outside the internal/Tailscale allowlist before routing."""
 
-    basic_credentials = extract_basic_credentials()
-    if basic_credentials and credentials_match(*basic_credentials):
-        mark_session_authenticated()
+    if panel_source_allowed():
         return None
-    return auth_required_response()
+    emit_event(
+        "panel.access.denied",
+        result="rejected",
+        level="warning",
+        error_code="forbidden_source",
+        metadata={"source": str(request.remote_addr or "")},
+    )
+    return panel_access_denied_response()
 
 
 @before_request
@@ -367,9 +307,9 @@ def ensure_customer_portal_auth():
 
 @before_request
 def bind_observability_actor():
-    if is_session_authenticated():
-        bind_actor("admin")
-        return None
+    # Every request that reaches this hook already passed the source allowlist,
+    # so an anonymous-but-allowed caller is the operator.
+    bind_actor("admin")
     customer = get_authenticated_customer()
     if customer is not None:
         bind_actor("customer", customer.get("id"))
@@ -813,8 +753,6 @@ def json_tenant_auth_required():
 def json_validate_csrf():
     # Returns a JSON 400 tuple when the CSRF token is missing/invalid, else None,
     # so JSON endpoints stay JSON instead of aborting to an HTML error page.
-    if is_internal_panel_request():
-        return None
     token = request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
     if not validate_csrf_token(token):
         return json_error_response("CSRF token 无效。", 400)
@@ -872,8 +810,6 @@ def get_authenticated_customer():
 
 
 def require_csrf():
-    if is_internal_panel_request():
-        return None
     token = request.headers.get("X-CSRF-Token", "")
     if not token:
         token = request.form.get("csrf_token", "")

@@ -1,19 +1,16 @@
 from datetime import datetime
 import sqlite3
 
-from flask import make_response, redirect, render_template, request, session, url_for
+from flask import make_response, redirect, render_template, request, url_for
 
 from ..auth import (
-    credentials_match,
     ensure_csrf_token,
-    mark_session_authenticated,
     mark_tenant_session_authenticated,
     normalize_next_target,
     render_login_page,
     tenant_credentials_match,
 )
 from ..config import (
-    AUTH_ENABLED,
     PANEL_HOST,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
@@ -24,7 +21,6 @@ from .core import (
     customer_dashboard_target,
     get_authenticated_customer,
     get_authenticated_tenant,
-    is_session_authenticated,
     bind_actor,
     log_business_event,
     message_redirect,
@@ -38,6 +34,8 @@ from .sqlite_errors import is_listen_port_conflict
 
 @route("/login", methods=["GET", "POST"])
 def login():
+    # Admin access no longer has a login: the source allowlist decides who may
+    # reach the panel. This page stays for per-port tenant credentials.
     next_target = normalize_next_target(request.values.get("next"), fallback=url_for("index"))
     authenticated_tenant = get_authenticated_tenant()
     authenticated_customer = get_authenticated_customer()
@@ -45,8 +43,6 @@ def login():
         return redirect(tenant_panel_target(authenticated_tenant["tenant_token"]), code=303)
     if authenticated_customer is not None:
         return redirect(customer_dashboard_target(), code=303)
-    if is_session_authenticated():
-        return redirect(next_target, code=303)
 
     if request.method == "POST":
         require_csrf()
@@ -54,11 +50,6 @@ def login():
         state.disable_auto_stopped_ports(reload_xray=True)
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if AUTH_ENABLED and credentials_match(username, password):
-            mark_session_authenticated()
-            bind_actor("admin")
-            log_business_event("auth.admin.login", actor_type="admin")
-            return redirect(next_target, code=303)
         port = state.get_port_by_tenant_username(username)
         if port is not None and tenant_credentials_match(port, username, password):
             mark_tenant_session_authenticated(port)
@@ -67,8 +58,6 @@ def login():
             return redirect(tenant_panel_target(port["tenant_token"]), code=303)
         if port is not None:
             log_business_event("auth.tenant.login", result="failure", actor_type="tenant", resource_type="port", resource_id=port.get("id"), error_code="invalid_credentials")
-        else:
-            log_business_event("auth.admin.login", result="failure", actor_type="admin", error_code="invalid_credentials")
         return render_login_page(
             next_target=next_target,
             form_username=username,
@@ -79,13 +68,6 @@ def login():
     return render_login_page(next_target=next_target)
 
 
-@route("/logout", methods=["GET", "POST"])
-def logout():
-    log_business_event("auth.admin.logout", actor_type="admin")
-    session.clear()
-    return redirect(url_for("login", message="已退出登录。", level="info"), code=303)
-
-
 @route("/", methods=["GET"])
 def index():
     # The admin is now a built SPA (app/static/admin/*). The shell only needs the
@@ -94,7 +76,7 @@ def index():
     response = make_response(
         render_template(
             "index.html",
-            boot={"csrf_token": ensure_csrf_token(), "auth_enabled": AUTH_ENABLED},
+            boot={"csrf_token": ensure_csrf_token()},
         )
     )
     response.headers["Cache-Control"] = "no-store, no-cache, max-age=0, must-revalidate"
@@ -117,7 +99,6 @@ def probe_dashboard():
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
         panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
-        auth_enabled=AUTH_ENABLED,
     )
 
 
@@ -137,7 +118,6 @@ def ai_domain_dashboard():
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
         panel_public_url=(f"{PANEL_PUBLIC_URL}/" if PANEL_PUBLIC_URL else ""),
-        auth_enabled=AUTH_ENABLED,
     )
 
 
