@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-09-21 @ d2f5086
+Last verified: 2026-09-21 @ 8ac08ed
 
 ## Current Focus
 
@@ -19,7 +19,7 @@ Last verified: 2026-09-21 @ d2f5086
 - `scripts/restore_backup.py` 可校验明文/AES-256-GCM 灾备包，并把面板数据库、可选运维数据库、用户附件、控制面文件和普通/AI 节点文件准备到隔离恢复树；默认不写 SSH、Docker 或线上服务。
 - `scripts/configure_backup_secrets.py` 提供中文交互配置和 `--check`，只管理灾备加密密码及可选 R2 字段；输入不回显，生成值不打印，目标 dotenv 文件原子更新并保持 `0600`。使用边界见 [灾备上传](db-backup-uploader.md)。
 - 仓库具备首个 CI 门禁：`.github/workflows/ci.yml` 在**指向 `main` 的 PR**和**推送到 `main`**时运行 `backend`（Python 3.12 跑 `python -m pytest`）和 `frontend`（Node 22 跑 `npm test`、`npm run build`，再阻塞比对产物与 `app/static/admin`）两个 job，均只申请 `contents: read`。检查清单见 [开发流程](development.md)。
-- 管理后台已重构为控制中心，暴露 Overview、AI Routing、Traffic、Resources、Orders & Plans、Infrastructure、Observability 七个一级工作区，共用 `frontend/src/shared/control-center.css`；AI Routing 与 Traffic 只渲染 `/api/dashboard` 已返回的数据。Admin 源码改动必须与重建的 `app/static/admin` 产物一起提交，构建与比对命令见 [开发流程](development.md)。
+- 管理后台已由 Vue 重构为 React 控制中心，围绕主机、流量和故障排查组织，暴露 Overview、Hosts、Traffic、Diagnostics、Routing、Delivery、Commerce、Observability 八个一级工作区；主机、流量和诊断工作区用原生 SVG 可视化（`frontend/src/admin/components/charts`，无新增图表依赖），只渲染 `/api/dashboard` 与只读 `GET /api/insights?days=N`（`app/web/core.py` 的 `collect_insights_state`，读取 `app/state/{traffic,probes,dns_failover}.py` 的历史查询）已返回的真实数据，全部既有写操作走原端点、原 payload。Admin 源码改动必须与重建的 `app/static/admin` 产物一起提交，构建与比对命令见 [开发流程](development.md)；客户门户与落地页仍是 Vue（`frontend/src/{portal,landing}`），只在 `frontend/vite.config.js` 里保留 `@vitejs/plugin-vue`，不是构建输入。
 - 面板控制台只允许内网和 Tailscale 来源访问：`PANEL_ALLOWED_NETWORKS`（CIDR 列表，默认回环、RFC1918、链路本地、`100.64.0.0/10`、`fc00::/7`、`fe80::/10`）在路由前按来源地址放行，其他来源一律 `403`（`/api/**` 返回 `{"ok":false,"code":"forbidden_source"}`）并记录 `panel.access.denied`；宿主机 `ai_routing_panel_firewall` 表使用同一组网段做 L3/L4 兜底。管理员登录已整体移除（`PANEL_USERNAME`、`PANEL_PASSWORD`、`PANEL_INTERNAL_HOSTS`、`AUTH_ENABLED`、Basic Auth、Cloudflare Access 邮箱旁路、`/logout` 和后台登出按钮），CSRF 仍对每个调用方强制校验；租户与客户登录不变，访问说明见 [面板访问](panel-access.md)。
 
 ## In Progress
@@ -28,12 +28,12 @@ Last verified: 2026-09-21 @ d2f5086
 
 ## Known Issues / Failing Checks
 
-- 全量 `PYTHONPATH=. .venv/bin/pytest -q`：384 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
+- 全量 `python -m pytest tests -q`（Python 3.12）：390 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。本机 `.venv` 为 Python 3.14，Werkzeug 不兼容，需在 `python:3.12-slim` 容器内运行。
 - 手工采集周期使用 `DB_BACKUP_R2_ENABLED=0`，因此本次未验证 R2 上传链路；定时 `03:00 UTC` 任务在本次会话中未被观察。
 - 日报归档已启用推送：`OPS_GITHUB_REPORTS_PUSH_ENABLED=1` 且通过 `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` 只读挂载 token；2026-09-20 实测调度周期把归档提交推到 `origin/main`，日志为 `push_status=pushed`、`ahead_after=0`。
 - 归档日期存在缺口：`ops-daily-reports/` 在 `origin/main` 上从 2026-09-08 直接跳到 2026-09-19；2026-09-09 的报告只提交在本地 `main` 分支且未推送，2026-09-10 至 2026-09-18 因日报器故障未生成。本仓库不计划回补。
 - AI 节点自建的控制面栈（`prometheus` 重启循环、`xray-routing-panel` `/healthz` 非 200）是遗留部署；本仓库当前只对其做灾备采集，不接管其运行时。
-- `frontend/src/portal` 与 `frontend/src/landing` 的源码改动没有构建路径：本仓库不生成 `app/static/{portal,landing}` 产物（见 [开发流程](development.md)），所以 2026-09-21 合并的这两处改版不会进入运行中的服务，已提交的 `app/static/{portal,landing}` 仍是改版前版本。
+- `frontend/src/portal` 与 `frontend/src/landing` 的源码改动没有构建路径：`frontend/vite.config.js` 只把 `src/admin/main.jsx` 作为输入、输出到 `app/static/admin`，本仓库不生成 `app/static/{portal,landing}` 产物（见 [开发流程](development.md)），所以这两处的 Vue 源码改版不会进入运行中的服务，已提交的 `app/static/{portal,landing}` 是改版前版本。
 
 ## Constraints
 
