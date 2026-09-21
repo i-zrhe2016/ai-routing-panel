@@ -1,0 +1,53 @@
+name: CI
+
+# The daily reporter pushes archive commits straight to main, so main itself
+# needs the same verification a pull request gets.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      # tests/ has no __init__.py, so pytest puts tests/ on sys.path instead of
+      # the repository root; without the prefix the suite fails to collect.
+      - name: Run backend tests
+        run: PYTHONPATH=. python -m pytest tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+      - name: Build admin bundle
+        working-directory: frontend
+        run: npm run build
+      # SPA bundles are deployment inputs: the Dockerfile copies app/static and
+      # installs no Node, so a source change without a committed rebuild never
+      # reaches the running service. Only app/static/admin is checked here —
+      # the portal and landing bundles have no build path in this repository.
+      - name: Verify committed bundle matches source
+        run: git diff --exit-code -- app/static/admin

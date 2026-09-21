@@ -214,8 +214,39 @@ Node 或 npm。
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests -q
+PYTHONPATH=. .venv/bin/python -m pytest tests -q
 ```
+
+`tests/` 没有 `__init__.py`，pytest 会把 `tests/` 而非仓库根加入 `sys.path`，因此
+`PYTHONPATH=.` 是必需的；省略它会有 28 个测试文件在收集阶段直接报错。
+
+## 持续集成
+
+`.github/workflows/ci.yml` 在**指向 `main` 的 PR** 和**推送到 `main`** 时运行。日报器会把
+归档提交直接推到 `main`，所以 `main` 自身也需要与 PR 相同的检查。两个 job 都只申请
+`contents: read` 权限，不需要任何 secret。
+
+`backend` job 使用与 `Dockerfile` 基础镜像一致的 Python 3.12，安装
+`requirements-dev.txt` 后执行：
+
+```bash
+PYTHONPATH=. python -m pytest tests -q
+```
+
+`frontend` job 使用 Node 22，从提交的 lockfile 安装后依次执行 `npm ci`、`npm test`、
+`npm run build`，最后比对构建产物：
+
+```bash
+git diff --exit-code -- app/static/admin
+```
+
+最后一步是**阻塞项**：源码改动而没有提交重建后的产物时，该步骤会失败并列出差异文件。
+产物是部署输入（镜像直接复制 `app/static/`，且不在构建阶段安装 Node），所以未提交的
+重建不会进入运行中的服务。该比对只覆盖 `app/static/admin`——`app/static/portal` 与
+`app/static/landing` 在本仓库没有构建路径，纳入比对会无条件失败。
+
+`ruff` 和 `black` 尚未纳入 CI：现有代码库存在 181 个 ruff 错误和 56 个待重排文件，需要
+先单独完成清理。README 中列出的这两条命令目前只是本地建议，不是门禁。
 
 ## Landing 页面资源
 

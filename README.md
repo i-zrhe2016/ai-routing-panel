@@ -152,14 +152,22 @@ docker compose up -d --build xray-routing-panel-db-backup
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[dev]'
-python -m pytest -q
+PYTHONPATH=. python -m pytest -q
 ruff check .
 black --check .
 ```
 
+`PYTHONPATH=.` 是必需的：`tests/` 没有 `__init__.py`，pytest 会把 `tests/` 而非仓库根加入
+`sys.path`。`ruff` 和 `black` 目前只是本地建议，尚未纳入 CI——现有代码库仍有存量问题需要
+先清理。
+
 前端发布资源仍随仓库保存在 `app/static/{admin,portal,landing}`，运行时和镜像内不需要 JavaScript 构建工具。
 Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会将 Admin bundle 写入
 `app/static/admin/`，再由 Flask/Docker 直接发布。
+
+指向 `main` 的 PR 和推送到 `main` 的提交都会自动运行后端测试、前端测试和 Admin 构建，
+并校验已提交的构建产物与源码一致（不一致会阻塞合并）。见
+[持续集成](docs/development.md#持续集成)。
 
 完整流程见[开发与启动](docs/development.md)。
 
