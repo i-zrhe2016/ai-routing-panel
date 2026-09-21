@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-09-21 @ 68cf90e
+Last verified: 2026-09-21 @ 4153da0
 
 ## Current Focus
 
@@ -19,6 +19,7 @@ Last verified: 2026-09-21 @ 68cf90e
 - `scripts/restore_backup.py` 可校验明文/AES-256-GCM 灾备包，并把面板数据库、可选运维数据库、用户附件、控制面文件和普通/AI 节点文件准备到隔离恢复树；默认不写 SSH、Docker 或线上服务。
 - `scripts/configure_backup_secrets.py` 提供中文交互配置和 `--check`，只管理灾备加密密码及可选 R2 字段；输入不回显，生成值不打印，目标 dotenv 文件原子更新并保持 `0600`。使用边界见 [灾备上传](db-backup-uploader.md)。
 - 仓库具备首个 CI 门禁：`.github/workflows/ci.yml` 在**指向 `main` 的 PR**和**推送到 `main`**时运行 `backend`（Python 3.12 跑 `python -m pytest`）和 `frontend`（Node 22 跑 `npm test`、`npm run build`，再阻塞比对产物与 `app/static/admin`）两个 job，均只申请 `contents: read`。检查清单见 [开发流程](development.md)。
+- 管理后台已重构为控制中心，暴露 Overview、AI Routing、Traffic、Resources、Orders & Plans、Infrastructure、Observability 七个一级工作区，共用 `frontend/src/shared/control-center.css`；AI Routing 与 Traffic 只渲染 `/api/dashboard` 已返回的数据。Admin 源码改动必须与重建的 `app/static/admin` 产物一起提交，构建与比对命令见 [开发流程](development.md)。
 
 ## In Progress
 
@@ -31,6 +32,7 @@ Last verified: 2026-09-21 @ 68cf90e
 - 日报归档已启用推送：`OPS_GITHUB_REPORTS_PUSH_ENABLED=1` 且通过 `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` 只读挂载 token；2026-09-20 实测调度周期把归档提交推到 `origin/main`，日志为 `push_status=pushed`、`ahead_after=0`。
 - 归档日期存在缺口：`ops-daily-reports/` 在 `origin/main` 上从 2026-09-08 直接跳到 2026-09-19；2026-09-09 的报告只提交在本地 `main` 分支且未推送，2026-09-10 至 2026-09-18 因日报器故障未生成。本仓库不计划回补。
 - AI 节点自建的控制面栈（`prometheus` 重启循环、`xray-routing-panel` `/healthz` 非 200）是遗留部署；本仓库当前只对其做灾备采集，不接管其运行时。
+- `frontend/src/portal` 与 `frontend/src/landing` 的源码改动没有构建路径：本仓库不生成 `app/static/{portal,landing}` 产物（见 [开发流程](development.md)），所以 2026-09-21 合并的这两处改版不会进入运行中的服务，已提交的 `app/static/{portal,landing}` 仍是改版前版本。
 
 ## Constraints
 
