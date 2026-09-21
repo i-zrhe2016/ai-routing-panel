@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ..config import (
     LOCAL_TZ,
@@ -328,3 +328,108 @@ class TrafficService:
             return restored
 
         return self.renderer.apply_mutation(operation)
+
+    def query_traffic_series(self, days=14):
+        """Read-only daily traffic series for the console history charts.
+
+        Reads only ``traffic_daily`` and ``ports``; it never triggers a sync or
+        a render, so an admin refresh cannot change node state. The window is
+        clamped to [1, 30] days and every port is aligned to the same date list
+        so the SPA can plot a dense series without client-side gap filling.
+        """
+        try:
+            day_count = int(days)
+        except (TypeError, ValueError):
+            day_count = 14
+        day_count = max(1, min(day_count, 30))
+        end_date = datetime.now(LOCAL_TZ).date()
+        start_date = end_date - timedelta(days=day_count - 1)
+        dates = [(start_date + timedelta(days=offset)).isoformat() for offset in range(day_count)]
+
+        with self.repository.connect() as conn:
+            port_rows = conn.execute(
+                """
+                SELECT listen_port, note, enabled
+                FROM ports
+                ORDER BY listen_port ASC
+                """
+            ).fetchall()
+            daily_rows = conn.execute(
+                """
+                SELECT listen_port, stat_date, total_connections, total_bytes_sent, total_bytes_received
+                FROM traffic_daily
+                WHERE stat_date >= ?
+                """,
+                (start_date.isoformat(),),
+            ).fetchall()
+
+        daily = {}
+        for row in daily_rows:
+            daily[(int(row["listen_port"]), str(row["stat_date"]))] = {
+                "connections": int(row["total_connections"] or 0),
+                "bytes_sent": int(row["total_bytes_sent"] or 0),
+                "bytes_received": int(row["total_bytes_received"] or 0),
+            }
+
+        ports = []
+        fleet_series = {
+            "bytes_sent": [0] * day_count,
+            "bytes_received": [0] * day_count,
+            "connections": [0] * day_count,
+            "total_bytes": [0] * day_count,
+        }
+        for port_row in port_rows:
+            listen_port = int(port_row["listen_port"])
+            series = {
+                "bytes_sent": [],
+                "bytes_received": [],
+                "connections": [],
+                "total_bytes": [],
+            }
+            totals = {"bytes_sent": 0, "bytes_received": 0, "connections": 0}
+            for index, stat_date in enumerate(dates):
+                point = daily.get((listen_port, stat_date), {"connections": 0, "bytes_sent": 0, "bytes_received": 0})
+                total_bytes = point["bytes_sent"] + point["bytes_received"]
+                series["bytes_sent"].append(point["bytes_sent"])
+                series["bytes_received"].append(point["bytes_received"])
+                series["connections"].append(point["connections"])
+                series["total_bytes"].append(total_bytes)
+                totals["bytes_sent"] += point["bytes_sent"]
+                totals["bytes_received"] += point["bytes_received"]
+                totals["connections"] += point["connections"]
+                fleet_series["bytes_sent"][index] += point["bytes_sent"]
+                fleet_series["bytes_received"][index] += point["bytes_received"]
+                fleet_series["connections"][index] += point["connections"]
+                fleet_series["total_bytes"][index] += total_bytes
+            ports.append(
+                {
+                    "listen_port": listen_port,
+                    "note": port_row["note"] or "",
+                    "enabled": bool(port_row["enabled"]),
+                    "totals": {**totals, "total_bytes": totals["bytes_sent"] + totals["bytes_received"]},
+                    "today": {
+                        "bytes_sent": series["bytes_sent"][-1],
+                        "bytes_received": series["bytes_received"][-1],
+                        "connections": series["connections"][-1],
+                        "total_bytes": series["total_bytes"][-1],
+                    },
+                    "series": series,
+                }
+            )
+
+        ports.sort(key=lambda item: item["totals"]["total_bytes"], reverse=True)
+        fleet_totals = {
+            "bytes_sent": sum(fleet_series["bytes_sent"]),
+            "bytes_received": sum(fleet_series["bytes_received"]),
+            "connections": sum(fleet_series["connections"]),
+            "total_bytes": sum(fleet_series["total_bytes"]),
+        }
+        return {
+            "days": day_count,
+            "range_start": dates[0],
+            "range_end": dates[-1],
+            "dates": dates,
+            "totals": fleet_totals,
+            "series": fleet_series,
+            "ports": ports,
+        }

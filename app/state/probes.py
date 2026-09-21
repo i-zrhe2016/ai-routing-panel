@@ -250,3 +250,112 @@ class ProbesService:
             }
             for key, config in PROBE_DASHBOARD_RANGES.items()
         ]
+
+    def query_probe_overview(self, per_port_limit=48, recent_failure_limit=12):
+        """Read-only probe availability summary for the console.
+
+        Returns one bounded, oldest-first check window per configured port plus
+        the newest failures, so the console can draw an availability strip and
+        list what actually failed without scanning ``upstream_probe_history``
+        itself.
+        """
+        try:
+            history_limit = max(1, min(int(per_port_limit), 240))
+        except (TypeError, ValueError):
+            history_limit = 48
+        try:
+            failure_limit = max(1, min(int(recent_failure_limit), 50))
+        except (TypeError, ValueError):
+            failure_limit = 12
+
+        with self.repository.connect() as conn:
+            port_rows = conn.execute(
+                """
+                SELECT listen_port, note, enabled
+                FROM ports
+                ORDER BY listen_port ASC
+                """
+            ).fetchall()
+            history_rows = conn.execute(
+                """
+                SELECT listen_port, is_reachable, checked_at, failure_reason
+                FROM upstream_probe_history
+                ORDER BY checked_at DESC, id DESC
+                LIMIT ?
+                """,
+                (history_limit * max(len(port_rows), 1) * 4,),
+            ).fetchall()
+
+        by_port = {}
+        for row in history_rows:
+            bucket = by_port.setdefault(int(row["listen_port"]), [])
+            if len(bucket) < history_limit:
+                bucket.append(row)
+
+        ports = []
+        total_checks = 0
+        unhealthy_checks = 0
+        recent_failures = []
+        for port_row in port_rows:
+            listen_port = int(port_row["listen_port"])
+            rows = list(reversed(by_port.get(listen_port, [])))
+            checks = []
+            healthy_count = 0
+            for row in rows:
+                reachable = bool(row["is_reachable"])
+                healthy_count += 1 if reachable else 0
+                checked_local = localize_time(row["checked_at"])
+                checks.append(
+                    {
+                        "status": "healthy" if reachable else "unhealthy",
+                        "checked_at": row["checked_at"],
+                        "checked_at_display": (
+                            checked_local.strftime("%Y-%m-%d %H:%M:%S") if checked_local else "暂无"
+                        ),
+                        "failure_reason": row["failure_reason"] or "",
+                    }
+                )
+            count = len(checks)
+            unhealthy_count_port = count - healthy_count
+            total_checks += count
+            unhealthy_checks += unhealthy_count_port
+            latest = checks[-1] if checks else None
+            ports.append(
+                {
+                    "listen_port": listen_port,
+                    "note": port_row["note"] or "",
+                    "enabled": bool(port_row["enabled"]),
+                    "status": latest["status"] if latest else "unknown",
+                    "status_label": (
+                        ("端口可达" if latest["status"] == "healthy" else "端口不可达") if latest else "未检测"
+                    ),
+                    "checked_at_display": latest["checked_at_display"] if latest else "暂无",
+                    "failure_reason": latest["failure_reason"] if latest else "",
+                    "checks": checks,
+                    "total_checks": count,
+                    "healthy_count": healthy_count,
+                    "unhealthy_count": unhealthy_count_port,
+                    "uptime_ratio": f"{(healthy_count / count * 100):.1f}" if count else "0.0",
+                }
+            )
+            if latest and latest["status"] == "unhealthy":
+                recent_failures.append(
+                    {
+                        "listen_port": listen_port,
+                        "note": port_row["note"] or "",
+                        "checked_at": latest["checked_at"],
+                        "checked_at_display": latest["checked_at_display"],
+                        "failure_reason": latest["failure_reason"],
+                    }
+                )
+
+        recent_failures.sort(key=lambda item: item["checked_at"], reverse=True)
+        return {
+            "ports": ports,
+            "recent_failures": recent_failures[:failure_limit],
+            "total_checks": total_checks,
+            "unhealthy_checks": unhealthy_checks,
+            "uptime_ratio": (
+                f"{((total_checks - unhealthy_checks) / total_checks * 100):.1f}" if total_checks else "0.0"
+            ),
+        }

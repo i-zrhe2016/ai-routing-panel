@@ -197,7 +197,12 @@ python app/panel.py
 `app/static/{admin,portal,landing}`。控制面镜像直接复制这些静态文件，运行时不安装
 JavaScript 构建工具。
 
-Admin 控制台源码和构建配置位于 `frontend/`。修改 Admin 前端后执行：
+Admin 控制台源码和构建配置位于 `frontend/`。Admin 控制台是 React 应用
+（`frontend/src/admin/`，Vite + `@vitejs/plugin-react`），订阅者门户和 Landing 页仍是
+Vue 应用（`frontend/src/{portal,landing}/`，共用 `frontend/src/shared/` 的令牌、
+API 客户端和 `.vue` 组件）。控制台的八个工作区为：总览、主机、流量、故障排查、
+AI 路由、交付、订单与套餐、可观测；其中主机、流量和故障排查只读取 `/api/dashboard`
+与只读的 `/api/insights`。修改 Admin 前端后执行：
 
 ```bash
 cd frontend

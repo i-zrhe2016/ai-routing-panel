@@ -9,6 +9,7 @@ from ..dns_failover import CloudflareApiError, resolve_public_ip
 from ..errors import ValidationError
 from ..helpers import (
     format_display_time,
+    localize_time,
     utc_iso_now,
 )
 from ..observability.logging import emit_business_event
@@ -659,3 +660,57 @@ class DnsFailoverService:
                 )
                 conn.commit()
         return self.dns_failover_status()
+
+    FAILOVER_EVENT_LABELS = {
+        "probe": "探测",
+        "switch": "切换",
+        "manual_switch": "人工切换",
+        "recover": "自动回切",
+    }
+
+    FAILOVER_STATUS_LABELS = {
+        "ok": "成功",
+        "error": "失败",
+        "noop": "无需变更",
+        "skipped": "已跳过",
+    }
+
+    def query_failover_history(self, limit=40):
+        """Read-only DNS failover event timeline for the console."""
+        try:
+            row_limit = max(1, min(int(limit), 200))
+        except (TypeError, ValueError):
+            row_limit = 40
+        with self.repository.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, event_type, event_status, target, detail, created_at
+                FROM dns_failover_history
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (row_limit,),
+            ).fetchall()
+        events = []
+        for row in rows:
+            created_local = localize_time(row["created_at"])
+            event_type = str(row["event_type"] or "")
+            event_status = str(row["event_status"] or "")
+            target = str(row["target"] or "")
+            events.append(
+                {
+                    "id": int(row["id"]),
+                    "event_type": event_type,
+                    "event_type_label": self.FAILOVER_EVENT_LABELS.get(event_type, event_type or "事件"),
+                    "event_status": event_status,
+                    "status_label": self.FAILOVER_STATUS_LABELS.get(event_status, event_status or "未知"),
+                    "target": target,
+                    "target_label": self.failover_manager.target_label(target) if target else "",
+                    "detail": row["detail"] or "",
+                    "created_at": row["created_at"],
+                    "created_at_display": (
+                        created_local.strftime("%Y-%m-%d %H:%M:%S") if created_local else "暂无"
+                    ),
+                }
+            )
+        return {"events": events, "total_events": len(events)}

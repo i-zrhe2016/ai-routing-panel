@@ -13,7 +13,7 @@
 
 ## 页面与订阅路径
 
-- `/`：管理后台 SPA（Vue + Naive UI）
+- `/`：管理后台 SPA（React，构建产物 `app/static/admin/`）
 - `/login`：租户登录页（控制台本身没有登录）
 - `/probe-dashboard`：TCP 探针监控页
 - `/ai-domain-dashboard`：AI 域名统计页
@@ -38,6 +38,7 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/dashboard` | 获取首页完整状态 |
+| `GET` | `/api/insights` | 只读历史快照：主机清单、按天流量序列、探针可用性、DNS 切换事件；可选 `days`（1–30，默认 14）。不触发同步、配置下发或节点操作 |
 | `POST` | `/api/ports` | 新建监听端口 |
 | `PUT` | `/api/ports/<port_id>` | 更新端口配置 |
 | `POST` | `/api/ports/<port_id>/toggle` | 启用或停用端口 |

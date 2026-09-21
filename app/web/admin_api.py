@@ -5,6 +5,7 @@ from flask import jsonify, request
 from ..errors import ValidationError
 from .core import (
     build_dashboard_state,
+    collect_insights_state,
     json_error_response,
     json_snapshot_success_response,
     json_success_response,
@@ -20,6 +21,17 @@ from .sqlite_errors import is_listen_port_conflict
 @route("/api/dashboard", methods=["GET"])
 def api_dashboard():
     return jsonify({"ok": True, "dashboard": build_dashboard_state()})
+
+
+@route("/api/insights", methods=["GET"])
+def api_insights():
+    """Read-only history for the console: hosts, traffic series, probe uptime,
+    and DNS failover events. No sync, no reload, no write."""
+    try:
+        days = int(request.args.get("days", "14"))
+    except (TypeError, ValueError):
+        days = 14
+    return jsonify({"ok": True, "insights": collect_insights_state(days=days)})
 
 
 @route("/api/plans", methods=["GET"])
