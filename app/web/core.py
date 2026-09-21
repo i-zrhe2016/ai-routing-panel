@@ -35,7 +35,7 @@ from ..config import (
     XRAY_CLIENT_CONFIG_PATH,
     is_allowed_panel_source,
 )
-from ..helpers import format_optional_display_time, human_bytes
+from ..helpers import format_optional_display_time, human_bytes, utc_iso_now
 from ..observability.logging import (
     REQUEST_ID_HEADER,
     bind_actor,
@@ -670,6 +670,55 @@ def build_customer_dashboard_state(customer, message="", level="info"):
         "services": services[:5],
         "orders": orders[:10],
         "commerce_settings": state.get_commerce_settings(),
+    }
+
+
+def collect_insights_state(days=14):
+    """Read-only operational history for the console visualization workspaces.
+
+    Deliberately separate from :func:`build_dashboard_state`: it performs no
+    traffic sync, no port maintenance and no Xray reload, so the console can
+    refresh history on its own cadence without touching node state. Every value
+    is read from tables the control plane already maintains.
+    """
+    hosts = []
+    data_plane_status = application.nodes.data_plane_status()
+    hosts.append(_insights_host("data_plane", "data_plane", "普通数据面", data_plane_status))
+    for node_status in application.nodes.ai_nodes_status():
+        node_id = str(node_status.get("node_id") or "")
+        hosts.append(
+            _insights_host(
+                f"ai_node:{node_id}" if node_id else "ai_node",
+                "ai_node",
+                str(node_status.get("label") or "AI 节点"),
+                node_status,
+            )
+        )
+    return {
+        "generated_at": utc_iso_now(),
+        "hosts": hosts,
+        "traffic": application.traffic.query_traffic_series(days=days),
+        "probes": application.probes.query_probe_overview(),
+        "failover_events": application.dns_failover.query_failover_history(),
+    }
+
+
+def _insights_host(key, role, label, status):
+    status = status or {}
+    return {
+        "key": key,
+        "role": role,
+        "label": label,
+        "configured": bool(status.get("configured")),
+        "reachable": bool(status.get("reachable")),
+        "xray_running": status.get("xray_running"),
+        "management_target": status.get("management_target") or "",
+        "api_server": status.get("api_server") or "",
+        "config_path": status.get("config_path") or "",
+        "access_log_path": status.get("access_log_path") or "",
+        "supports_restart": bool(status.get("supports_restart")),
+        "supports_sync": bool(status.get("supports_sync")),
+        "last_error": status.get("last_error") or "",
     }
 
 

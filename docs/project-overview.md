@@ -4,7 +4,7 @@
 
 ## 核心能力
 
-- 管理后台（Vue + Naive UI 单页应用）和 JSON API 统一管理监听端口、备注、到期时间、流量上限、租户凭据和订阅链接。
+- 管理后台（React 单页应用）和 JSON API 统一管理监听端口、备注、到期时间、流量上限、租户凭据和订阅链接。
 - 面向终端用户的**订阅者门户**：客户注册/登录、浏览套餐、查看订阅、续费和提交支付凭证。新购套餐不再通过面板创建预订单；每个端口租户即客户，原“租户面板”统一为门户中的订阅详情（Clash/V2Ray/VLESS 订阅链接、流量用量、凭据）。
 - 根据数据库状态生成 `app/xray/runtime/panel-ports.json` 和 `app/xray/runtime/config.json`。
 - 通过 Docker、本地二进制或 SSH 管理唯一 `data_plane`，并读取 Xray API / `access.log` 做统计。
