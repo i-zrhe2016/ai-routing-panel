@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-09-21 @ 4153da0
+Last verified: 2026-09-21 @ d2f5086
 
 ## Current Focus
 
@@ -11,7 +11,7 @@ Last verified: 2026-09-21 @ 4153da0
 - 台湾 AI 节点是当前唯一配置的 AI 主候选；原不可用主节点已从节点清单、监控目标、路由候选和运行中的控制面容器环境中移除。
 - `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 可将带独立凭据的 fallback 分享链接提升为候选 0；单候选可作为主节点，过期的 `backup` 状态会归一化，人工固定备用仍要求至少两个候选。
 - AI 管理器已拆分到 `app/xray/ai_routing/`，节点控制统一使用 `app/xray/node/` 的 canonical backend；控制面由 `app/bootstrap.py` 组装 Application。
-- 远端 AI 节点的指标和访问日志通过受管 SSH 通道读取；本地节点继续使用本地 endpoint/file 路径。远端日志读取具备有界读取、超长记录丢弃和跨轮次续传状态。控制面运行镜像已于 2026-09-20 从当前 `main` 重建部署，`xray_panel_ai_node_metrics_available`、`xray_panel_ai_destination_log_available` 和 `xray_panel_ai_node_running` 均为 1。
+- 远端 AI 节点的指标和访问日志通过受管 SSH 通道读取；本地节点继续使用本地 endpoint/file 路径。远端日志读取具备有界读取、超长记录丢弃和跨轮次续传状态。控制面运行镜像已于 2026-09-21 从当前 `main`（`d2f5086`）重建部署，`xray_panel_ai_node_metrics_available`、`xray_panel_ai_destination_log_available` 和 `xray_panel_ai_node_running` 均为 1。
 - 运维日报器支持第三方 OpenAI 兼容 provider：`OPS_CODEX_MODEL_PROVIDER`、`OPS_CODEX_PROVIDER_BASE_URL`、`OPS_CODEX_PROVIDER_WIRE_API`、`OPS_CODEX_MODEL_REASONING_SUMMARY`、`OPS_CODEX_OUTPUT_SCHEMA` 通过 `-c` 显式覆盖 Codex 配置，仍不读取任何用户 `config.toml`。拒绝约束输出的 provider 可设 `OPS_CODEX_OUTPUT_SCHEMA=0`，此时改为把同一份 JSON Schema 文档写进提示词。2026-09-20 实测 2026-09-19 日报以 `generation_mode=codex` 成功生成。
 - 控制面 Loki 与 Fluent Bit Agent 组成集中日志链路，控制面和普通数据面 Agent 通过 Tailscale 推送；Grafana 通过 `GRAFANA_LOKI_URL` 查询。
 - 灾备 SSH 采集已启用，覆盖普通数据面和 AI 节点；AI 节点采集其 Xray 配置和 `.env`。2026-09-20 手工执行 `run_db_backup_cycle.py`（关闭 R2）验证两个角色均为 `ok`、`recoveryReady=true`。
@@ -20,6 +20,7 @@ Last verified: 2026-09-21 @ 4153da0
 - `scripts/configure_backup_secrets.py` 提供中文交互配置和 `--check`，只管理灾备加密密码及可选 R2 字段；输入不回显，生成值不打印，目标 dotenv 文件原子更新并保持 `0600`。使用边界见 [灾备上传](db-backup-uploader.md)。
 - 仓库具备首个 CI 门禁：`.github/workflows/ci.yml` 在**指向 `main` 的 PR**和**推送到 `main`**时运行 `backend`（Python 3.12 跑 `python -m pytest`）和 `frontend`（Node 22 跑 `npm test`、`npm run build`，再阻塞比对产物与 `app/static/admin`）两个 job，均只申请 `contents: read`。检查清单见 [开发流程](development.md)。
 - 管理后台已重构为控制中心，暴露 Overview、AI Routing、Traffic、Resources、Orders & Plans、Infrastructure、Observability 七个一级工作区，共用 `frontend/src/shared/control-center.css`；AI Routing 与 Traffic 只渲染 `/api/dashboard` 已返回的数据。Admin 源码改动必须与重建的 `app/static/admin` 产物一起提交，构建与比对命令见 [开发流程](development.md)。
+- 面板控制台只允许内网和 Tailscale 来源访问：`PANEL_ALLOWED_NETWORKS`（CIDR 列表，默认回环、RFC1918、链路本地、`100.64.0.0/10`、`fc00::/7`、`fe80::/10`）在路由前按来源地址放行，其他来源一律 `403`（`/api/**` 返回 `{"ok":false,"code":"forbidden_source"}`）并记录 `panel.access.denied`；宿主机 `ai_routing_panel_firewall` 表使用同一组网段做 L3/L4 兜底。管理员登录已整体移除（`PANEL_USERNAME`、`PANEL_PASSWORD`、`PANEL_INTERNAL_HOSTS`、`AUTH_ENABLED`、Basic Auth、Cloudflare Access 邮箱旁路、`/logout` 和后台登出按钮），CSRF 仍对每个调用方强制校验；租户与客户登录不变，访问说明见 [面板访问](panel-access.md)。
 
 ## In Progress
 
@@ -27,7 +28,7 @@ Last verified: 2026-09-21 @ 4153da0
 
 ## Known Issues / Failing Checks
 
-- 全量 `PYTHONPATH=. .venv/bin/pytest -q`：375 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
+- 全量 `PYTHONPATH=. .venv/bin/pytest -q`：384 passed、1 skipped；跳过项需要 `XRAY_TEST_BINARY` 和 HAProxy 才能执行真实传输测试。
 - 手工采集周期使用 `DB_BACKUP_R2_ENABLED=0`，因此本次未验证 R2 上传链路；定时 `03:00 UTC` 任务在本次会话中未被观察。
 - 日报归档已启用推送：`OPS_GITHUB_REPORTS_PUSH_ENABLED=1` 且通过 `OPS_GITHUB_REPORTS_TOKEN_HOST_PATH` 只读挂载 token；2026-09-20 实测调度周期把归档提交推到 `origin/main`，日志为 `push_status=pushed`、`ahead_after=0`。
 - 归档日期存在缺口：`ops-daily-reports/` 在 `origin/main` 上从 2026-09-08 直接跳到 2026-09-19；2026-09-09 的报告只提交在本地 `main` 分支且未推送，2026-09-10 至 2026-09-18 因日报器故障未生成。本仓库不计划回补。
