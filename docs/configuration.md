@@ -17,8 +17,8 @@
 | `PANEL_SLOW_REQUEST_MS` | 慢请求阈值（毫秒），默认 `1000`；普通成功 GET 仍不记录 |
 | `METRICS_TOKEN` | Prometheus `/metrics` 抓取令牌；不设置则 `/metrics` 返回 404，设置后需 `Authorization: X <token>` |
 | `METRICS_DP_TTL` | `/metrics` 缓存数据面存活检测的秒数，默认 `30`（抓取路径上唯一的 SSH 调用） |
-| `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台「监控」标签使用该同源地址 |
-| `GRAFANA_OBSERVABILITY_UID` | 「监控」标签内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
+| `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台 Observability 工作区使用该同源地址 |
+| `GRAFANA_OBSERVABILITY_UID` | Observability 工作区内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
 | `DATAPLANE_SSH_TARGET` | 远端数据面内网 SSH 目标；默认 `root@<normal-data-plane-host>`（Compose） |
 | `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；认证固定为密码/键盘交互，禁止注入私钥 |

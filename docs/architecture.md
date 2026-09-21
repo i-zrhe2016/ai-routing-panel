@@ -57,7 +57,7 @@
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `config-backup.json`（控制面备用）
 - 对普通数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
 - 对 AI 节点做 SSH 状态检查和重启；未配置远端目标时可使用本机 Docker，配置上传能力由 `AI_NODE_CONFIG_PATH` 单独控制，生产当前保持关闭
-- 读取受控 AI Xray `/debug/vars`，只聚合入站/直出累计字节；以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）。管理后台「监控」标签把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
+- 读取受控 AI Xray `/debug/vars`，只聚合入站/直出累计字节；以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）。管理后台 Observability 工作区把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
 
 ### 普通数据面
 

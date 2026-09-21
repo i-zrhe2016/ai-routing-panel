@@ -1,0 +1,365 @@
+/* Shared control-center layer.
+ * Imported after the legacy surface CSS so the redesign can be rolled out
+ * without rewriting every business component at once. */
+.cc-page-intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 4px 2px 6px;
+}
+.cc-page-intro h2 {
+  margin: 4px 0 6px;
+  font-size: clamp(24px, 2.4vw, 34px);
+  letter-spacing: -0.035em;
+}
+.cc-page-intro p:not(.section-kicker) {
+  max-width: 720px;
+  margin: 0;
+  color: var(--c-text-muted);
+  font-size: 13px;
+}
+.cc-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  color: var(--c-text-muted);
+  font-size: 12px;
+}
+.cc-status-line::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--c-success);
+  content: "";
+}
+.cc-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.cc-metric {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+}
+.cc-metric__label {
+  display: block;
+  color: var(--c-text-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.cc-metric strong {
+  display: block;
+  margin-top: 9px;
+  overflow: hidden;
+  font-size: 22px;
+  letter-spacing: -0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-metric small {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--c-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
+  gap: 14px;
+}
+.cc-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+}
+.cc-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.cc-card__head h3 {
+  margin: 3px 0 0;
+  font-size: 16px;
+}
+.cc-card__head p {
+  margin: 4px 0 0;
+  color: var(--c-text-muted);
+  font-size: 12px;
+}
+.cc-table-wrap {
+  overflow-x: auto;
+}
+.cc-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cc-table th,
+.cc-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--c-line);
+  text-align: left;
+}
+.cc-table th {
+  color: var(--c-text-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.cc-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.cc-table td strong,
+.cc-table td small {
+  display: block;
+}
+.cc-table td small {
+  margin-top: 2px;
+  color: var(--c-text-muted);
+}
+.cc-empty {
+  padding: 28px 12px;
+  color: var(--c-text-muted);
+  text-align: center;
+}
+.cc-node-list {
+  display: grid;
+  gap: 8px;
+}
+.cc-node-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--c-line);
+}
+.cc-node-row:last-child { border-bottom: 0; }
+.cc-node-row strong,
+.cc-node-row small { display: block; }
+.cc-node-row small {
+  margin-top: 3px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+
+/* Admin shell overrides: neutral control-center chrome, less decorative color. */
+.admin-shell { grid-template-columns: 236px minmax(0, 1fr); }
+.admin-sidebar {
+  width: 236px;
+  color: #d8dde5;
+  background: #11151b;
+  box-shadow: none;
+}
+.brand-mark {
+  border-color: #303742;
+  color: #101319;
+  background: #f3f5f7;
+}
+.brand-kicker,
+.nav-label { color: #77808d; }
+.brand-description { color: #808997; }
+.workspace-nav__item {
+  min-height: 52px;
+  border-radius: 9px;
+  color: #929ba8;
+}
+.workspace-nav__item:hover {
+  color: #f7f8fa;
+  background: #1b2027;
+}
+.workspace-nav__item.is-active {
+  border-color: #343c48;
+  color: #fff;
+  background: #252b34;
+  box-shadow: none;
+}
+.workspace-nav__item.is-active .workspace-nav__icon {
+  color: #fff;
+  background: #343b46;
+}
+.workspace-nav__copy small { color: #68717f; }
+.workspace-nav__item.is-active .workspace-nav__copy small { color: #9ba5b2; }
+.sidebar-status-card {
+  border-color: #2a3039;
+  background: #171c23;
+}
+.admin-topbar {
+  min-height: 72px;
+  border-bottom-color: var(--c-line);
+  background: rgba(255,255,255,.94);
+  box-shadow: none;
+}
+.admin-content { max-width: 1540px; }
+.panel-block,
+.command-hero,
+.kpi-card {
+  box-shadow: none !important;
+}
+
+/* Portal shell */
+.portal-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--c-bg);
+}
+.portal-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 20px 14px;
+  color: #d8dde5;
+  background: #11151b;
+}
+.portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 22px;
+}
+.portal-brand__mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: #101319;
+  background: #f3f5f7;
+  font-size: 11px;
+  font-weight: 900;
+}
+.portal-brand strong,
+.portal-brand small { display: block; }
+.portal-brand small {
+  margin-top: 2px;
+  color: #747e8b;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+.portal-nav {
+  display: grid;
+  gap: 4px;
+}
+.portal-nav a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: #909aa7;
+  text-decoration: none;
+  font-size: 13px;
+}
+.portal-nav a:hover {
+  color: #fff;
+  background: #1b2027;
+}
+.portal-nav a.router-link-exact-active,
+.portal-nav a.router-link-active {
+  color: #fff;
+  background: #252b34;
+}
+.portal-nav__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: .65;
+}
+.portal-sidebar__footer {
+  position: absolute;
+  right: 14px;
+  bottom: 18px;
+  left: 14px;
+  padding: 12px 10px 0;
+  border-top: 1px solid #29303a;
+  color: #77808d;
+  font-size: 11px;
+}
+.portal-sidebar__footer strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #d8dde5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.portal-main { min-width: 0; }
+.portal-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 66px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--c-line);
+  background: rgba(255,255,255,.94);
+}
+.portal-topbar__title strong,
+.portal-topbar__title small { display: block; }
+.portal-topbar__title strong { font-size: 15px; }
+.portal-topbar__title small {
+  margin-top: 2px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+}
+.portal-content {
+  width: min(1120px, 100%);
+  padding: 24px;
+}
+.portal-mobile-nav { display: none; }
+
+.customer-page-head { margin-bottom: 18px; }
+.customer-page-head h1 {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 32px);
+  letter-spacing: -0.035em;
+}
+.customer-page-head p {
+  margin: 5px 0 0;
+  color: var(--c-text-muted);
+  font-size: 13px;
+}
+.customer-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 10px;
+}
+.customer-list-card { margin-top: 12px; }
+
+@media (max-width: 1100px) {
+  .cc-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cc-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 840px) {
+  .admin-shell { grid-template-columns: minmax(0, 1fr); }
+  .admin-sidebar { width: min(300px, 88vw); }
+  .portal-shell { grid-template-columns: 1fr; }
+  .portal-sidebar { display: none; }
+  .portal-mobile-nav { display: inline-flex; }
+  .portal-content { padding: 18px 16px; }
+}
+@media (max-width: 560px) {
+  .cc-page-intro { align-items: flex-start; flex-direction: column; }
+  .cc-metric-grid,
+  .customer-summary-grid { grid-template-columns: 1fr; }
+  .portal-topbar { padding: 0 14px; }
+}

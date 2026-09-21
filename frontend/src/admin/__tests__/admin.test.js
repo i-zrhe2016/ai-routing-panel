@@ -169,23 +169,24 @@ describe("sameOriginLoginUrl", () => {
 });
 
 describe("AdminApp", () => {
-  it("organizes the console into three workspaces and exposes contextual tabs", async () => {
+  it("organizes the console into seven first-class control-center workspaces", async () => {
     const wrapper = await mountAdmin();
-    expect(wrapper.findAll(".workspace-nav__item")).toHaveLength(3);
-    expect(wrapper.text()).toContain("运行总览");
-    await wrapper.findAll(".workspace-nav__item").at(2).trigger("click");
-    expect(wrapper.vm.activeWorkspace).toBe("infra");
-    expect(wrapper.find('[role="tablist"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("Prometheus 与 Grafana");
+    expect(wrapper.findAll(".workspace-nav__item")).toHaveLength(7);
+    expect(wrapper.text()).toContain("Overview");
+    expect(wrapper.text()).toContain("AI Routing");
+    expect(wrapper.text()).toContain("Traffic");
+    await wrapper.findAll(".workspace-nav__item").at(1).trigger("click");
+    expect(wrapper.vm.activeWorkspace).toBe("routing");
+    expect(wrapper.find(".routing-workspace").exists()).toBe(true);
   });
 
-  it("switches the resources workspace between ports and commerce", async () => {
+  it("exposes resources and commerce as direct workspaces", async () => {
     const wrapper = await mountAdmin();
-    await wrapper.findAll(".workspace-nav__item").at(1).trigger("click");
+    await wrapper.findAll(".workspace-nav__item").at(3).trigger("click");
     expect(wrapper.vm.activeWorkspace).toBe("resources");
-    expect(wrapper.find(".workspace-tabs").text()).toContain("端口与租户");
-    await wrapper.get('.workspace-tabs [role="tab"]:nth-child(2)').trigger("click");
-    expect(wrapper.vm.resourceTab).toBe("commerce");
+    expect(wrapper.find(".ports-workspace").exists()).toBe(true);
+    await wrapper.findAll(".workspace-nav__item").at(4).trigger("click");
+    expect(wrapper.vm.activeWorkspace).toBe("commerce");
     expect(wrapper.find(".commerce-workspace").exists()).toBe(true);
   });
 

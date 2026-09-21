@@ -10,15 +10,18 @@ import { PortsMixin } from "../mixins/ports.js";
 import StatusPill from "../shared/ui/StatusPill.vue";
 import { naiveThemeOverrides } from "../shared/tokens.js";
 import WorkspaceNav from "./components/WorkspaceNav.vue";
+import AiRoutingSection from "./sections/AiRoutingSection.vue";
 import CommerceSection from "./sections/CommerceSection.vue";
 import InfraSection from "./sections/InfraSection.vue";
 import MonitoringSection from "./sections/MonitoringSection.vue";
 import OverviewSection from "./sections/OverviewSection.vue";
 import PortsSection from "./sections/PortsSection.vue";
+import TrafficSection from "./sections/TrafficSection.vue";
 
 export default {
   name: "AdminApp",
   components: {
+    AiRoutingSection,
     CommerceSection,
     InfraSection,
     MonitoringSection,
@@ -27,6 +30,7 @@ export default {
     OverviewSection,
     PortsSection,
     StatusPill,
+    TrafficSection,
     WorkspaceNav,
   },
   mixins: [CoreMixin, PortsMixin, CommerceMixin, DnsMixin, AiDomainsMixin],
@@ -37,8 +41,6 @@ export default {
     return {
       themeOverrides: naiveThemeOverrides(),
       activeWorkspace: "overview",
-      resourceTab: "ports",
-      infraTab: "infrastructure",
       isMobile: false,
       mobileNavOpen: false,
       loading: true,
@@ -46,17 +48,13 @@ export default {
       dashboardRefreshBusy: false,
       authEnabled: Boolean(typeof window !== "undefined" && window.__BOOT__ && window.__BOOT__.auth_enabled),
       workspaceOptions: [
-        { key: "overview", label: "运行总览", description: "路由健康与待处理" },
-        { key: "resources", label: "资源与租户", description: "端口、套餐与订单" },
-        { key: "infra", label: "基础设施", description: "数据面、DNS 与监控" },
-      ],
-      resourceTabs: [
-        { key: "ports", label: "端口与租户", description: "监听入口和订阅交付" },
-        { key: "commerce", label: "套餐与订单", description: "售卖、审核与设置" },
-      ],
-      infraTabs: [
-        { key: "infrastructure", label: "数据面与 DNS", description: "路由、探测与故障切换" },
-        { key: "monitoring", label: "监控", description: "Prometheus 与 Grafana" },
+        { key: "overview", label: "Overview", description: "系统健康与待处理" },
+        { key: "routing", label: "AI Routing", description: "出口、探测与切换" },
+        { key: "traffic", label: "Traffic", description: "流量、端口与连接" },
+        { key: "resources", label: "Resources", description: "端口与租户交付" },
+        { key: "commerce", label: "Orders & Plans", description: "订单、套餐与审核" },
+        { key: "infra", label: "Infrastructure", description: "节点、DNS 与运行时" },
+        { key: "observe", label: "Observability", description: "Prometheus 与 Grafana" },
       ],
     };
   },
@@ -72,9 +70,13 @@ export default {
     },
     workspaceDescription() {
       return {
-        overview: "先确认当前路径和异常，再进入具体操作。",
-        resources: "管理监听入口、租户交付和商业化服务。",
-        infra: "检查数据面、DNS、AI 路由与观测信号。",
+        overview: "先确认系统健康、当前路径和待处理，再进入具体操作。",
+        routing: "解释当前 AI 出口、候选健康、人工策略和故障切换。",
+        traffic: "观察累计流量、连接和主要端口负载。",
+        resources: "管理监听入口、租户交付和订阅凭据。",
+        commerce: "管理套餐、订单审核与服务开通。",
+        infra: "检查数据面、AI 节点、DNS 与运行时状态。",
+        observe: "从指标和 Grafana 深入排查资源与流量异常。",
       }[this.activeWorkspace] || "";
     },
     lastRefreshLabel() {
@@ -123,12 +125,6 @@ export default {
       this.activeWorkspace = key;
       this.mobileNavOpen = false;
     },
-    selectResourceTab(key) {
-      this.resourceTab = key;
-    },
-    selectInfraTab(key) {
-      this.infraTab = key;
-    },
     toggleMobileNav() {
       this.mobileNavOpen = !this.mobileNavOpen;
     },
@@ -166,11 +162,11 @@ export default {
           <div class="brand-lockup">
             <div class="brand-mark" aria-hidden="true">XR</div>
             <div>
-              <p class="brand-kicker">XRAY ROUTING</p>
-              <strong>控制台</strong>
+              <p class="brand-kicker">ROUTING PANEL</p>
+              <strong>Control Center</strong>
             </div>
           </div>
-          <p class="brand-description">网络流量、AI 路由和租户交付的统一操作面。</p>
+          <p class="brand-description">AI 路由、网络流量、租户与运营的一体化控制面。</p>
 
           <workspace-nav :items="workspaceOptions" :active-key="activeWorkspace" @select="selectWorkspace" />
 
@@ -188,7 +184,7 @@ export default {
           </div>
         </div>
         <div class="sidebar-footer">
-          <span>面板地址</span>
+          <span>CONTROL PLANE</span>
           <strong>{{ meta.panel_address || "—" }}</strong>
           <small>{{ meta.timezone_label || "服务器本地时区" }}</small>
         </div>
@@ -203,7 +199,7 @@ export default {
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
             <div>
-              <p class="breadcrumb">CONTROL PLANE <span>/</span> {{ activeWorkspaceMeta.label.toUpperCase() }}</p>
+              <p class="breadcrumb">CONTROL CENTER <span>/</span> {{ workspaceTitle.toUpperCase() }}</p>
               <h1>{{ workspaceTitle }}</h1>
               <p>{{ workspaceDescription }}</p>
             </div>
@@ -228,31 +224,26 @@ export default {
             <button class="notice-close" type="button" aria-label="关闭提示" @click="clearFlash">关闭</button>
           </div>
 
-          <div v-if="activeWorkspace === 'resources'" class="workspace-tabs" role="tablist" aria-label="资源与租户视图">
-            <button v-for="tab in resourceTabs" :key="tab.key" class="workspace-tab" :class="{ 'is-active': resourceTab === tab.key }" type="button" role="tab" :aria-selected="resourceTab === tab.key" @click="selectResourceTab(tab.key)">
-              <strong>{{ tab.label }}</strong><small>{{ tab.description }}</small>
-            </button>
-          </div>
-          <div v-if="activeWorkspace === 'infra'" class="workspace-tabs" role="tablist" aria-label="基础设施视图">
-            <button v-for="tab in infraTabs" :key="tab.key" class="workspace-tab" :class="{ 'is-active': infraTab === tab.key }" type="button" role="tab" :aria-selected="infraTab === tab.key" @click="selectInfraTab(tab.key)">
-              <strong>{{ tab.label }}</strong><small>{{ tab.description }}</small>
-            </button>
-          </div>
-
           <n-spin :show="loading">
-            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'overview' }" :aria-hidden="activeWorkspace !== 'overview'">
+            <section v-if="activeWorkspace === 'overview'" class="workspace-view">
               <overview-section />
             </section>
-            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'resources' || resourceTab !== 'ports' }" :aria-hidden="activeWorkspace !== 'resources' || resourceTab !== 'ports'">
+            <section v-if="activeWorkspace === 'routing'" class="workspace-view">
+              <ai-routing-section />
+            </section>
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'traffic' }" :aria-hidden="activeWorkspace !== 'traffic'">
+              <traffic-section />
+            </section>
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'resources' }" :aria-hidden="activeWorkspace !== 'resources'">
               <ports-section />
             </section>
-            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'resources' || resourceTab !== 'commerce' }" :aria-hidden="activeWorkspace !== 'resources' || resourceTab !== 'commerce'">
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'commerce' }" :aria-hidden="activeWorkspace !== 'commerce'">
               <commerce-section />
             </section>
-            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'infra' || infraTab !== 'infrastructure' }" :aria-hidden="activeWorkspace !== 'infra' || infraTab !== 'infrastructure'">
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'infra' }" :aria-hidden="activeWorkspace !== 'infra'">
               <infra-section />
             </section>
-            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'infra' || infraTab !== 'monitoring' }" :aria-hidden="activeWorkspace !== 'infra' || infraTab !== 'monitoring'">
+            <section class="workspace-view" :class="{ 'is-hidden': activeWorkspace !== 'observe' }" :aria-hidden="activeWorkspace !== 'observe'">
               <monitoring-section />
             </section>
           </n-spin>
