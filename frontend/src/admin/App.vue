@@ -46,7 +46,6 @@ export default {
       loading: true,
       dashboardPollTimer: null,
       dashboardRefreshBusy: false,
-      authEnabled: Boolean(typeof window !== "undefined" && window.__BOOT__ && window.__BOOT__.auth_enabled),
       workspaceOptions: [
         { key: "overview", label: "Overview", description: "系统健康与待处理" },
         { key: "routing", label: "AI Routing", description: "出口、探测与切换" },
@@ -143,13 +142,6 @@ export default {
         this.dashboardRefreshBusy = false;
       }
     },
-    logout() {
-      const form = document.createElement("form");
-      form.method = "post";
-      form.action = "/logout";
-      document.body.appendChild(form);
-      form.submit();
-    },
   },
 };
 </script>
@@ -213,7 +205,6 @@ export default {
             <button class="icon-button" type="button" :aria-label="dashboardRefreshBusy ? '正在刷新' : '刷新数据'" :disabled="dashboardRefreshBusy" @click="refreshNow">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.9-3M4 5v4h4M4 13a8.1 8.1 0 0 0 14.9 3M20 19v-4h-4" /></svg>
             </button>
-            <button v-if="authEnabled" class="topbar-logout" type="button" @click="logout">退出登录</button>
           </div>
         </header>
 

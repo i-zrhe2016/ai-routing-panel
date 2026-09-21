@@ -129,7 +129,7 @@ let fetchMock;
 const dashboard = makeDashboard();
 
 beforeEach(() => {
-  vi.stubGlobal("__BOOT__", { csrf_token: "csrf-x", auth_enabled: true });
+  vi.stubGlobal("__BOOT__", { csrf_token: "csrf-x" });
   vi.stubGlobal("confirm", () => true);
   vi.stubGlobal("matchMedia", () => ({ matches: false, addListener() {}, removeListener() {} }));
   vi.stubGlobal("ResizeObserver", class {
