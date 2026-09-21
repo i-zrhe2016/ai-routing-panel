@@ -22,8 +22,10 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
-      # tests/ has no __init__.py, so pytest puts tests/ on sys.path instead of
-      # the repository root; without the prefix the suite fails to collect.
+      # tests/ has no __init__.py, so the `pytest` console script puts tests/ on
+      # sys.path instead of the repository root and 28 files fail to collect.
+      # `python -m pytest` adds the cwd itself, so it collects either way; the
+      # prefix is kept so CI runs the documented command verbatim.
       #
       # app/bootstrap.py mkdirs DATA_DIR, which defaults to /data. That path
       # exists on the runner but is not writable, so the two architecture tests

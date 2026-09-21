@@ -217,8 +217,9 @@ python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 PYTHONPATH=. .venv/bin/python -m pytest tests -q
 ```
 
-`tests/` 没有 `__init__.py`，pytest 会把 `tests/` 而非仓库根加入 `sys.path`，因此
-`PYTHONPATH=.` 是必需的；省略它会有 28 个测试文件在收集阶段直接报错。
+`tests/` 没有 `__init__.py`，直接调用 `pytest` 控制台脚本时它会把 `tests/` 而非仓库根加入
+`sys.path`，省略 `PYTHONPATH=.` 会有 28 个测试文件在收集阶段直接报错；`python -m pytest` 因为
+`-m` 已经加入当前目录，并不依赖该前缀。这里统一保留，使两种调用方式行为一致。
 
 ## 持续集成
 

@@ -157,9 +157,10 @@ ruff check .
 black --check .
 ```
 
-`PYTHONPATH=.` 是必需的：`tests/` 没有 `__init__.py`，pytest 会把 `tests/` 而非仓库根加入
-`sys.path`。`ruff` 和 `black` 目前只是本地建议，尚未纳入 CI——现有代码库仍有存量问题需要
-先清理。
+`PYTHONPATH=.` 在 `python -m pytest` 下是冗余的（`-m` 已把当前目录加入 `sys.path`）；保留它是
+为了让直接调用 `pytest` 控制台脚本时行为一致——`tests/` 没有 `__init__.py`，控制台脚本会把
+`tests/` 而非仓库根加入 `sys.path`，省略前缀会有 28 个测试文件在收集阶段报错。`ruff` 和
+`black` 目前只是本地建议，尚未纳入 CI——现有代码库仍有存量问题需要先清理。
 
 前端发布资源仍随仓库保存在 `app/static/{admin,portal,landing}`，运行时和镜像内不需要 JavaScript 构建工具。
 Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会将 Admin bundle 写入
