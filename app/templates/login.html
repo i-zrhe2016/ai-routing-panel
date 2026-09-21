@@ -3,27 +3,27 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>登录 - xray-routing-panel</title>
+    <title>租户登录 - xray-routing-panel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   </head>
   <body class="auth-page">
     <main class="shell auth-shell">
       <section class="auth-layout">
         <div class="auth-copy">
-          <p class="eyebrow">PANEL ACCESS</p>
-          <h1 class="page-title">统一登录入口</h1>
+          <p class="eyebrow">TENANT LOGIN</p>
+          <h1 class="page-title">租户登录</h1>
           <p class="page-subtitle">
-            管理员和普通租户都使用这个页面登录。管理员进入总控台，租户进入各自独立的端口面板。
+            控制台仅允许内网或 Tailscale 来源直接访问，没有管理员登录；这个页面只用于租户使用各端口的用户名和密码进入自己的订阅面板。
           </p>
 
           <div class="auth-highlights">
             <div class="info-tile">
               <span>认证方式</span>
-              <strong>管理员 / 租户</strong>
+              <strong>租户端口凭据</strong>
             </div>
             <div class="info-tile">
-              <span>脚本兼容</span>
-              <strong>保留 Basic Auth</strong>
+              <span>控制台入口</span>
+              <strong>内网 / Tailscale</strong>
             </div>
           </div>
 
@@ -37,8 +37,8 @@
           <div class="panel-head">
             <div>
               <p class="section-eyebrow">LOGIN</p>
-              <h2>进入 xray-routing-panel</h2>
-              <p>管理员使用固定账号密码；普通租户使用系统为各端口随机生成的用户名和密码。</p>
+              <h2>进入租户面板</h2>
+              <p>使用系统为各端口随机生成的用户名和密码。</p>
             </div>
           </div>
 

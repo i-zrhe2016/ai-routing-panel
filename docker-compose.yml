@@ -15,7 +15,7 @@ services:
       # Keep the panel reachable from the configured control-plane address
       # as well as local reverse proxies.
       PANEL_HOST: "0.0.0.0"
-      PANEL_INTERNAL_HOSTS: "${PANEL_INTERNAL_HOSTS:-127.0.0.1}"
+      PANEL_ALLOWED_NETWORKS: "${PANEL_ALLOWED_NETWORKS:-}"
       PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-https://xray.zrhe2016.cc}"
       PANEL_SUBSCRIPTION_PUBLIC_URL: "${PANEL_SUBSCRIPTION_PUBLIC_URL:-https://sub.xray.zrhe2016.cc}"
       DEFAULT_UPSTREAM_HOST: "127.0.0.1"
@@ -96,8 +96,6 @@ services:
       DNS_FAILOVER_PEAK_START: "${DNS_FAILOVER_PEAK_START:-}"
       DNS_FAILOVER_PEAK_END: "${DNS_FAILOVER_PEAK_END:-}"
       DNS_FAILOVER_PEAK_TIMEZONE: "${DNS_FAILOVER_PEAK_TIMEZONE:-}"
-      PANEL_USERNAME: "${PANEL_USERNAME:-}"
-      PANEL_PASSWORD: "${PANEL_PASSWORD:-}"
       PANEL_SECRET_KEY: "${PANEL_SECRET_KEY:-}"
       PANEL_LOG_LEVEL: "${PANEL_LOG_LEVEL:-INFO}"
       PANEL_SLOW_REQUEST_MS: "${PANEL_SLOW_REQUEST_MS:-1000}"

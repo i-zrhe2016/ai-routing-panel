@@ -97,8 +97,7 @@ cp .env.example .env
 常用项：
 
 - `PANEL_PUBLIC_URL`
-- `PANEL_USERNAME`
-- `PANEL_PASSWORD`
+- `PANEL_ALLOWED_NETWORKS`
 - `PANEL_SECRET_KEY`
 - `DATAPLANE_SSH_TARGET`
 - `DATAPLANE_PROBE_HOST`
@@ -270,7 +269,7 @@ docker compose run --rm xray-routing-panel-db-backup \
 
 ## 常用接口摘要
 
-管理后台（需管理员会话 / Basic X
+管理后台（仅限 `PANEL_ALLOWED_NETWORKS` 内的来源，无登录）：
 
 - `GET /`: 管理后台 SPA 壳
 - `GET /api/dashboard`: 首页完整状态

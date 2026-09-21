@@ -27,7 +27,7 @@
 
 - [AI 节点部署与 SSH 纳管](ai-node-deployment.md) — 远端 AI 数据面部署、状态检查和同步保护。
 - [AI 节点独立凭据](ai-node-credentials.md) — AI inbound/outbound 凭据契约和轮换边界。
-- [Cloudflare Access 邮箱登录](cloudflare-access-email-login.md) — 控制面 Email OTP 登录、Access 策略和源站边界。
+- [控制面访问与来源白名单](panel-access.md) — Tailscale/内网直连、无登录控制台和 403 边界。
 - [内网 SSH 纳管](ssh-key-access.md) — 控制面直连普通数据面的认证、主机指纹校验与验证。
 - [面板迁移](panel-migration.md) — 控制面数据、配置和服务迁移。
 - [AWS 普通数据面迁移与回退](aws-normal-data-plane-migration.md) — 普通数据面 AWS 灰度迁移、切换和回退。

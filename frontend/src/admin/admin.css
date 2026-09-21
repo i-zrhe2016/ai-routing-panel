@@ -405,8 +405,7 @@ a {
   animation: pulse-dot 1s ease-in-out infinite;
 }
 
-.icon-button,
-.topbar-logout {
+.icon-button {
   display: inline-grid;
   place-items: center;
   min-width: 42px;
@@ -419,8 +418,7 @@ a {
   transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
 }
 
-.icon-button:hover,
-.topbar-logout:hover {
+.icon-button:hover {
   border-color: #9db4d0;
   color: var(--c-primary);
   background: #f8fbff;
@@ -438,14 +436,6 @@ a {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
-}
-
-.topbar-logout {
-  display: inline-flex;
-  min-width: auto;
-  padding: 0 14px;
-  font-size: 13px;
-  font-weight: 700;
 }
 
 .mobile-menu-button {
@@ -1440,17 +1430,6 @@ a {
 
   .admin-topbar p:not(.breadcrumb) {
     display: none;
-  }
-
-  .topbar-logout {
-    min-width: 42px;
-    padding: 0 8px;
-    font-size: 0;
-  }
-
-  .topbar-logout::before {
-    content: "↪";
-    font-size: 18px;
   }
 
   .admin-content {

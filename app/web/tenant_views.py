@@ -9,7 +9,6 @@ from ..auth import (
 from .core import (
     clear_tenant_session,
     bind_actor,
-    is_session_authenticated,
     is_tenant_session_authenticated,
     log_business_event,
     route,
@@ -30,8 +29,6 @@ def tenant_login(tenant_token):
     if request.method == "GET":
         return redirect(tenant_login_target(tenant_token), code=303)
 
-    if is_session_authenticated():
-        return redirect(tenant_panel_target(tenant_token), code=303)
     if is_tenant_session_authenticated(port):
         return redirect(tenant_panel_target(tenant_token), code=303)
 
