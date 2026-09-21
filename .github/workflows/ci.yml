@@ -14,12 +14,6 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    # app/bootstrap.py mkdirs DATA_DIR, which defaults to /data. That path
-    # exists on the runner but is not writable there, so the two tests that
-    # call build_application() directly would fail with PermissionError.
-    # Point it at a writable scratch path, as the container does via ENV.
-    env:
-      DATA_DIR: ${{ runner.temp }}/xray-panel-data
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -30,7 +24,15 @@ jobs:
         run: pip install -r requirements-dev.txt
       # tests/ has no __init__.py, so pytest puts tests/ on sys.path instead of
       # the repository root; without the prefix the suite fails to collect.
+      #
+      # app/bootstrap.py mkdirs DATA_DIR, which defaults to /data. That path
+      # exists on the runner but is not writable, so the two architecture tests
+      # that call build_application() directly would fail with PermissionError.
+      # Point it at a writable scratch path, as the container does via ENV.
+      # The `runner` context is only available at step level, not job level.
       - name: Run backend tests
+        env:
+          DATA_DIR: ${{ runner.temp }}/xray-panel-data
         run: PYTHONPATH=. python -m pytest tests -q
 
   frontend:
