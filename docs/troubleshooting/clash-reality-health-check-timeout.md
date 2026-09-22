@@ -1,6 +1,6 @@
 # Clash REALITY 健康检查超时排障记录
 
-本文记录 2026-09-03 `ai.zrhe2016.cc:31098` 在 Clash 中显示 `check timeout` 的故障定位、修复和验收结果。文档只记录故障边界与可复用步骤，不记录订阅令牌、UUID、REALITY 私钥或其他租户凭据。
+本文记录 2026-09-03 `ai.zrhe2016.cc:31098` 的首次故障，以及 2026-09-17 的数据面 DNS/时钟复发故障。文档只记录故障边界与可复用步骤，不记录订阅令牌、UUID、REALITY 私钥或其他租户凭据。
 
 ## 2026-09-17 数据面 Xray 启动失败：残留 Unix Socket
 
@@ -103,6 +103,28 @@ docker start xray-reality-local
 订阅内容和磁盘上的服务端配置一致；使用同一份 inbound 配置启动的临时 Xray 实例能够正常返回 HTTP 204。仅重启生产容器 `xray-reality-local` 后，完整协议检查和国内实际流量均恢复。
 
 已确认的直接故障点是生产 Xray 进程的运行状态，而不是订阅接口、租户参数、DNS 或国内到 `31098` 的普遍网络阻断。进程为何进入该异常状态没有足够证据，不将其归因于某个未验证的 Xray 缺陷。
+
+## 2026-09-17 复发：数据面 DNS 与时钟不同步
+
+本次故障中，`xray-reality-local` 虽为 `running / healthy`，HAProxy、Unix Socket 和全部入口端口也正常，但完整 VLESS + REALITY 请求仍被关闭。配置字段校验仍全部匹配；隔离 debug Xray 记录了 `REALITY: failed to dial dest`，原因是无法通过容器内遗留的 Tailscale DNS 解析伪装目标。
+
+同时发现数据面系统时钟比控制面落后约 1 小时 13 分，`systemd-timesyncd` 未同步。校正时钟后握手仍失败，说明 DNS 是本次复发的直接阻断点，时钟漂移是必须一并修复的第二个风险。
+
+### 修复操作
+
+1. 设置数据面 `tailscale set --accept-dns=false`，避免继续注入失效的 Tailscale DNS。
+2. 备份原 `/etc/resolv.conf`，恢复为 `/run/systemd/resolve/stub-resolv.conf`，使 Xray 使用 eth0 的上游 DNS。
+3. 安全重建 `xray-reality-local`，刷新 Docker 容器内创建时遗留的 resolver 文件；未修改 Xray 凭据、端口或路由。
+4. 通过已恢复的 DNS 校正系统时钟，并重启 `systemd-timesyncd`。
+
+### 修复后验收
+
+- `xray-reality-local` 为 `running / healthy`，7 个入口 Unix Socket 重新监听。
+- 数据面容器内可以解析 REALITY 目标，`systemd-timesyncd` 为 `NTPSynchronized=yes`，时间偏差约为毫秒级。
+- 控制面真实 Xray 客户端经 443 完成 VLESS + REALITY，并通过代理访问 `www.gstatic.com/generate_204` 返回 HTTP 204。
+- access log 出现新的有效统一入口用户请求。
+
+本次故障判定为已恢复。后续若再次出现“TCP 可达但 REALITY 被关闭”，应优先同时检查宿主机与 Xray 容器内的 `/etc/resolv.conf`、目标域名解析和 `NTPSynchronized`，不能只看容器健康状态。
 
 ## 排障流程
 
