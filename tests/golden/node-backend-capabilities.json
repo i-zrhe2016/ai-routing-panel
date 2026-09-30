@@ -1,0 +1,42 @@
+{
+  "docker": {
+    "is_remote": false,
+    "supports_ai_domains_snapshot_pull": false,
+    "supports_ai_report_pull": false,
+    "supports_dynamic_routing_pull": false,
+    "supports_logs": false,
+    "supports_restart": true,
+    "supports_stats": true,
+    "supports_sync": false
+  },
+  "local": {
+    "is_remote": false,
+    "supports_ai_domains_snapshot_pull": false,
+    "supports_ai_report_pull": false,
+    "supports_dynamic_routing_pull": false,
+    "supports_logs": false,
+    "supports_restart": false,
+    "supports_stats": true,
+    "supports_sync": false
+  },
+  "ssh": {
+    "is_remote": true,
+    "supports_ai_domains_snapshot_pull": true,
+    "supports_ai_report_pull": true,
+    "supports_dynamic_routing_pull": true,
+    "supports_logs": true,
+    "supports_restart": true,
+    "supports_stats": true,
+    "supports_sync": true
+  },
+  "unmanaged": {
+    "is_remote": false,
+    "supports_ai_domains_snapshot_pull": false,
+    "supports_ai_report_pull": false,
+    "supports_dynamic_routing_pull": false,
+    "supports_logs": false,
+    "supports_restart": false,
+    "supports_stats": false,
+    "supports_sync": false
+  }
+}

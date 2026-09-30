@@ -1,0 +1,148 @@
+{
+  "dashboard": {
+    "commerce": {
+      "orders": [],
+      "plans": [],
+      "settings": {
+        "auto_port_end": 39999,
+        "auto_port_start": 31000,
+        "order_expiry_hours": 24,
+        "payment_instructions": "请扫码支付宝付款后上传截图，并填写付款备注以便人工审核。",
+        "payment_proof_max_bytes": 5242880,
+        "payment_proof_max_display": "5.00 MB",
+        "payment_qr_code_url": ""
+      },
+      "summary": {
+        "customer_count": 0,
+        "enabled_plan_count": 0,
+        "pending_review_count": 0,
+        "service_count": 0
+      }
+    },
+    "flash": {
+      "level": "info",
+      "message": ""
+    },
+    "meta": {
+      "ai_domain_dashboard_url": "/ai-domain-dashboard",
+      "ai_domain_stats": {
+        "available": true,
+        "current_ai_domains": 1,
+        "route_status": "applied",
+        "total_ai_domains": 1
+      },
+      "ai_node_running": true,
+      "ai_node_status": {
+        "configured": true,
+        "label": "ai-synthetic",
+        "management_target": "agent-ai",
+        "reachable": true,
+        "supports_restart": true,
+        "xray_running": true
+      },
+      "ai_nodes": [],
+      "ai_routing_status": {
+        "ai_candidates": [
+          {
+            "is_reachable": true,
+            "label": "ai-synthetic",
+            "selected": true
+          }
+        ],
+        "route_status": "applied",
+        "status": "applied"
+      },
+      "backup_xray_mode": "disabled",
+      "csrf_token": "<csrf-token>",
+      "customer_login_url": "/customer/login",
+      "data_plane_running": true,
+      "data_plane_status": {
+        "configured": true,
+        "label": "normal-synthetic",
+        "management_target": "agent-normal",
+        "reachable": true,
+        "supports_restart": true,
+        "xray_running": true
+      },
+      "default_upstream_host": "127.0.0.1",
+      "default_upstream_port": 443,
+      "dns_failover_status": {
+        "configured": false,
+        "current_target": "primary",
+        "enabled": false
+      },
+      "grafana_observability_uid": "xray-observability",
+      "grafana_url": "",
+      "nodes": [
+        {
+          "configured": true,
+          "key": "data_plane",
+          "label": "normal-synthetic",
+          "management_target": "agent-normal",
+          "reachable": true,
+          "supports_restart": true,
+          "xray_running": true
+        },
+        {
+          "configured": true,
+          "key": "ai_node",
+          "label": "ai-synthetic",
+          "management_target": "agent-ai",
+          "reachable": true,
+          "supports_restart": true,
+          "xray_running": true
+        },
+        {
+          "configured": false,
+          "key": "control_plane_backup",
+          "label": "控制面备用",
+          "management_target": "",
+          "reachable": false,
+          "supports_restart": false,
+          "xray_running": false
+        }
+      ],
+      "panel_address": "http://panel.example.com",
+      "plans_page_url": "/plans",
+      "probe_dashboard_url": "",
+      "probe_enabled": false,
+      "tenant_panel_prefix": "/tenant/",
+      "timezone_label": "<timezone>",
+      "traffic_routing": {
+        "entry_node": "普通数据面",
+        "exit_node": "ai-synthetic freedom 直出",
+        "is_degraded": false,
+        "label": "数据面→ai-synthetic直出",
+        "path": "normal_ai",
+        "route_status": "正常",
+        "scenario": "正常：AI 流量经ai-synthetic直出",
+        "transit_nodes": [
+          "ai-synthetic"
+        ],
+        "waiting_for_switch": false
+      }
+    },
+    "ports": [],
+    "subscription": {
+      "available": true,
+      "client_config_path": "<client-config-path>",
+      "error": "",
+      "mode": "per-port",
+      "server": "example.com",
+      "tenant_count": 0,
+      "tenant_panel_path_example": "/login?next=/tenant/<tenant_token>",
+      "tenant_subscription_path_example": "/tenant-subscriptions/<subscription_token>/clash"
+    },
+    "summary": {
+      "active_ports": 0,
+      "disabled_ports": 0,
+      "expired_ports": 0,
+      "quota_ports": 0,
+      "total_bytes_received": 0,
+      "total_bytes_sent": 0,
+      "total_connections": 0,
+      "total_ports": 0
+    }
+  },
+  "ok": true
+}

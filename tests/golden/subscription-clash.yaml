@@ -1,0 +1,259 @@
+port: 7890
+socks-port: 7891
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: true
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: true
+  enhanced-mode: fake-ip
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+
+proxies:
+  - name: "golden-plan-31098"
+    type: vless
+    server: "panel.example.com"
+    port: 31098
+    uuid: "11111111-1111-1111-1111-111111111111"
+    udp: true
+    tls: true
+    network: tcp
+    servername: "www.microsoft.com"
+    flow: "xtls-rprx-vision"
+    reality-opts:
+      public-key: "synthetic-public-key"
+      short-id: "0123456789abcdef"
+    client-fingerprint: "chrome"
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - "golden-plan-31098"
+      - DIRECT
+
+  - name: AUTO
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    proxies:
+      - "golden-plan-31098"
+
+rule-providers:
+  LAN:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/LocalAreaNetwork.yaml
+    path: ./ruleset/LAN.yaml
+    interval: 86400
+
+  UNBAN:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/UnBan.yaml
+    path: ./ruleset/UNBAN.yaml
+    interval: 86400
+
+  ADS:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/BanAD.yaml
+    path: ./ruleset/ADS.yaml
+    interval: 86400
+
+  PROGRAM_ADS:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/BanProgramAD.yaml
+    path: ./ruleset/PROGRAM_ADS.yaml
+    interval: 86400
+
+  DOWNLOAD:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Download.yaml
+    path: ./ruleset/DOWNLOAD.yaml
+    interval: 86400
+
+  CHINA_DOMAIN:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/ChinaDomain.yaml
+    path: ./ruleset/CHINA_DOMAIN.yaml
+    interval: 86400
+
+  CHINA_IP:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/ChinaIp.yaml
+    path: ./ruleset/CHINA_IP.yaml
+    interval: 86400
+
+  CHINA_MEDIA:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/ChinaMedia.yaml
+    path: ./ruleset/CHINA_MEDIA.yaml
+    interval: 86400
+
+  PROXY_GFW:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/ProxyGFWlist.yaml
+    path: ./ruleset/PROXY_GFW.yaml
+    interval: 86400
+
+  PROXY_MEDIA:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/ProxyMedia.yaml
+    path: ./ruleset/PROXY_MEDIA.yaml
+    interval: 86400
+
+  APPLE:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Apple.yaml
+    path: ./ruleset/APPLE.yaml
+    interval: 86400
+
+  BILIBILI:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Bilibili.yaml
+    path: ./ruleset/BILIBILI.yaml
+    interval: 86400
+
+  BILIBILI_HMT:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/BilibiliHMT.yaml
+    path: ./ruleset/BILIBILI_HMT.yaml
+    interval: 86400
+
+  GOOGLE:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Google.yaml
+    path: ./ruleset/GOOGLE.yaml
+    interval: 86400
+
+  GOOGLE_CN:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/GoogleCN.yaml
+    path: ./ruleset/GOOGLE_CN.yaml
+    interval: 86400
+
+  GOOGLE_FCM:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/GoogleFCM.yaml
+    path: ./ruleset/GOOGLE_FCM.yaml
+    interval: 86400
+
+  MICROSOFT:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Microsoft.yaml
+    path: ./ruleset/MICROSOFT.yaml
+    interval: 86400
+
+  NETEASE:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/NetEaseMusic.yaml
+    path: ./ruleset/NETEASE.yaml
+    interval: 86400
+
+  NETFLIX:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Netflix.yaml
+    path: ./ruleset/NETFLIX.yaml
+    interval: 86400
+
+  ONEDRIVE:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/OneDrive.yaml
+    path: ./ruleset/ONEDRIVE.yaml
+    interval: 86400
+
+  SPOTIFY:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Spotify.yaml
+    path: ./ruleset/SPOTIFY.yaml
+    interval: 86400
+
+  STEAM:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Steam.yaml
+    path: ./ruleset/STEAM.yaml
+    interval: 86400
+
+  STEAM_CN:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/SteamCN.yaml
+    path: ./ruleset/STEAM_CN.yaml
+    interval: 86400
+
+  TELEGRAM:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Telegram.yaml
+    path: ./ruleset/TELEGRAM.yaml
+    interval: 86400
+
+  YOUTUBE:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/YouTube.yaml
+    path: ./ruleset/YOUTUBE.yaml
+    interval: 86400
+
+rules:
+  - RULE-SET,LAN,DIRECT
+  - DOMAIN,localhost,DIRECT
+  - DOMAIN-SUFFIX,local,DIRECT
+  - DOMAIN-SUFFIX,lan,DIRECT
+  - IP-CIDR,<private-network>/8,DIRECT,no-resolve
+  - IP-CIDR,<private-network>/8,DIRECT,no-resolve
+  - IP-CIDR,<private-network>/12,DIRECT,no-resolve
+  - IP-CIDR,<private-network>/16,DIRECT,no-resolve
+  - IP-CIDR6,::1/128,DIRECT,no-resolve
+  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
+  - RULE-SET,UNBAN,DIRECT
+  - RULE-SET,ADS,REJECT
+  - RULE-SET,PROGRAM_ADS,REJECT
+  - RULE-SET,DOWNLOAD,DIRECT
+  - RULE-SET,GOOGLE_FCM,PROXY
+  - RULE-SET,GOOGLE_CN,DIRECT
+  - RULE-SET,GOOGLE,PROXY
+  - RULE-SET,TELEGRAM,PROXY
+  - RULE-SET,NETFLIX,PROXY
+  - RULE-SET,SPOTIFY,PROXY
+  - RULE-SET,STEAM_CN,DIRECT
+  - RULE-SET,STEAM,PROXY
+  - RULE-SET,YOUTUBE,PROXY
+  - RULE-SET,BILIBILI_HMT,PROXY
+  - RULE-SET,BILIBILI,DIRECT
+  - RULE-SET,NETEASE,DIRECT
+  - RULE-SET,APPLE,PROXY
+  - RULE-SET,MICROSOFT,PROXY
+  - RULE-SET,ONEDRIVE,PROXY
+  - RULE-SET,CHINA_MEDIA,DIRECT
+  - RULE-SET,PROXY_MEDIA,PROXY
+  - RULE-SET,PROXY_GFW,PROXY
+  - RULE-SET,CHINA_DOMAIN,DIRECT
+  - RULE-SET,CHINA_IP,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY

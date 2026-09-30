@@ -1,0 +1,74 @@
+{
+  "thresholds": {
+    "failure": 3,
+    "recovery": 2
+  },
+  "probes": [
+    "failure",
+    "failure",
+    "failure",
+    "success",
+    "success",
+    "failure",
+    "failure",
+    "failure"
+  ],
+  "expected": [
+    {
+      "current_target": "primary",
+      "consecutive_failures": 1,
+      "consecutive_successes": 0,
+      "last_switch_reason": "",
+      "provider_updates": []
+    },
+    {
+      "current_target": "primary",
+      "consecutive_failures": 2,
+      "consecutive_successes": 0,
+      "last_switch_reason": "",
+      "provider_updates": []
+    },
+    {
+      "current_target": "backup",
+      "consecutive_failures": 3,
+      "consecutive_successes": 0,
+      "last_switch_reason": "auto_failover",
+      "provider_updates": ["backup"]
+    },
+    {
+      "current_target": "backup",
+      "consecutive_failures": 0,
+      "consecutive_successes": 1,
+      "last_switch_reason": "auto_failover",
+      "provider_updates": ["backup"]
+    },
+    {
+      "current_target": "primary",
+      "consecutive_failures": 0,
+      "consecutive_successes": 2,
+      "last_switch_reason": "auto_recovery",
+      "provider_updates": ["backup", "primary"]
+    },
+    {
+      "current_target": "primary",
+      "consecutive_failures": 1,
+      "consecutive_successes": 0,
+      "last_switch_reason": "auto_recovery",
+      "provider_updates": ["backup", "primary"]
+    },
+    {
+      "current_target": "primary",
+      "consecutive_failures": 2,
+      "consecutive_successes": 0,
+      "last_switch_reason": "auto_recovery",
+      "provider_updates": ["backup", "primary"]
+    },
+    {
+      "current_target": "backup",
+      "consecutive_failures": 3,
+      "consecutive_successes": 0,
+      "last_switch_reason": "auto_failover",
+      "provider_updates": ["backup", "primary", "backup"]
+    }
+  ]
+}
