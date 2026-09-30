@@ -1,6 +1,10 @@
 # 远端节点配置采集
 
-本模块只说明控制面如何通过 SSH 读取远端数据面实际配置，并把结果交给灾备归档器。启用远端 AI 数据面节点后，普通数据面和 AI 数据面节点的 Xray 配置与 `.env` 都通过同一套只读 SSH 采集归档。AI 角色在 `DB_BACKUP_AI_NODE_SSH_TARGET` 已配置时执行；直接运行采集脚本时它也兼容 `AI_NODE_SSH_TARGET`，而 Compose 会显式传入 DB 前缀变量（空值不会回退）。
+> Type: Runbook
+> Status: Active
+> Scope: Read-only collection of remote Xray node files and their recovery paths
+
+本模块说明控制面如何通过 Tailscale SSH 读取远端数据面实际配置，并将文件纳入灾备归档。未配置远端 AI 目标时，AI 备用运行在控制面本机 `xray-ai-node`，配置随控制面运行时目录归档。其他灾备流程见[灾备归档](disaster-backup.md)，变量默认值见[配置说明](configuration.md)。
 
 ![远端节点只读配置采集流程](diagrams/remote-backup-flow.svg)
 
@@ -8,107 +12,57 @@
 
 ## 采集边界
 
-采集器是 `scripts/collect_remote_backup.py`，在备份容器内运行。每次任务只执行一条受限的远端 `python3 -c` 脚本，该脚本对配置路径执行 `stat` 和只读 `open(..., "rb")`：
+采集器 `scripts/collect_remote_backup.py` 对远端路径只执行 `stat` 和只读 `open(..., "rb")`：
 
-- 只接受普通文件；目录、符号链接目标异常、超出大小上限或不可读文件会记录状态。
-- 远端进程不写文件、不修改权限、不执行 `systemctl`/`docker restart`，也不会上传或替换配置。
-- 内容以 Base64 返回，控制面重新计算 SHA-256 后才落入临时 staging 目录。
-- `config.json` 和 `.env` 是节点恢复必需文件；运行时辅助产物是可选文件，缺失会保留在逐文件状态中。
-- staging 文件和 `remote-node-collection.json` 使用 `0600`。
-- SSH 私钥不会挂载或写入归档；密码也不会写入环境变量、日志或归档。配置文件在本地打包前是明文，备份目录必须限制为备份服务可读。
+- 只接收普通文件；目录、异常符号链接、超限或不可读文件会写入状态。
+- 远端不写文件、不改权限、不运行 `systemctl` 或 `docker restart`，也不会上传或替换配置。
+- 文件内容以 Base64 返回；控制面重新计算 SHA-256 后才写入临时 staging 目录。
+- 节点主配置和 `.env` 是恢复必需文件，运行时辅助产物是可选文件。
+- staging 文件和 `remote-node-collection.json` 权限为 `0600`。配置在本地加密前是明文，备份目录必须限制为备份服务可读。
 
-## 各节点的配置来源
+## 节点来源
 
-灾备归档包含控制面本地文件，以及每个已启用角色的远端宿主机文件。AI 目标未配置时不会产生 AI 远端采集结果，但 `DB_BACKUP_EXTRA_PATHS` 仍会归档控制面的 `app/xray/runtime`，`node_recovery.py` 会把其中的 `config-ai-node.json` 当作控制面本机 Docker AI 节点的恢复材料（`source=control-plane-local`）：
-
-```text
-database/
-config/                         # 控制面 DB_BACKUP_EXTRA_PATHS
-nodes/
-  normal-data-plane/
-    root/xray-routing-panel/app/xray/runtime/config.json
-  ai-data-plane/
-    root/ai-routing-panel/app/xray/runtime/config-ai-node.json
-  remote-node-collection.json
-backup-manifest.json
-node-recovery-manifest.json
-```
-
-本次通过只读 SSH 实测的路径如下：
-
-| 节点 | SSH 目标 | 主配置路径 | 配置环境文件 |
-| --- | --- | --- | --- |
-| 普通数据面 | `root@YOUR_NORMAL_DATA_PLANE_HOST:22`（独立脚本另有内置回退目标，生产必须显式覆盖） | `/root/xray-routing-panel/app/xray/runtime/config.json` | `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物、最新报告 |
-| AI 数据面 | `root@<ai-node-host>:22` | 默认 `/etc/xray/config.json`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/runtime/config-ai-node.json` | 默认 `/etc/xray/.env`，实际部署覆盖为 `/root/ai-routing-panel/app/xray/.env` |
-
-`nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再把同一文件映射成便携恢复路径，所以归档路径和恢复路径看起来不同。映射规则是：远端路径位于该角色的部署根之下时去掉部署根前缀；否则按文件名回退到固定的便携路径（`config.json` → `app/xray/runtime/config.json`，`.env` → `app/xray/.env`，其余归到 `remote/`）。每个角色仍保存在各自的 `nodes/<role>/` 树下，因此回退路径不会跨节点互相覆盖；但 AI 数据面的默认路径 `/etc/xray/*` 不在部署根之下，回退后只能得到通用路径，要用 `DB_BACKUP_AI_NODE_DEPLOY_ROOT` 指向真实部署根才能保留远端目录结构。
-
-普通数据面上的 `/root/xray-routing-panel/app/xray/runtime/config.json` 是宿主机文件，Docker 容器内以只读方式挂载为 `/etc/xray/config.json`。不要把容器内路径误填为宿主机路径；如果部署目录不同，显式覆盖 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`。默认还会请求 `.env`、`panel-ports.json`、`dynamic-routing.json`、客户端产物和最新 AI 报告；显式覆盖时必须保留 `config.json` 与 `.env`。
-
-控制面自己的配置由 `DB_BACKUP_EXTRA_PATHS` 提供。Compose 默认把 `/app/xray/.env` 和 `/app/xray/runtime` 以只读方式挂载到备份服务，因此普通数据面和 AI 数据面快照都来自 SSH，控制面快照来自本地目录。
-
-## 认证与主机校验
-
-- 普通数据面目标：`root@YOUR_NORMAL_DATA_PLANE_HOST:22`；控制面直接通过内网连接。独立脚本在变量缺失时会回退到内置目标，生产必须显式设置 `DB_BACKUP_DATAPLANE_SSH_TARGET`，否则可能备份到非预期主机。
-- SSH 命令不包含 `-i`/`IdentityFile`，也不挂载任何私钥；公钥认证被显式关闭，只允许密码和键盘交互认证，并且不提供 TTY 或密码输入来源。因此目标节点必须已经授权控制面免密登录（例如 Tailscale SSH 的 ACL 授权）；否则定时采集会认证失败或一直等到超时。
-- 普通数据面 known_hosts：`/root/.ssh/known_hosts`。
-- AI 数据面目标：`root@<ai-node-host>:22`；使用独立 known_hosts 文件，不复用普通数据面的主机密钥清单。
-- SSH 仍强制 `StrictHostKeyChecking=yes`，并设置连接和存活超时。
-- `DB_BACKUP_SSH_OPTIONS` 以及节点级 options 只允许无边界风险的网络/日志选项（`-4`、`-6`、`-q`/`-v` 和连接超时/keepalive）；身份、known_hosts、代理和远端命令选项会被拒绝。
-
-不要把 root 密码放在环境变量、日志、Markdown 或归档中。若后台任务需要密码认证，应由部署环境提供受控的 SSH 认证机制；采集器本身不保存密码。
-
-## 开关与失败策略
-
-| 变量 | 默认值（Compose） | 作用 |
+| 角色 | 目标 | 默认路径与恢复来源 |
 | --- | --- | --- |
-| `DB_BACKUP_SSH_COLLECTION_ENABLED` | `1` | 是否启用远端配置采集；开关作用于采集器整体，每个角色只在其 SSH 目标已配置时执行，关闭时仍生成控制面本地灾备归档 |
-| `DB_BACKUP_SSH_COLLECTION_REQUIRED` | `0` | `0`：已配置远端节点失联只写入 manifest；`1`：所有已配置远端节点的必需恢复文件必须成功采集 |
-| `DB_BACKUP_SSH_TIMEOUT_SECONDS` | `20` | 单节点连接/远端读取超时上限 |
-| `DB_BACKUP_SSH_MAX_FILE_BYTES` | `5242880` | 单个远端文件大小上限，默认 5 MiB |
-| `DB_BACKUP_DATAPLANE_REMOTE_PATHS` | 普通数据面配置、`.env`、运行时产物和最新报告 | 逗号或换行分隔；配置和 `.env` 是恢复必需文件 |
-| `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | `/root/xray-routing-panel` | 将远端路径映射到便携恢复目录的部署根 |
-| `DB_BACKUP_AI_NODE_SSH_PORT` | `22` | AI 数据面节点 SSH 采集端口 |
-| `DB_BACKUP_AI_NODE_SSH_TARGET` | 空 | AI 数据面节点的 SSH 目标；必须显式设置，未设置时跳过该角色，不会回退到普通数据面目标 |
-| `DB_BACKUP_AI_NODE_KNOWN_HOSTS` | `/root/.ssh/known_hosts_ai` | AI 数据面节点的 known_hosts 文件；必须是备份容器内可见的路径，Compose 只把 `/root/.ssh/known_hosts_ai` 以只读方式挂载进容器，改到其他路径必须同时改挂载 |
-| `DB_BACKUP_AI_NODE_REMOTE_PATHS` | `/etc/xray/config.json`、`/etc/xray/.env` | AI 数据面节点的配置和 `.env`；默认值只适用于标准部署，实际宿主机路径不同时必须覆盖 |
-| `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | AI 数据面节点的部署根；该节点的实际部署根不同时必须显式覆盖，否则恢复路径会退化为 `remote/...` 前缀 |
+| 普通数据面 | `DB_BACKUP_DATAPLANE_SSH_TARGET`，回退 `DATAPLANE_SSH_TARGET` | `/root/xray-routing-panel/app/xray/runtime/config.json`、`.env` 和可选运行产物 |
+| 远端 AI 节点 | `DB_BACKUP_AI_NODE_SSH_TARGETS`，兼容 `AI_NODE_SSH_TARGETS` 和单目标别名 | `/etc/xray/config.json`、`/etc/xray/.env`；按实际宿主机路径覆盖 |
+| 本机 AI 备用 | 无远端 AI 目标时读取控制面归档 | `app/xray/runtime/config-ai-node.json` 和 `app/xray/.env` |
 
-`DB_BACKUP_SSH_COLLECTION_REQUIRED=0` 是灾备优先的默认策略：远端节点暂时不可达时仍保留控制面数据库和本地配置，manifest 会记录 `failed`、`skipped_no_target` 或文件级 `missing`。设置为 `1` 后，任何已配置 SSH 目标的角色（普通数据面或 AI 数据面）采集失败都会中止本次归档；未配置目标的角色仍然只是 `skipped_no_target`。
+每个远端 AI 目标都会生成一个恢复角色。单目标使用 `ai-data-plane`；多目标使用 `ai-data-plane-<node-id>`，其中 `AI_NODE_IDS` 按顺序提供后缀，未提供时使用序号。恢复时以 manifest 中的完整角色名为准。
 
-## manifest 与核验
+`nodes/<role>/` 保留远端绝对路径（去掉开头的 `/`）；`node-recovery-manifest.json` 再按节点部署根映射为便携恢复路径。路径位于部署根下时去掉根前缀，否则按文件名映射到固定的配置路径；各节点保存在独立目录中，不会互相覆盖。AI 默认路径 `/etc/xray/*` 不在默认部署根下，生产环境应按实际部署设置 `DB_BACKUP_AI_NODE_REMOTE_PATHS` 和 `DB_BACKUP_AI_NODE_DEPLOY_ROOT`。
 
-`nodes/remote-node-collection.json` 为每个实际启用的远端节点和每个请求路径记录：
+## Tailscale 访问
 
-- `status`：节点整体状态（`ok`、`partial`、`failed` 或 `skipped_no_target`）。
-- `target`、`sshPort`、`knownHosts`、`requestedPaths`：本次连接参数和请求路径（不包含密钥内容）。
-- `path`、`exists`、`mode`、`mtime`、`size`、`sha256`：远端 stat 与内容摘要。
-- `stagedPath`：归档内对应文件路径；不包含 Base64 内容。
-- `configCollected`：主配置路径是否确实成功写入 staging。
-- `requiredPaths` / `recoveryReady`：恢复必需路径和该节点是否具备完整恢复材料。
+- Compose 默认使用 `DB_BACKUP_SSH_TRANSPORT=tailscale-broker`。隔离的 `xray-routing-panel-db-backup-tailscale` 服务执行 Tailscale SSH，备份容器只连接 `/var/run/xray-backup/tailscale-ssh.sock`。
+- broker 只接受恢复角色和文件大小上限；目标、路径和只读远端命令由 broker 配置决定。broker 不挂载项目、数据库、归档或 R2 凭据。
+- 宿主机 Tailscale CLI 和 daemon socket 只挂载到 broker；备份容器只挂载 broker socket。Tailscale 身份、节点授权和主机校验由宿主机 daemon 与 Tailscale ACL 管理。
+- Tailscale 模式不读取 `known_hosts`、不使用私钥，也不接受 OpenSSH options。受信任主机上直接运行采集器可设 `DB_BACKUP_SSH_TRANSPORT=tailscale`；受控兼容环境可用 `openssh`。
 
-归档根部 `backup-manifest.json` 再记录所有文件的 SHA-256，`node-recovery-manifest.json` 将远端路径映射到便携恢复目录。灾难阶段先验证两层 manifest，再用 `scripts/node_recovery.py prepare --bundle <bundle> --node normal-data-plane --output-dir <dir>` 把 `nodes/` 下的配置复制到隔离目录（`--bundle` 和 `--output-dir` 都是必填）；该命令不启动 Xray、不重启 Docker，随后的人工启动和验收步骤见[节点恢复](node-recovery.md)。不要直接覆盖运行中的配置。
+Compose 默认关闭远端采集和完整性门禁。完整节点备份需启用 `DB_BACKUP_SSH_COLLECTION_ENABLED`、`DB_BACKUP_SSH_COLLECTION_REQUIRED` 和 `DB_BACKUP_RECOVERY_REQUIRED`，并配置普通数据面目标、有效的 Tailscale CLI/socket 宿主机路径。缺少普通数据面目标或已配置节点缺少必需恢复文件时，门禁会阻止归档上传；未配置远端 AI 目标时，本机 AI 文件仍从控制面归档。
 
-## 只读验证命令
+## Manifest 与验证
 
-在控制面上执行采集器（不会触碰远端状态）：
+`nodes/remote-node-collection.json` 为每个远端角色和请求路径记录状态、目标、路径、文件大小、SHA-256、采集结果及 `recoveryReady`。归档根部的 `backup-manifest.json` 校验归档文件；`node-recovery-manifest.json` 描述恢复角色和便携路径。先用 `scripts/node_recovery.py validate --bundle <bundle> --require-ready` 检查，再运行 `prepare` 将节点文件复制到隔离目录；不要直接覆盖运行中的配置。恢复过程见[节点恢复](node-recovery.md)。
+
+可在控制面上验证普通数据面采集。若当前环境设置了 AI 目标别名，清除或显式覆盖它们，避免命令同时采集 AI 节点。
 
 ```bash
-DB_BACKUP_DATAPLANE_SSH_TARGET=root@YOUR_NORMAL_DATA_PLANE_HOST \
-DB_BACKUP_DATAPLANE_SSH_PORT=22 \
-DB_BACKUP_DATAPLANE_KNOWN_HOSTS=/root/.ssh/known_hosts \
-DB_BACKUP_DATAPLANE_REMOTE_PATHS=/root/xray-routing-panel/app/xray/runtime/config.json,/root/xray-routing-panel/app/xray/.env,/root/xray-routing-panel/app/xray/runtime/panel-ports.json,/root/xray-routing-panel/app/xray/runtime/dynamic-routing.json \
-python3 scripts/collect_remote_backup.py --output-dir /var/tmp/xray-remote-staging --required
+DB_BACKUP_SSH_TRANSPORT=tailscale \
+DB_BACKUP_TAILSCALE_BIN=/usr/bin/tailscale \
+DB_BACKUP_TAILSCALE_SOCKET=/var/run/tailscale/tailscaled.sock \
+DB_BACKUP_DATAPLANE_SSH_TARGET='root@<normal-data-plane-host>' \
+python3 scripts/collect_remote_backup.py \
+  --output-dir /var/tmp/xray-remote-staging --required
 ```
 
-上面的命令只验证普通数据面：它没有设置 AI 目标，因此 `remote-node-collection.json` 里 AI 角色会是 `skipped_no_target`，不会出现 `configCollected=true`。这个结论只在 `AI_NODE_SSH_TARGET` 也没有继承到当前环境时成立——采集器会回退到该变量，存在时仍会采集 AI 节点。采集器没有角色选择器，一次调用始终处理两个角色：普通数据面目标未提供时回退到内置目标，AI 角色只在 `DB_BACKUP_AI_NODE_SSH_TARGET` 或 `AI_NODE_SSH_TARGET` 已配置时执行。要在同一次验证里也检查 AI 数据面，需要在同一命令上追加该角色的目标、known_hosts 和远端路径变量，并确认它同样得到 `configCollected=true` 和 `recoveryReady=true`。该命令只在本地 staging 目录写入临时文件；远端命令只执行 `stat`/读取。
+## 故障排查
 
-## 排障顺序
+- `Tailscale SSH CLI is unavailable`：确认 `DB_BACKUP_TAILSCALE_BIN_HOST` 指向宿主机 CLI，并重建 broker 容器。
+- `Tailscale daemon socket is unavailable`：确认宿主机 `tailscaled` 正常运行，并检查 `DB_BACKUP_TAILSCALE_SOCKET_HOST`。
+- `Tailscale SSH broker is unavailable`：确认 broker 健康检查通过，备份容器的只读 socket 挂载正常。
+- `SSH collection failed`：确认 Tailscale ACL 授权 broker 身份连接目标，并在宿主机用同一目标执行只读 `tailscale ssh`。
+- `missing` 或 `partial`：根据文件级状态核实宿主机路径，并覆盖对应的 `*_REMOTE_PATHS`。
+- `too_large`：确认文件确属灾备范围后，再评估是否提高 `DB_BACKUP_SSH_MAX_FILE_BYTES`。
 
-1. `Permission denied`：采集器禁用公钥认证，且定时任务没有密码输入来源，因此需要确认目标已经按非交互方式授权控制面（例如 Tailscale SSH 的 ACL 授权），而不是临时打开密码认证；同时不要关闭严格主机校验。
-2. `Host key verification failed`：更新受控的对应 known_hosts 文件，先人工核对指纹，再重新执行。
-3. `missing`：通过只读 `docker inspect`、`systemctl cat` 或部署清单确认宿主机真实路径，再覆盖节点的 `*_REMOTE_PATHS`。
-4. `partial`：查看文件级 status；主配置缺失时不要把 `.env` 采集成功误判为完整配置。
-5. `too_large`：提高 `DB_BACKUP_SSH_MAX_FILE_BYTES` 前先确认该文件确实属于灾备范围，并评估归档大小和本地/R2 保留成本。
-
-SSH 采集失败不会触发节点重启、配置回滚或 DNS 切换；这些是独立运维流程。R2 上传仍只是加密后的异地灾备通道，不承担快速恢复。
+采集失败不会触发节点重启、配置回滚或 DNS 切换；这些属于独立运维流程。R2 仅保存加密灾备归档，不负责快速恢复。

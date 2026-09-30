@@ -43,7 +43,11 @@ class BackupCycleTest(unittest.TestCase):
             with mock.patch.object(module, "collect_remote_configs", return_value=mocked_result) as collect:
                 result = module.collect_remote_backup(staging)
 
-            collect.assert_called_once_with(node_staging, required=False)
+            collect.assert_called_once_with(
+                node_staging,
+                required=False,
+                raise_on_required=False,
+            )
             self.assertEqual(result, node_staging)
 
     def create_source_db(self, root):
@@ -100,6 +104,8 @@ class BackupCycleTest(unittest.TestCase):
                     "DB_BACKUP_DIR": str(backup_dir),
                     "DB_BACKUP_KEEP_DAYS": "7",
                     "DB_BACKUP_PREFIX": "panel-test",
+                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "0",
+                    "DB_BACKUP_RECOVERY_REQUIRED": "0",
                     "DB_BACKUP_R2_ENABLED": "0",
                 }
             )
@@ -131,7 +137,8 @@ class BackupCycleTest(unittest.TestCase):
                     "DB_BACKUP_PREFIX": "panel-test",
                     "DB_BACKUP_BUNDLE_DIR": str(backup_dir),
                     "DB_BACKUP_EXTRA_PATHS": "",
-                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "0",
+                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "1",
+                    "DB_BACKUP_SSH_COLLECTION_REQUIRED": "0",
                     "DB_BACKUP_RECOVERY_REQUIRED": "1",
                     "DB_BACKUP_R2_ENABLED": "0",
                 }
@@ -151,6 +158,35 @@ class BackupCycleTest(unittest.TestCase):
             status_path = backup_dir / "node-recovery-status.json"
             self.assertTrue(status_path.is_file())
             self.assertFalse(json.loads(status_path.read_text(encoding="utf-8"))["recoveryReady"])
+
+    def test_required_remote_collection_rejects_before_upload_even_when_recovery_gate_is_off(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = self.create_source_db(root)
+            backup_dir = root / "backups"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "DB_PATH": str(db_path),
+                    "DB_BACKUP_DIR": str(backup_dir),
+                    "DB_BACKUP_PREFIX": "panel-test",
+                    "DB_BACKUP_BUNDLE_DIR": str(backup_dir),
+                    "DB_BACKUP_EXTRA_PATHS": "",
+                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "1",
+                    "DB_BACKUP_SSH_COLLECTION_REQUIRED": "1",
+                    "DB_BACKUP_RECOVERY_REQUIRED": "0",
+                    "DB_BACKUP_R2_ENABLED": "1",
+                    "DB_BACKUP_ENCRYPTION_PASSWORD": "test-only-password",
+                }
+            )
+            module = load_module("run_db_backup_cycle_required_collection", RUN_CYCLE_SCRIPT)
+            with mock.patch.dict(os.environ, env, clear=True):
+                with mock.patch.object(module, "upload_bundle") as upload:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "required remote node collection is incomplete"
+                    ):
+                        module.main()
+            upload.assert_not_called()
 
     def test_run_db_backup_cycle_skips_cleanly_when_database_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

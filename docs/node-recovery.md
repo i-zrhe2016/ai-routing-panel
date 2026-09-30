@@ -16,7 +16,7 @@
 | 普通数据面 | 远端实际 `config.json`、远端 `.env` | `panel-ports.json`、`dynamic-routing.json`、客户端测试产物、最新 AI 报告 |
 | AI 数据面 | 远端模式：远端 `config.json` + `.env`；本机 Docker 模式：控制面 `config-ai-node.json` + `.env` | — |
 
-普通数据面默认通过内网直连的严格只读 SSH 采集，AI 节点有远端目标时同样采集；本机 Docker AI 节点直接读取控制面运行时目录。SSH 登录私钥、known_hosts、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
+完整节点模式通过宿主机 Tailscale SSH 严格只读采集普通数据面，AI 节点有远端目标时同样采集；Compose 默认关闭远端采集，本机 Docker AI 节点直接读取控制面运行时目录。Tailscale 身份、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
 
 默认远端路径如下；部署目录不同时必须显式设置 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`：
 
@@ -41,13 +41,14 @@
 
 备份任务完成后会在本地写出 `node-recovery-status.json`。`recoveryReady=true` 的含义是：共享 `panel.db` 存在，且当前已配置节点的必需配置和 `.env` 都已采集并通过哈希校验。
 
-节点暂时失联时，默认仍保留控制面数据库备份，但状态会明确显示该版本不能作为完整节点恢复包。可用最近一个 `recoveryReady=true` 的归档恢复；需要把完整性作为备份门禁时设置：
+完整节点模式下节点暂时失联会阻止该不完整归档继续上传，状态会明确显示缺失原因；可用最近一个 `recoveryReady=true` 的归档恢复。控制面-only 默认允许归档；若计划中的节点维护需要保留不完整归档，可显式关闭门禁：
 
 ```dotenv
-DB_BACKUP_RECOVERY_REQUIRED=1
+DB_BACKUP_RECOVERY_REQUIRED=0
+DB_BACKUP_SSH_COLLECTION_REQUIRED=0
 ```
 
-这会在生成归档并校验后阻止该不完整版本继续上传。节点失联时不要删除此前完整归档。
+Compose 和直接 cron 默认值均为 `0`，用于允许控制面-only 归档；启用完整节点模式时必须将两个变量都设为 `1`，生成归档并校验后会阻止不完整版本继续上传。节点失联时不要删除此前完整归档。
 
 ## 校验归档
 
@@ -103,7 +104,8 @@ data/uploads/                 # 业务附件
 .env                          # 控制面配置
 app/xray/                     # 控制面 Xray 配置和运行产物
 nodes/normal-data-plane/      # 普通数据面配置，独立目录
-nodes/ai-data-plane/          # AI 数据面配置，独立目录
+nodes/ai-data-plane/          # 单个兼容旧配置的 AI 数据面
+nodes/ai-data-plane-<node-id>/ # 多个远端 AI 节点按 node-id 分目录
 recovery/                     # 两层 manifest
 restore-report.json           # 非敏感恢复结果和完整性状态
 ```
@@ -134,12 +136,12 @@ docker compose -f docker-compose.node.yml up -d
 docker compose -f docker-compose.node.yml ps
 ```
 
-恢复 AI 数据面使用 `--node ai-data-plane` 和一个新的空目录。`prepare` 会生成标准目录、权限为 `0600` 的配置/`.env`、独立的 `docker-compose.node.yml` 和 `node-recovery.json`；默认拒绝向非空目录写入。只有明确确认目标内容后才使用 `--force`。
+恢复 AI 数据面使用清单中对应的 `--node` 值（单节点通常是 `ai-data-plane`，多节点是 `ai-data-plane-<node-id>`）和一个新的空目录。`prepare` 会生成标准目录、权限为 `0600` 的配置/`.env`、独立的 `docker-compose.node.yml` 和 `node-recovery.json`；默认拒绝向非空目录写入。只有明确确认目标内容后才使用 `--force`。
 
 恢复完成后按顺序执行：
 
 1. 用 `docker compose -f docker-compose.node.yml logs` 和 Xray 配置测试确认服务健康。
-2. 将新主机加入内网，确认 SSH 密码/键盘交互认证可用，并人工核对后更新 known_hosts。
+2. Tailscale 模式下，将新主机加入 Tailscale，确认目标主机启用 Tailscale SSH 且 ACL 允许控制面身份以目标用户登录；此模式不需要额外启用 OpenSSH 密码认证或配置 known_hosts。若使用 OpenSSH 兼容模式，则按 `remote-node-backup.md` 恢复受控的 OpenSSH/known_hosts 配置。
 3. 在控制面更新对应的 `DATAPLANE_SSH_TARGET` 或 `AI_NODE_SSH_TARGET`、远端配置路径和探测地址；AI 节点还要确认公网地址/端口与 `AI_UPSTREAM_*` 一致。
 4. 先做配置同步/探针/业务连接验证，再切换 DNS 或恢复流量。
 
