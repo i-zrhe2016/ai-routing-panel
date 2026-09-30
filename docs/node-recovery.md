@@ -16,7 +16,7 @@
 | 普通数据面 | 远端实际 `config.json`、远端 `.env` | `panel-ports.json`、`dynamic-routing.json`、客户端测试产物、最新 AI 报告 |
 | AI 数据面 | 远端模式：远端 `config.json` + `.env`；本机 Docker 模式：控制面 `config-ai-node.json` + `.env` | — |
 
-完整节点模式通过宿主机 Tailscale SSH 严格只读采集普通数据面，AI 节点有远端目标时同样采集；Compose 默认关闭远端采集，本机 Docker AI 节点直接读取控制面运行时目录。Tailscale 身份、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
+完整节点模式可通过隔离 broker 的只读挂载采集同机普通数据面，也可通过宿主机 Tailscale SSH 采集远端普通数据面；配置了远端目标的 AI 节点仍通过 Tailscale SSH 采集。Compose 默认关闭节点采集，本机 Docker AI 节点直接读取控制面运行时目录。Tailscale 身份、部署 Secret 和 R2 密钥不进入归档，必须放在独立的 Secret 管理位置。
 
 默认远端路径如下；部署目录不同时必须显式设置 `DB_BACKUP_DATAPLANE_REMOTE_PATHS`：
 

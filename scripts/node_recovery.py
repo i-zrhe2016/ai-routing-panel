@@ -201,7 +201,7 @@ def _remote_node_manifest(
     )
     return {
         "role": role,
-        "source": "remote-ssh",
+        "source": str(collection_node.get("source") or "remote-ssh"),
         "configured": configured,
         "target": str(collection_node.get("target", "")),
         "sshPort": str(collection_node.get("sshPort", "22")),

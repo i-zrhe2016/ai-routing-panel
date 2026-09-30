@@ -206,6 +206,62 @@ class NodeRecoveryTest(unittest.TestCase):
             {"remote-ssh"},
         )
 
+    def test_local_filesystem_collection_uses_distinct_recovery_source(self):
+        paths = (
+            "/root/xray-routing-panel/app/xray/runtime/config.json",
+            "/root/xray-routing-panel/app/xray/.env",
+        )
+        files = [
+            {
+                "archivePath": "database/panel.db",
+                "sourcePath": "/data/panel.db",
+                "size": 1,
+                "sha256": "database-hash",
+            }
+        ]
+        node_files = []
+        for index, (path, restore_path) in enumerate(
+            zip(paths, ("app/xray/runtime/config.json", "app/xray/.env"))
+        ):
+            staged = f"normal-data-plane/{path.lstrip('/')}"
+            files.append(
+                {
+                    "archivePath": f"nodes/{staged}",
+                    "sourcePath": path,
+                    "size": 1,
+                    "sha256": f"local-{index}",
+                }
+            )
+            node_files.append(
+                {
+                    "path": path,
+                    "status": "ok",
+                    "stagedPath": staged,
+                    "restorePath": restore_path,
+                }
+            )
+
+        manifest = self.recovery.build_node_recovery_manifest(
+            files,
+            {
+                "nodes": [
+                    {
+                        "role": "normal-data-plane",
+                        "target": "local",
+                        "source": "local-filesystem",
+                        "status": "ok",
+                        "requestedPaths": list(paths),
+                        "requiredPaths": list(paths),
+                        "files": node_files,
+                    }
+                ]
+            },
+        )
+
+        node = manifest["nodes"][0]
+        self.assertTrue(node["recoveryReady"])
+        self.assertEqual(node["source"], "local-filesystem")
+
     def test_recovery_role_validation_rejects_arbitrary_and_empty_ai_roles(self):
         self.assertTrue(self.recovery.is_recoverable_role("ai-data-plane-hawaii"))
         self.assertFalse(self.recovery.is_recoverable_role("evil-node"))

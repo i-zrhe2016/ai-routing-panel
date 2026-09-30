@@ -205,7 +205,8 @@ def enforce_recovery_readiness(bundle_path):
     recovery_gate_enabled = env_enabled("DB_BACKUP_RECOVERY_REQUIRED", "0")
     collection_gate_enabled = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "0")
     remote_collection_incomplete = any(
-        node.get("source") == "remote-ssh" and not node.get("recoveryReady", False)
+        node.get("source") in {"remote-ssh", "local-filesystem"}
+        and not node.get("recoveryReady", False)
         for node in validated["nodeManifest"].get("nodes", [])
     )
     collection = validated.get("remoteCollection")

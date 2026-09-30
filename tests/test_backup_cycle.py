@@ -188,6 +188,40 @@ class BackupCycleTest(unittest.TestCase):
                         module.main()
             upload.assert_not_called()
 
+    def test_incomplete_local_collection_fails_required_collection_gate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle = root / "incomplete.tar.gz"
+            bundle.touch()
+            module = load_module("run_db_backup_cycle_local_collection_gate", RUN_CYCLE_SCRIPT)
+            validated = {
+                "readiness": {"recoveryReady": False, "sharedReady": True, "nodes": []},
+                "nodeManifest": {
+                    "nodes": [
+                        {
+                            "role": "normal-data-plane",
+                            "source": "local-filesystem",
+                            "recoveryReady": False,
+                        }
+                    ]
+                },
+                "remoteCollection": None,
+            }
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "DB_BACKUP_SSH_COLLECTION_ENABLED": "1",
+                    "DB_BACKUP_SSH_COLLECTION_REQUIRED": "1",
+                    "DB_BACKUP_RECOVERY_REQUIRED": "0",
+                },
+                clear=False,
+            ):
+                with mock.patch.object(module, "validate_backup_bundle", return_value=validated):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "required remote node collection is incomplete"
+                    ):
+                        module.enforce_recovery_readiness(bundle)
+
     def test_run_db_backup_cycle_skips_cleanly_when_database_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

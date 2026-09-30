@@ -231,6 +231,10 @@ def _validate_remote_payload(payload: object, role: str) -> dict:
     return payload
 
 
+def collection_source(node: RemoteNode) -> str:
+    return "local-filesystem" if node.target.strip().lower() == "local" else "remote-ssh"
+
+
 def parse_paths(value: str, defaults: tuple[str, ...] = ()) -> tuple[str, ...]:
     items = []
     seen = set()
@@ -495,7 +499,135 @@ def _read_broker_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
     return _validate_remote_payload(envelope.get("payload"), node.role)
 
 
+def _read_local_payload(node: RemoteNode, max_bytes: int) -> dict:
+    if node.role != "normal-data-plane":
+        raise ValueError("local collection is only supported for the normal data plane")
+
+    root = Path(node.restore_root).expanduser()
+    if not root.is_absolute():
+        raise ValueError("local collection requires an absolute deployment root")
+    root_path = Path(os.path.abspath(root))
+    try:
+        resolved_root = root.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("local normal data-plane root is unavailable") from exc
+    if resolved_root == Path("/"):
+        raise ValueError("local collection deployment root cannot be filesystem root")
+
+    max_bytes = max(1, max_bytes)
+    files = []
+    for raw_path in node.paths:
+        path = Path(os.path.expanduser(raw_path))
+        item = {"path": str(path), "exists": False, "status": "missing"}
+        if not path.is_absolute() or ".." in path.parts:
+            item.update(
+                {
+                    "status": "outside_root",
+                    "error": "path outside configured deploy root",
+                }
+            )
+            files.append(item)
+            continue
+        try:
+            path.relative_to(root_path)
+        except ValueError:
+            item.update(
+                {
+                    "status": "outside_root",
+                    "error": "path outside configured deploy root",
+                }
+            )
+            files.append(item)
+            continue
+
+        try:
+            parent = path.parent.resolve(strict=True)
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            item["status"] = "unreadable" if isinstance(exc, PermissionError) else "missing"
+            files.append(item)
+            continue
+        if parent != resolved_root and resolved_root not in parent.parents:
+            item.update(
+                {
+                    "status": "outside_root",
+                    "error": "path outside configured deploy root",
+                }
+            )
+            files.append(item)
+            continue
+
+        local_path = parent / path.name
+        try:
+            metadata = os.lstat(local_path)
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            item["status"] = "unreadable" if isinstance(exc, PermissionError) else "missing"
+            files.append(item)
+            continue
+
+        item.update(
+            {
+                "exists": True,
+                "mode": stat.S_IMODE(metadata.st_mode),
+                "mtime": float(metadata.st_mtime),
+                "size": int(metadata.st_size),
+            }
+        )
+        if not stat.S_ISREG(metadata.st_mode):
+            item["status"] = "not_regular_file"
+            files.append(item)
+            continue
+        if metadata.st_size > max_bytes:
+            item["status"] = "too_large"
+            files.append(item)
+            continue
+
+        fd = None
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(local_path, flags)
+            opened = os.fstat(fd)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_dev != metadata.st_dev
+                or opened.st_ino != metadata.st_ino
+            ):
+                item["status"] = "changed"
+                files.append(item)
+                continue
+            with os.fdopen(fd, "rb") as handle:
+                fd = None
+                data = handle.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                item["status"] = "too_large"
+                files.append(item)
+                continue
+            item.update(
+                {
+                    "status": "ok",
+                    "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "data_base64": base64.b64encode(data).decode("ascii"),
+                }
+            )
+        except (PermissionError, OSError) as exc:
+            item["status"] = "unreadable"
+            item["error"] = type(exc).__name__
+        finally:
+            if fd is not None:
+                os.close(fd)
+        files.append(item)
+    return {"version": 1, "role": node.role, "files": files}
+
+
 def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
+    transport = ssh_transport()
+    if transport == "tailscale-broker":
+        return _read_broker_remote(node, timeout, max_bytes)
+    if node.target.strip().lower() == "local":
+        if transport != "tailscale":
+            raise ValueError("local collection requires the Tailscale transport")
+        return _validate_remote_payload(_read_local_payload(node, max_bytes), node.role)
+
     remote_command = " ".join(
         shlex.quote(value)
         for value in (
@@ -508,9 +640,6 @@ def read_remote(node: RemoteNode, timeout: int, max_bytes: int) -> dict:
             *node.paths,
         )
     )
-    transport = ssh_transport()
-    if transport == "tailscale-broker":
-        return _read_broker_remote(node, timeout, max_bytes)
     if transport == "tailscale":
         if node.options:
             raise ValueError("SSH options are not supported with Tailscale SSH transport")
@@ -590,6 +719,7 @@ def write_collection(output_dir: Path, node: RemoteNode, payload: dict) -> dict:
     result = {
         "role": node.role,
         "target": node.target,
+        "source": collection_source(node),
         "sshPort": node.ssh_port,
         "knownHosts": node.known_hosts,
         "requestedPaths": list(node.paths),
@@ -682,6 +812,7 @@ def collect_nodes(
                 {
                     "role": node.role,
                     "target": node.target,
+                    "source": collection_source(node),
                     "sshPort": node.ssh_port,
                     "knownHosts": node.known_hosts,
                     "status": "failed" if missing_target else "skipped_no_target",
@@ -704,6 +835,7 @@ def collect_nodes(
                 {
                     "role": node.role,
                     "target": node.target,
+                    "source": collection_source(node),
                     "sshPort": node.ssh_port,
                     "knownHosts": node.known_hosts,
                     "requestedPaths": list(node.paths),

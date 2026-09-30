@@ -154,6 +154,10 @@ services:
       # Only this isolated broker sees the host Tailscale CLI and LocalAPI.
       - ${DB_BACKUP_TAILSCALE_BIN_HOST:-./scripts/tailscale-disabled}:/usr/local/bin/tailscale:ro
       - ${DB_BACKUP_TAILSCALE_SOCKET_HOST:-./scripts/tailscale-disabled}:/var/run/tailscale/tailscaled.sock:ro
+      # Optional local normal-node mounts; configure host paths only when the
+      # normal data plane shares this host. The broker can read these files only.
+      - ${DB_BACKUP_DATAPLANE_LOCAL_RUNTIME_HOST:-./scripts/backup-local-disabled/runtime}:${DB_BACKUP_DATAPLANE_DEPLOY_ROOT:-/root/xray-routing-panel}/app/xray/runtime:ro
+      - ${DB_BACKUP_DATAPLANE_LOCAL_ENV_HOST:-./scripts/backup-local-disabled/local-env-placeholder}:${DB_BACKUP_DATAPLANE_DEPLOY_ROOT:-/root/xray-routing-panel}/app/xray/.env:ro
       - xray-routing-panel-db-backup-tailscale-socket:/var/run/xray-backup
     healthcheck:
       test: ["CMD-SHELL", "test -S \"$${DB_BACKUP_TAILSCALE_BROKER_SOCKET:-/var/run/xray-backup/tailscale-ssh.sock}\""]

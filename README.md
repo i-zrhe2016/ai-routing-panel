@@ -113,7 +113,7 @@ DB_BACKUP_ENCRYPTION_PASSWORD='separate-archive-password' \
 docker compose up -d --build xray-routing-panel-db-backup
 ```
 
-控制面额外文件和本机 AI 配置通过 `DB_BACKUP_EXTRA_PATHS` 归档。Compose 默认关闭远端节点采集；启用完整节点模式后，备份容器才会通过隔离 broker 以只读 Tailscale SSH 采集普通数据面和已配置的远端 AI 节点。完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)、[远端节点配置采集](docs/remote-node-backup.md)和[节点快速恢复](docs/node-recovery.md)。
+控制面额外文件和本机 AI 配置通过 `DB_BACKUP_EXTRA_PATHS` 归档。Compose 默认关闭节点采集；启用完整节点模式后，隔离 broker 可从两个只读挂载采集同机普通数据面，或用 Tailscale SSH 采集远端普通/AI 节点。完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)、[节点配置采集](docs/remote-node-backup.md)和[节点快速恢复](docs/node-recovery.md)。
 
 ### 默认访问地址
 
@@ -210,7 +210,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 
 - [AI 路由](docs/ai-routing.md) — 域名分类、动态规则、AI 上游选择和故障回退。
 - [灾备归档与 R2 上传通道](docs/disaster-backup.md) — 配置文件等额外内容的归档、R2 异地保留和离线恢复边界。
-- [远端节点配置采集](docs/remote-node-backup.md) — 通过严格只读 SSH 采集普通数据面实际配置；本机 AI 配置随控制面归档。
+- [节点配置采集](docs/remote-node-backup.md) — 同机普通数据面使用 broker 只读挂载，远端节点使用严格只读 SSH；本机 AI 配置随控制面归档。
 - [节点备份完整性与快速恢复](docs/node-recovery.md) — 节点必需材料校验和可直接启动的替换目录。
 - [Cloudflare R2 灾备上传](docs/db-backup-uploader.md) — 加密上传、对象命名、安全边界和人工恢复。
 

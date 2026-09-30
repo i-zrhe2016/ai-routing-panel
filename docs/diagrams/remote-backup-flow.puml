@@ -1,31 +1,33 @@
 @startuml
 !theme plain
-title Read-only remote node configuration backup
+title Read-only node configuration backup
 left to right direction
 
 rectangle "Control plane\nbackup service" as control #AED6F1
-component "collect_remote_backup.py\nSSH read-only collector" as collector #D7BDE2
-node "Normal data plane\nconfigured SSH target\nconfigured host path" as normal #A9DFBF
-node "AI data plane\noptional SSH target\nown known_hosts + host path" as ai #A9DFBF
+component "collect_remote_backup.py\nscoped broker client" as collector #D7BDE2
+component "Isolated broker\nrole-scoped file reads" as broker #D5F5E3
+node "Normal data plane\nlocal: mounted runtime + .env\nremote: Tailscale SSH" as normal #A9DFBF
+node "AI data plane\noptional Tailscale SSH\nown host path" as ai #A9DFBF
 component "build_backup_bundle.py\nlocal tar.gz + SHA-256 manifest" as bundle #FAD7A0
 component "upload_backup_r2.py\nAES-256-GCM + R2 upload" as uploader #FAD7A0
 cloud "Cloudflare R2\nremote disaster archive" as r2 #F9E79F
 database "SQLite snapshot\npanel.db" as db #D3D3D3
 
 control --> collector : scheduled cycle
-collector --> normal : SSH\nstat/read regular files
-collector ..> ai : SSH when target set\nstat/read regular files
+collector --> broker : scoped Unix socket request
+broker --> normal : local read-only mounts
+broker ..> normal : Tailscale SSH when remote
+broker ..> ai : Tailscale SSH when target set
 collector --> bundle : staged nodes/\ncollection manifest
 db --> bundle : database/
-bundle --> uploader : encrypted input archive
+bundle --> uploader : validated input archive
 uploader --> r2 : encrypted archive\nobject key + SHA-256
 
-note right of collector
-  StrictHostKeyChecking=yes
-  PubkeyAuthentication=no
-  PreferredAuthentications=password,keyboard-interactive
-  UserKnownHostsFile per node
-  No remote writes/restarts
+note right of broker
+  Local mode is restricted to the
+  configured deployment root.
+  Remote mode reads regular files only.
+  No node writes or service restarts.
 end note
 
 note bottom of ai
