@@ -1,6 +1,8 @@
 # SQLite 报告运行审计与历史归档
 
-> 权威范围：SQLite 在 Prometheus-only 方案中的唯一用途
+> Type: Reference
+> Status: Active
+> Scope: SQLite 报告运行审计与历史归档
 
 SQLite 仅用于报告运行审计和历史报告归档索引，不是遥测数据库。
 

@@ -1,8 +1,8 @@
 # SSH 日志采集器停用说明
 
-> 状态：已停用，不得部署
-> 权威范围：旧 `xray-ops-log-collector` 的生命周期状态
-> 最后核验日期：2026-07-31
+> Type: Runbook
+> Status: Deprecated
+> Scope: SSH 日志采集器停用说明
 
 `xray-ops-log-collector` 已从运行 Compose 和生产容器中移除。Reporter 不通过 SSH 连接数据面，不读取或保存 Xray、Docker、systemd 原始日志，也不再写入日志游标、raw events、五分钟日志 rollup 或采集缺口记录。AI exporter 的指标传输可以使用控制面的专用 SSH 回环隧道，但该隧道不属于 Reporter，也不承载日志或远程命令。
 

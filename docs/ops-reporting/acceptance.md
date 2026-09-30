@@ -1,6 +1,8 @@
 # Prometheus 与脱敏归因验收标准
 
-> 权威范围：上线完成定义与安全门禁
+> Type: Reference
+> Status: Active
+> Scope: Prometheus 与脱敏归因验收标准
 
 ## 上线门禁
 

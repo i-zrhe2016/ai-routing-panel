@@ -1,5 +1,9 @@
 # Clash REALITY 健康检查超时排障记录
 
+> Type: Runbook
+> Status: Active
+> Scope: Clash REALITY 健康检查超时排障记录
+
 本文记录 2026-09-03 `ai.zrhe2016.cc:31098` 在 Clash 中显示 `check timeout` 的故障定位、修复和验收结果。文档只记录故障边界与可复用步骤，不记录订阅令牌、UUID、REALITY 私钥或其他租户凭据。
 
 ## 2026-09-17 数据面 Xray 启动失败：残留 Unix Socket

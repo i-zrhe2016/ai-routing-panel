@@ -2,7 +2,7 @@
 
 > Type: Reference
 > Status: Active
-> Scope: Runtime configuration variables for the control plane, data planes, AI routing, and disaster backup
+> Scope: 控制面、普通与 AI 数据面、AI 路由和灾备的运行时配置变量
 
 - 配置入口
   - 根目录 `.env`：面板地址、管理员认证、AI 路由开关、远端数据面接入参数、AI 节点纳管参数

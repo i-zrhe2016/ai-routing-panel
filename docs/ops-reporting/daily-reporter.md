@@ -1,12 +1,14 @@
 # 每日日报器
 
-> 权威范围：Prometheus 查询、脱敏归因快照、AI 域名聚合、规则执行和报告发布
+> Type: Architecture
+> Status: Active
+> Scope: Prometheus 查询、脱敏归因、AI 域名聚合、规则与 Codex 执行和报告发布
 
 日报器每天按 `Asia/Shanghai` 自然日查询 Prometheus HTTP API，并读取本地 SQLite 中已脱敏的 Xray counter 快照。日报器本身不访问 SSH，不读取原始日志，不部署 exporter，也不执行修复。
 
 当前日报 JSON/Markdown 契约版本为 `1.1`；旧版 `1.0` 报告不会被当作当前日期的完整报告，调度器会在下一次运行时重新生成。
 
-截至 2026-08-05，生产日报器以 `OPS_FORCE_RULES_ONLY=1` 影子模式运行。首份 2026-08-04 报告因窗口早于 Prometheus 上线而为 `unknown`，仅用于验证缺口处理、审计和原子发布，不作为业务状态结论。
+2026-08-05 的历史部署记录中，日报器以 `OPS_FORCE_RULES_ONLY=1` 影子模式运行。首份 2026-08-04 报告因窗口早于 Prometheus 上线而为 `unknown`，仅用于验证缺口处理、审计和原子发布，不作为业务状态结论。
 
 ## 生成流程
 
@@ -56,7 +58,9 @@ AI 域名分析使用 `ai_domain_analysis` 字段写入日报 JSON，并在 Mark
 
 小时域名历史是请求命中次数和路由状态的来源，`panel.db` 以只读方式补充 AI 域名的累计分类、来源和每小时观察。日报不会读取原始访问日志，也不会把当前出口倒推成没有历史记录的过去出口。
 
-数据流图：[AI 域名日报汇总](diagrams/ai-domain-daily-report.svg) · [PlantUML 源文件](diagrams/ai-domain-daily-report.puml)
+![AI 域名日报汇总](diagrams/ai-domain-daily-report.svg)
+
+[PlantUML 源文件](diagrams/ai-domain-daily-report.puml)
 
 ## 脱敏归因
 

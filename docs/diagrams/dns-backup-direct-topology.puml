@@ -1,0 +1,10 @@
+@startuml
+!include style.iuml
+title 普通数据面与 AI 候选均故障后的直出路径
+left to right direction
+actor "客户端" as client
+cloud "互联网" as internet
+component "控制面备用 Xray\nbackup IP" as entry
+client --> entry : DNS 指向 backup
+entry --> internet : 所有流量 / freedom
+@enduml

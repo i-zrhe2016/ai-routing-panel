@@ -1,0 +1,19 @@
+@startuml
+!include style.iuml
+title ChatGPT 请求链路
+top to bottom direction
+actor "ChatGPT 客户端" as client
+component "普通数据面\nVLESS + REALITY inbound" as normal
+component "ai_proxy\nVLESS + REALITY outbound" as proxy
+component "选中的 AI 上游\n当前主候选：台湾节点" as candidate
+component "AI 节点\nVLESS + REALITY inbound" as ai
+component "freedom 出站" as egress
+cloud "OpenAI HTTPS" as openai
+client --> normal
+normal --> proxy : ChatGPT / OpenAI 域名规则命中
+proxy --> candidate
+candidate --> ai
+ai --> egress
+egress --> openai
+
+@enduml

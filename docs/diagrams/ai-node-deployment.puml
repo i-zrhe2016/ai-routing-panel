@@ -1,0 +1,19 @@
+@startuml
+!include style.iuml
+title AI 节点业务与管理边界
+left to right direction
+component "控制面" as panel
+component "普通数据面" as normal
+node "台湾 AI 节点" as ai {
+  component "VLESS + REALITY\n:27166" as inbound
+  component "freedom 出站" as egress
+  component "独立 AI 日志与监控" as telemetry
+}
+cloud "互联网" as internet
+panel ..> ai : SSH 纳管
+normal --> inbound : VLESS + REALITY
+inbound --> egress
+egress --> internet
+inbound ..> telemetry
+
+@enduml

@@ -1,0 +1,23 @@
+@startuml
+!include style.iuml
+title 备用 Xray 模式维护
+start
+:探测普通数据面与 AI 候选池;
+if (当前处于 backup 模式？) then (是)
+  if (至少一个 AI 候选可达？) then (是)
+    :目标模式 relay;
+  else (否)
+    :目标模式 freedom 直出;
+  endif
+  if (当前配置与目标模式不同？) then (是)
+    :重新渲染 config-backup.json\n并重启备用 Xray;
+  endif
+else (primary)
+  :备用 Xray 待命;
+endif
+if (本轮从 backup 回切 primary？) then (是)
+  :恢复 relay 配置供下次接管;
+endif
+stop
+
+@enduml

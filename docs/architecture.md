@@ -1,5 +1,9 @@
 # 架构说明
 
+> Type: Architecture
+> Status: Active
+> Scope: 组件职责、依赖方向、节点后端与主要数据流
+
 ## 总览
 
 控制面负责编排普通数据面，并通过内网 SSH 直连纳管远端节点；AI 路由支持主、备候选和自动探测，当前生产仅保留台湾 AI 节点作为主候选。用户代理流量的正常路径不依赖控制面在线：
@@ -25,9 +29,9 @@
 
 ## 已部署扩展：Prometheus-only 每日节点运维分析
 
-生产环境已部署 Prometheus、Grafana 和 `xray-ops-daily-reporter`。普通数据面由 Prometheus 直接抓取 exporter；AI 数据面位于 NAT 后，由控制面的专用 SSH 回环隧道转发 exporter HTTP。Reporter 只查询 Prometheus HTTP API，以确定性规则生成 JSON/Markdown 影子报告，并仅在 SQLite 保存 `report_runs` 审计。
+仓库提供 Prometheus、Grafana 和 `xray-ops-daily-reporter` 部署配置。当前 Prometheus 配置通过 Tailscale 管理网络直接抓取普通数据面和台湾 AI 节点的 exporter。Reporter 查询 Prometheus HTTP API，并可读取本地脱敏归因快照与 AI 域名聚合，生成 JSON/Markdown 报告；详细职责和持久化边界见[每日日报器](ops-reporting/daily-reporter.md)。
 
-该子系统不进入用户流量路径。旧 SSH/raw-log Collector 已从生产删除，Reporter 不挂载 SSH 凭据、不执行远程命令，也不读取 Xray、Docker 或 systemd 原始日志。当前仍为 `rules_only` 影子模式，正式验收边界见[每日节点运维分析](ops-reporting/index.md)，日常问题见[故障排查手册](ops-reporting/troubleshooting.md)。
+该子系统不进入用户流量路径。旧 SSH/raw-log Collector 已从生产删除，Reporter 不挂载 SSH 凭据、不执行远程命令，也不读取 Xray、Docker 或 systemd 原始日志。正常日报通过确定性规则和 Codex 生成报告；`rules_only` 仅用于显式的影子或维护运行。报告生成契约见[每日日报器](ops-reporting/daily-reporter.md)，验收边界见[每日节点运维分析](ops-reporting/index.md)，日常问题见[故障排查手册](ops-reporting/troubleshooting.md)。
 
 ## 组件职责
 

@@ -75,45 +75,7 @@ docker compose --profile backup-xray up -d xray-reality-backup
 
 更多模式和排障命令见[开发与启动](docs/development.md)和[运维与排障](docs/operations.md)。
 
-启用 Fluent Bit 三节点日志采集：
-
-```bash
-# 在日志中心主机
-cd monitoring/loki
-cp .env.example .env
-# 编辑 .env，设置 LOKI_TAILNET_BIND_ADDRESS
-docker compose up -d
-
-# 在控制面、普通数据面、AI 数据面分别执行
-cd ../fluent-bit
-cp .env.example .env
-# 编辑 .env，设置节点角色、主机名、Xray 日志目录和 Loki Tailscale 地址
-docker compose -f docker-compose.agent.yml up -d
-
-# 在 Grafana/Prometheus 所在控制面
-cd ../..
-cp monitoring/.env.example monitoring/.env
-# 编辑 monitoring/.env，设置 GRAFANA_LOKI_URL
-docker compose -f monitoring/docker-compose.monitoring.yml up -d prometheus grafana
-```
-
-日志采集边界见 [Fluent Bit 日志采集](docs/logging-fluent-bit.md)。
-
-当前生产环境的控制面为内网地址 `<control-plane Tailscale IP>`，同时运行本机 AI 备用；普通数据面为 `<data-plane Tailscale IP>`，由控制面通过内网 SSH 直连纳管。控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
-
-启用配置归档并通过 Cloudflare R2 保存异地灾备版本（不用于快速恢复）：
-
-```bash
-DB_BACKUP_R2_ENABLED=1 \
-DB_BACKUP_R2_ENDPOINT='https://<account-id>.r2.cloudflarestorage.com' \
-DB_BACKUP_R2_BUCKET='xray-routing-panel-disaster' \
-DB_BACKUP_R2_ACCESS_KEY_ID='replace-with-access-key' \
-DB_BACKUP_R2_SECRET_ACCESS_KEY='replace-with-secret-key' \
-DB_BACKUP_ENCRYPTION_PASSWORD='separate-archive-password' \
-docker compose up -d --build xray-routing-panel-db-backup
-```
-
-控制面额外文件和本机 AI 配置通过 `DB_BACKUP_EXTRA_PATHS` 归档。Compose 默认关闭节点采集；启用完整节点模式后，隔离 broker 可从两个只读挂载采集同机普通数据面，或用 Tailscale SSH 采集远端普通/AI 节点。完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)、[节点配置采集](docs/remote-node-backup.md)和[节点快速恢复](docs/node-recovery.md)。
+日志采集、远端节点纳管和灾备配置分别见[日志采集](docs/logging-fluent-bit.md)、[内网 SSH 纳管](docs/ssh-key-access.md)和[灾备归档](docs/disaster-backup.md)。
 
 ### 默认访问地址
 
@@ -131,61 +93,22 @@ docker compose up -d --build xray-routing-panel-db-backup
 
 页面、认证和 JSON API 见 [API 文档](docs/api.md)。
 
-## 按场景阅读
-
-| 场景 | 首选文档 |
-| --- | --- |
-| 第一次了解项目 | [项目概览](docs/project-overview.md) → [架构说明](docs/architecture.md) → [配置说明](docs/configuration.md) |
-| 本地开发或启动控制面 | [开发与启动](docs/development.md) |
-| 管理远端普通数据面 | [架构说明](docs/architecture.md) → [内网 SSH 纳管](docs/ssh-key-access.md) |
-| 部署独立 AI 数据面 | [AI 节点部署](docs/ai-node-deployment.md) → [AI 节点独立凭据](docs/ai-node-credentials.md) |
-| 查看 AI 主机与容器监控 | [AI 节点部署](docs/ai-node-deployment.md#ai-节点监控采集) → [运维与排障](docs/operations.md#prometheus-监控metrics) |
-| 排查 ChatGPT/OpenAI 路由 | [ChatGPT 路由排障](docs/chatgpt-routing-troubleshooting.md) |
-| 排查 Clash REALITY 节点测速超时 | [Clash REALITY 健康检查超时排障](docs/troubleshooting/clash-reality-health-check-timeout.md) |
-| 配置故障切换 | [DNS 故障切换](docs/dns-failover.md) → [三节点容错](docs/fault-tolerance.md) |
-| 查询三节点日志 | [Fluent Bit 日志采集](docs/logging-fluent-bit.md) |
-| 监控节点和生成日报 | [Prometheus-only 运维分析](docs/ops-reporting/index.md) |
-| 迁移或灾难恢复 | [面板迁移](docs/panel-migration.md) → [灾备归档](docs/disaster-backup.md) → [节点快速恢复](docs/node-recovery.md) |
-| AWS 普通数据面迁移 | [AWS 普通数据面迁移与回退](docs/aws-normal-data-plane-migration.md) |
-
 ## 开发与验证
 
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[dev]'
-PYTHONPATH=. python -m pytest -q
-ruff check .
-black --check .
-```
-
-`PYTHONPATH=.` 在 `python -m pytest` 下是冗余的（`-m` 已把当前目录加入 `sys.path`）；保留它是
-为了让直接调用 `pytest` 控制台脚本时行为一致——`tests/` 没有 `__init__.py`，控制台脚本会把
-`tests/` 而非仓库根加入 `sys.path`，省略前缀会有 28 个测试文件在收集阶段报错。`ruff` 和
-`black` 目前只是本地建议，尚未纳入 CI——现有代码库仍有存量问题需要先清理。
-
-前端发布资源仍随仓库保存在 `app/static/{admin,portal,landing}`，运行时和镜像内不需要 JavaScript 构建工具。
-Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会将 Admin bundle 写入
-`app/static/admin/`，再由 Flask/Docker 直接发布。
-
-指向 `main` 的 PR 和推送到 `main` 的提交都会自动运行后端测试、前端测试和 Admin 构建，
-并校验已提交的构建产物与源码一致（不一致会阻塞合并）。见
-[持续集成](docs/development.md#持续集成)。
-
-完整流程见[开发与启动](docs/development.md)。
+开发环境、后端测试、前端构建和 CI 检查统一见[开发与启动](docs/development.md)。
 
 ## 完整文档导航
 
-`docs/` 是详细文档的权威目录；[文档首页](docs/index.md)提供与本节一致的内部索引。
+本节是项目唯一完整文档导航。详细说明保存在 `docs/`，各专题通过交叉链接引用相关内容。
 
 ### 开始使用
 
-- [文档首页](docs/index.md) — 阅读顺序和完整索引。
 - [仓库当前状态](docs/Repo_Current_State.md) — 已核实的实现、验证限制与当前工作状态。
-- [项目概览](docs/project-overview.md) — 项目定位、核心能力、架构摘要和快速开始。
+- [项目概览](docs/project-overview.md) — 项目定位、能力边界、阅读顺序和代码入口。
 - [架构说明](docs/architecture.md) — 控制面、普通数据面、AI 数据面、组件边界和数据流。
 - [配置说明](docs/configuration.md) — 根 `.env`、Xray 环境变量及各模块配置。
 - [开发与启动](docs/development.md) — 本地开发、Docker 启动、测试和调试。
+- [文档与图表维护约定](docs/documentation.md) — 文档归属、状态标记和 PlantUML 本地渲染。
 
 ### 部署、凭据与迁移
 
@@ -193,6 +116,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 - [AI 节点独立凭据](docs/ai-node-credentials.md) — AI inbound/outbound 凭据边界和轮换要求。
 - [控制面访问与来源白名单](docs/panel-access.md) — Tailscale/内网直连、无登录控制台和 403 边界。
 - [内网 SSH 纳管](docs/ssh-key-access.md) — 控制面直连普通数据面的认证、主机指纹校验与验证。
+- [Clash 统一 443 入口](docs/unified-entry.md) — 新旧订阅兼容、HAProxy 网关、计费与回退。
 - [面板迁移](docs/panel-migration.md) — 控制面数据、配置和服务迁移流程。
 - [AWS 普通数据面迁移与回退](docs/aws-normal-data-plane-migration.md) — 普通数据面灰度迁移、AWS 安全组门禁和回退步骤。
 
@@ -216,7 +140,7 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 
 ### Prometheus-only 运维分析
 
-- [模块首页](docs/ops-reporting/index.md) — 模块边界、生产状态和子模块导航。
+- [模块边界](docs/ops-reporting/index.md) — 模块职责与历史部署记录。
 - [Exporter 部署与网络隔离](docs/ops-reporting/exporter-deployment.md) — Node Exporter、cAdvisor 和网络访问边界。
 - [Prometheus Targets 与 Labels](docs/ops-reporting/prometheus-targets.md) — 抓取目标、标签及查询约束。
 - [故障判定规则边界](docs/ops-reporting/fault-classification.md) — 可判定能力、证据组合和 unknown 边界。
@@ -231,8 +155,8 @@ Admin 控制台的源码与 Vite 构建配置位于 `frontend/`；构建后会�
 
 以下文档用于追溯历史决策，不代表当前推荐部署方式：
 
-- [Reality dest 修复与多端口最终状态](docs/PORT443_PER_USER_MIGRATION.md) — 历史生产修复和验证记录。
-- [Prometheus-only 生产部署状态](docs/ops-reporting/deployment.md) — 历史部署状态记录；现行入口见模块首页。
+- [REALITY dest 修复与多端口迁移历史](docs/reality-dest-migration-history.md) — 历史生产修复和验证记录。
+- [Prometheus-only 生产部署状态](docs/ops-reporting/deployment.md) — 历史部署状态记录；现行行为见每日日报器。
 - [SSH 日志采集器停用说明](docs/ops-reporting/log-collector.md) — 已停用方案及迁移背景。
 
 ## 安全边界

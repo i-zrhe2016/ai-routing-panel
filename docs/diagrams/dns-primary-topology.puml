@@ -1,0 +1,13 @@
+@startuml
+!include style.iuml
+title 正常运行时的 DNS 与流量路径
+left to right direction
+actor "客户端" as client
+cloud "互联网" as internet
+component "普通数据面\nprimary IP" as entry
+component "AI 节点" as ai
+client --> entry : DNS 指向 primary
+entry --> internet : 普通流量 / freedom
+entry --> ai : AI 域名
+ai --> internet : freedom
+@enduml

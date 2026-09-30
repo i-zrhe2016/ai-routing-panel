@@ -1,14 +1,6 @@
 @startuml
-!theme plain
+!include ../../diagrams/style.iuml
 left to right direction
-skinparam backgroundColor #FFFFFF
-skinparam componentStyle rectangle
-skinparam shadowing false
-skinparam roundcorner 10
-skinparam ArrowColor #334155
-skinparam ArrowThickness 1.2
-skinparam defaultFontName Arial
-skinparam defaultTextAlignment center
 
 title Exporter Network Isolation
 
@@ -16,7 +8,6 @@ actor "Untrusted Internet Client" as publicClient
 
 node "Control Plane" as control #EFF6FF {
   component "Prometheus\nloopback API only" as prometheus #FEE2E2
-  component "AI Exporter SSH Tunnel\nloopback forwards only" as tunnel #E0E7FF
 }
 
 node "Normal Data Plane" as normal #ECFDF5 {
@@ -25,20 +16,20 @@ node "Normal Data Plane" as normal #ECFDF5 {
   component "cAdvisor" as normalCadvisor #F8FAFC
 }
 
-node "AI Data Plane behind NAT" as ai #FFF7ED {
-  component "No Public Exporter Mapping" as natBoundary #FEF3C7
+node "Taiwan AI Data Plane" as ai #FFF7ED {
+  component "Tailscale + Host Firewall\nno public exporter mapping" as aiFirewall #FEF3C7
   component "node-exporter" as aiNode #F8FAFC
   component "cAdvisor" as aiCadvisor #F8FAFC
 }
 
 publicClient -[#DC2626,dashed]-> normalFirewall : denied
-publicClient -[#DC2626,dashed]-> natBoundary : no route
+publicClient -[#DC2626,dashed]-> aiFirewall : denied
 prometheus --> normalFirewall : restricted scrape
 normalFirewall --> normalNode
 normalFirewall --> normalCadvisor
-tunnel --> aiNode : SSH-forwarded HTTP
-tunnel --> aiCadvisor : SSH-forwarded HTTP
-prometheus --> tunnel : redacted-ip-007 only
+prometheus --> aiFirewall : restricted Tailscale scrape
+aiFirewall --> aiNode : :9100
+aiFirewall --> aiCadvisor : :18081
 
 legend right
   |= Color |= Meaning |

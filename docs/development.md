@@ -1,5 +1,9 @@
 # 开发与启动
 
+> Type: Guide
+> Status: Active
+> Scope: 本机与 Docker 启动方式、开发命令、前端构建与持续集成
+
 ## 前置条件
 
 - Linux 宿主机

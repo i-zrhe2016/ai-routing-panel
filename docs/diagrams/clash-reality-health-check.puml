@@ -1,5 +1,5 @@
 @startuml
-!theme plain
+!include style.iuml
 
 title Clash REALITY health-check timeout diagnosis
 

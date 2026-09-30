@@ -1,6 +1,8 @@
 # 报告契约
 
-> 权威范围：Prometheus、AI 域名聚合与脱敏归因 JSON/Markdown 输出
+> Type: Reference
+> Status: Active
+> Scope: 日报 JSON 与 Markdown 的字段、版本和输出约束
 
 每份报告必须包含报告日期和时区、生成时间、程序与规则版本、节点状态、命中规则、阈值快照、Prometheus 查询窗口、target/label 身份、样本覆盖率、普通与 AI 数据面的日流量总量、AI 域名分类/新增域名/逐域名流量导向、Codex 域名分类状态、可用时的脱敏 user/inbound 流量归因、缺失与冲突序列、报告模式和 SQLite 审计运行 ID。
 

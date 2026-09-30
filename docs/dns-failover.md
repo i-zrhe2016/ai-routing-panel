@@ -1,5 +1,9 @@
 # DNS 故障切换
 
+> Type: Runbook
+> Status: Active
+> Scope: Cloudflare DNS 切换、恢复阈值、控制面备用 Xray 模式与操作排障
+
 ## 设计目标
 
 当普通数据面故障时，控制面通过 Cloudflare API 自动将 DNS 记录切到控制面本机，由控制面备用 Xray 接管流量。控制面备用 Xray 有两种工作模式：
@@ -15,43 +19,33 @@
 
 ### 场景① 正常运行
 
-```
-客户端 ──DNS──→ 普通数据面 IP (primary)
-                  │
-                  ├─普通流量──→ freedom 直出
-                  └─AI 域名──→ AI 节点 ──→ freedom 直出
-```
+![正常运行时的 DNS 与流量路径](diagrams/dns-primary-topology.svg)
+
+[PlantUML 源文件](diagrams/dns-primary-topology.puml)
 
 DNS 记录指向普通数据面公网 IP，控制面备用处于待命状态。
 
 ### 场景② AI 候选故障
 
-```
-客户端 ──DNS──→ 普通数据面 IP (primary)  ← DNS 不变
-                  │
-                  ├─普通流量──→ freedom 直出
-                  └─AI 域名──→ 另一可达 AI 候选（auto）
-```
+![单个 AI 候选故障时的流量路径](diagrams/dns-ai-failover-topology.svg)
 
-DNS 记录不变，AI 域名流量回退到数据面直出。由 `ai_domain_manager` 自动处理，不涉及 DNS 切换。
+[PlantUML 源文件](diagrams/dns-ai-failover-topology.puml)
+
+DNS 记录不变。`auto` 模式下由 `ai_domain_manager` 选择另一可达 AI 候选；全部候选不可达时，AI 域名流量回退到普通数据面直出，不涉及 DNS 切换。
 
 ### 场景③ 数据面故障（AI 节点正常）
 
-```
-客户端 ──DNS──→ 控制面 IP (backup)
-                  │
-                  └─所有流量──→ relay ──→ AI 节点 ──→ freedom 直出
-```
+![普通数据面故障后的备用 relay 路径](diagrams/dns-backup-relay-topology.svg)
+
+[PlantUML 源文件](diagrams/dns-backup-relay-topology.puml)
 
 DNS 切到控制面 IP，控制面备用 Xray 以 relay 模式将所有流量转发到 AI 节点。
 
 ### 场景④ 双节点故障（数据面 + AI 节点）
 
-```
-客户端 ──DNS──→ 控制面 IP (backup)
-                  │
-                  └─所有流量──→ freedom 直出
-```
+![普通数据面与 AI 候选均故障后的直出路径](diagrams/dns-backup-direct-topology.svg)
+
+[PlantUML 源文件](diagrams/dns-backup-direct-topology.puml)
 
 DNS 切到控制面 IP，控制面探测到 AI 节点不可达，自动将备用 Xray 切换为直出模式。
 
@@ -121,17 +115,11 @@ def probe_once(self):
 
 ### 自动切换与回切
 
-```
-探测结果记录 → 连续失败计数 / 连续成功计数
+![DNS 自动切换与回切判定](diagrams/dns-failover-decision.svg)
 
-当前在 primary:
-  连续失败 ≥ DNS_FAILOVER_FAILURE_THRESHOLD → 切到 backup (auto_failover)
+[PlantUML 源文件](diagrams/dns-failover-decision.puml)
 
-当前在 backup:
-  连续成功 ≥ DNS_FAILOVER_RECOVERY_THRESHOLD → 切回 primary (auto_recovery)
-```
-
-切换由 `evaluate_dns_failover_transition()`（`state/dns_failover.py:125`）决定，`switch_dns_target()`（`state/dns_failover.py:388`）执行 Cloudflare API 调用。
+切换由 `app/state/dns_failover.py` 的 `evaluate_dns_failover_transition()` 决定，`switch_dns_target()` 执行 Cloudflare API 调用。
 
 ### 高峰窗口
 
@@ -202,18 +190,9 @@ relay outbound 由 `build_backup_relay_outbound()`（`app/xray/render_config.py:
 
 目标态下，DNS failover worker 的每次检测中增加 AI 节点可达性探测：
 
-```
-每次 DNS failover 检测：
-  1. 探测数据面 DNS_FAILOVER_PROBE_HOST:PORT
-  2. 探测 AI 节点 AI_NODE_PROBE_HOST:AI_UPSTREAM_PORT
-  3. 如果当前在 backup 模式:
-     a. AI 节点可达 → 确保 config-backup.json 为 relay 模式
-     b. AI 节点不可达 → 重新渲染 config-backup.json 为直出模式 → 重启备用 Xray
-  4. 如果当前在 primary 模式:
-     a. 不需要关心备用模式（待命状态）
-  5. 如果从 backup 回切 primary:
-     a. 恢复 config-backup.json 为 relay 模式（供下次接管使用）
-```
+![备用 Xray 模式维护](diagrams/dns-backup-mode.svg)
+
+[PlantUML 源文件](diagrams/dns-backup-mode.puml)
 
 ### `CONTROL_PLANE_BACKUP_UPSTREAM_URL` 凭据边界
 
@@ -293,13 +272,7 @@ docker compose --profile backup-xray logs -f xray-reality-backup
 
 ### 场景④→⑤ 和 ⑤→④ 的自动切换
 
-```
-backup 活跃时，每轮 DNS failover 检测:
-
-  探测 AI 候选池:
-    至少一个可达 → 确保 relay 模式（如果当前是直出，重新渲染为 relay + 重启）
-    全部不可达 → 切换为直出模式（如果当前是 relay，重新渲染为直出 + 重启）
-```
+备用入口活跃时，每轮根据 AI 候选池可达性维护 relay 或直出配置；模式改变才重新渲染并重启。判定流程见[备用 Xray 模式维护](#自动模式切换)。
 
 ## 面板节点状态展示
 
@@ -307,33 +280,21 @@ backup 活跃时，每轮 DNS failover 检测:
 
 ### 节点状态卡片
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ 节点状态                                                  │
-├──────────┬─────────────┬──────────────────────────────────┤
-│ 普通数据面 │ AI 节点      │ 控制面备用                       │
-│ ● 运行中   │ ● 运行中     │ ⏸ 待命                          │
-│ 64.186... │ 远端 SSH    │ 本机                            │
-├──────────┴─────────────┴──────────────────────────────────┤
-│ 当前流量导向                                                │
-│                                                           │
-│  客户端 ──→ ●普通数据面 ──→ 直出                            │
-│              └─AI流量─→ ●AI 节点 ──→ 直出                  │
-│                                                           │
-└──────────────────────────────────────────────────────────┘
-```
+| 节点 | 正常状态 |
+| --- | --- |
+| 普通数据面 | 运行中，承载主入口流量 |
+| AI 节点 | 运行中，承载命中 AI 规则的流量 |
+| 控制面备用 | 待命 |
+
+正常流量路径见[正常运行拓扑](#场景①-正常运行)。
 
 故障场景③：
 
-```
-│  客户端 ──→ 🔵控制面备用 ──relay─→ ●AI 节点 ──→ 直出         │
-```
+流量路径见[备用 relay 拓扑](#场景③-数据面故障ai-节点正常)。
 
 故障场景④：
 
-```
-│  客户端 ──→ 🔵控制面备用 ──→ 直出                           │
-```
+流量路径见[备用直出拓扑](#场景④-双节点故障数据面--ai-节点)。
 
 ### 状态图例
 

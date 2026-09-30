@@ -1,0 +1,21 @@
+@startuml
+!include style.iuml
+title DNS 自动切换与回切判定
+start
+:记录探测结果\n更新连续失败与连续成功计数;
+if (当前 DNS 指向 primary？) then (是)
+  if (连续失败达到\nDNS_FAILOVER_FAILURE_THRESHOLD？) then (是)
+    :切到 backup\nauto_failover;
+  else (否)
+    :保持 primary;
+  endif
+else (backup)
+  if (连续成功达到\nDNS_FAILOVER_RECOVERY_THRESHOLD？) then (是)
+    :切回 primary\nauto_recovery;
+  else (否)
+    :保持 backup;
+  endif
+endif
+stop
+
+@enduml

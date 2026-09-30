@@ -1,14 +1,16 @@
 # Clash 统一 443 入口
 
+> Type: Runbook
+> Status: Active
+> Scope: Clash 统一 443 入口
+
 启用后，新获取的 Clash 和 V2Ray 订阅统一连接 `server:443`。已有订阅 URL、
 HTTP 80/8080 和 HTTPS 443 的订阅下载保持可用；未更新的客户端仍可使用原代理端口。
 此功能需要部署网关后显式开启，单独修改订阅端口不会自动迁移线上监听。
 
-```text
-Clash 新订阅 ───────────────────→ 443 ─→ 独立用户 UUID 的 REALITY 入站
-Clash 旧端口 → TCP 转发至本机 443 ─┘  └→ 对应旧端口的 REALITY 兼容入站
-HTTPS 订阅 / 网站 ──────────────→ 443 ─→ 127.0.0.1:18443 原 HTTPS 服务
-```
+![统一 443 入口与旧端口兼容](diagrams/unified-entry.svg)
+
+[PlantUML 源文件](diagrams/unified-entry.puml)
 
 443 由 HAProxy 监听：REALITY SNI 进入代理，其余 SNI 进入原 HTTPS 服务。
 原代理端口由独立的 TCP 转发器监听。转发器发送带原目标端口和源 IP 的 PROXY v2 头，

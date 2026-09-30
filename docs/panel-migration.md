@@ -1,8 +1,12 @@
 # 面板迁移文档
 
+> Type: Runbook
+> Status: Active
+> Scope: 面板迁移文档
+
 本文档用于把当前这套 `xray-routing-panel` 从旧机器迁移到新机器。
 
-> 当前版本不再使用 `nginx`。入口端口由 Xray 直接监听，面板负责维护数据库、渲染 Xray 配置并在需要时重启 `xray-reality`。
+> 本页说明控制面数据与服务迁移。普通多端口模式由 Xray 监听代理入口；启用[统一 443 入口](unified-entry.md)时由 HAProxy 分流。已有 Nginx、HTTPS 订阅与 Grafana 反代须按部署实际独立迁移。
 
 ## 迁移目标
 

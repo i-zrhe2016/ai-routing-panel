@@ -1,5 +1,9 @@
 # ChatGPT 路由排障
 
+> Type: Runbook
+> Status: Active
+> Scope: ChatGPT 路由排障
+
 ## 模块职责
 
 本文件只描述 ChatGPT/OpenAI 流量从客户端经主数据面转发到 AI 节点的排障流程。
@@ -8,26 +12,9 @@
 
 ## 流量链路
 
-```text
-ChatGPT 客户端
-      │
-      ▼
-主数据面 VLESS + REALITY inbound
-      │
-      ├─ 域名规则命中 ChatGPT/OpenAI
-      ▼
-ai_proxy VLESS + REALITY outbound
-      │
-      ▼
-AI 上游选择器
-      └─ 主：台湾 AI 节点
-      │
-      ▼
-AI 节点 VLESS + REALITY inbound
-      │
-      ▼
-freedom → OpenAI HTTPS
-```
+![ChatGPT 请求链路](diagrams/chatgpt-request-path.svg)
+
+[PlantUML 源文件](diagrams/chatgpt-request-path.puml)
 
 禁止把 AI 流量发往旧上游 `isif.217777.xyz:42994`。当前生产仅保留台湾 AI 主候选，实际目标以 `ai_target` 和 `manual_mode` 为准。
 
@@ -35,17 +22,15 @@ freedom → OpenAI HTTPS
 
 遵循由外到内、由只读到变更的顺序：
 
-```text
 1. 控制面健康
-2. 主数据面容器
+2. 普通数据面容器
 3. 动态域名规则
 4. AI 候选选择状态
-5. 主数据面 → 当前 AI 端口
+5. 普通数据面到当前 AI 端口的网络连通
 6. VLESS/REALITY 参数
-7. AI 容器真实配置
+7. AI 容器实际配置
 8. AI 节点互联网出口
 9. 客户端重新建连
-```
 
 ## 1. 检查控制面和节点状态
 
@@ -95,11 +80,11 @@ freedom → OpenAI HTTPS
 
 从主数据面分别测试当前候选的 TCP 连接；若使用 REALITY SNI，应进一步执行 REALITY 探测。
 
-```text
-reachable  → 仅证明网络层正常，继续检查 REALITY
-refused    → 检查对应 AI 容器、监听端口和防火墙
-超时       → 检查 DNS、路由、安全组和中间网络
-```
+| 探测结果 | 下一步 |
+| --- | --- |
+| `reachable` | 仅证明网络层正常，继续检查 REALITY |
+| `refused` | 检查 AI 容器、监听端口和防火墙 |
+| 超时 | 检查 DNS、路由、安全组和中间网络 |
 
 不要把“端口可达”当作“代理可用”。
 
@@ -115,13 +100,7 @@ address, port, uuid, flow, public key, shortId, SNI, fingerprint
 
 典型故障表现：
 
-```text
-TCP 27166 可达
-AI 节点互联网出口正常
-但 UUID / 公钥 / shortId / SNI 不匹配
-→ REALITY 握手失败
-→ ChatGPT 无法连接
-```
+即使 TCP 27166 可达且 AI 节点互联网出口正常，UUID、公钥、shortId 或 SNI 不匹配仍会导致 REALITY 握手失败，ChatGPT 无法连接。
 
 ## 7. 核对 Docker 真实配置源
 

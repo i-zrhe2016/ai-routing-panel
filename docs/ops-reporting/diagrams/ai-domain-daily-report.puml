@@ -1,5 +1,5 @@
 @startuml
-!theme plain
+!include ../../diagrams/style.iuml
 title AI Domain Daily Report Data Flow
 left to right direction
 

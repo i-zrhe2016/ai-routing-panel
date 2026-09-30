@@ -1,6 +1,8 @@
 # 故障判定规则边界
 
-> 权威范围：Prometheus-only 规则能判定和不能判定的事项
+> Type: Reference
+> Status: Active
+> Scope: 故障判定规则边界
 
 规则只接收报告窗口内的 Prometheus range query 结果、目标抓取健康和规则版本参数。缺失样本必须保持为 `unknown`，不得转换为零或正常。
 

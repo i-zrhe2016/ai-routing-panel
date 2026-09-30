@@ -2,11 +2,13 @@
 
 > Type: Runbook
 > Status: Active
-> Scope: Read-only collection of local and remote Xray node files and their recovery paths
+> Scope: 同机与远端 Xray 节点文件的只读采集、路径映射与恢复材料边界
 
 本模块说明隔离 broker 如何从同机只读挂载或通过 Tailscale SSH 读取数据面实际配置，并将文件纳入灾备归档。未配置远端 AI 目标时，AI 备用运行在控制面本机 `xray-ai-node`，配置随控制面运行时目录归档。其他灾备流程见[灾备归档](disaster-backup.md)，变量默认值见[配置说明](configuration.md)。
 
-Diagram (not yet rendered): [`diagrams/remote-backup-flow.puml`](diagrams/remote-backup-flow.puml)
+![节点配置只读采集与归档](diagrams/remote-backup-flow.svg)
+
+[PlantUML 源文件](diagrams/remote-backup-flow.puml)
 
 ## 采集边界
 

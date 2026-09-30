@@ -1,6 +1,8 @@
 # 灰度发布与回滚
 
-> 权威范围：Prometheus-only 上线顺序、验收节点和回滚
+> Type: Runbook
+> Status: Active
+> Scope: 灰度发布与回滚
 
 ## 分阶段发布
 

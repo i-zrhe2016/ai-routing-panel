@@ -1,0 +1,12 @@
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 13
+skinparam defaultTextAlignment center
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.2
+skinparam componentBorderColor #53708C
+skinparam componentBackgroundColor #F7F9FC

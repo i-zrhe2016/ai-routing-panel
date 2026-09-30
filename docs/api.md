@@ -1,5 +1,9 @@
 # API 与页面路径
 
+> Type: Reference
+> Status: Active
+> Scope: 页面与 API 路径、认证边界、请求字段和返回体
+
 ## 认证规则
 
 管理后台**没有登录**，由来源地址白名单放行（见 [控制面访问与来源白名单](panel-access.md)）；客户和租户各有自己的会话。

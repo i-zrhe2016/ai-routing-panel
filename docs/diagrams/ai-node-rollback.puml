@@ -1,0 +1,12 @@
+@startuml
+!include style.iuml
+title 本机 AI 节点配置回滚
+start
+:选择备份文件;
+:恢复 app/xray/runtime/config-ai-node.json;
+:docker restart xray-ai-node;
+:比较宿主机与容器配置哈希;
+:验证 27166 和完整 REALITY 握手;
+stop
+
+@enduml

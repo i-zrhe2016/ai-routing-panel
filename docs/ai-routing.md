@@ -1,5 +1,9 @@
 # AI 路由
 
+> Type: Architecture
+> Status: Active
+> Scope: 域名观测与分类、AI 候选选择、动态路由产物和故障回退
+
 ## 主链路
 
 AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过内网 SSH 或共享工作目录管理普通数据面，默认流程如下：
@@ -8,7 +12,9 @@ AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过内网
 
 [查看 PlantUML 源文件](diagrams/ai-routing-flow.puml)
 
-每小时流量分析与入库/分流细节见：[PlantUML 流程图](diagrams/ai-hourly-analysis.svg) · [源文件](diagrams/ai-hourly-analysis.puml)
+![每小时流量分析与入库分流](diagrams/ai-hourly-analysis.svg)
+
+[PlantUML 源文件](diagrams/ai-hourly-analysis.puml)
 
 1. 每小时读取最近一小时普通数据面 `access.log`；远端 SSH 模式直接在数据面读取，避免把整份日志复制到控制面
 2. 先应用内建 AI 域名规则

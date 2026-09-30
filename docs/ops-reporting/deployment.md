@@ -1,8 +1,10 @@
 # Prometheus 与脱敏归因生产部署状态
 
-> 状态：影子模式运行中
-> 权威范围：当前部署入口、运行边界和旧方案迁移
-> 最后核验日期：2026-08-31
+> Type: State
+> Status: Superseded
+> Scope: Prometheus 与脱敏归因生产部署状态
+
+本页保留历史部署记录；现行报告行为见[每日日报器](daily-reporter.md)，已核实状态见[仓库当前状态](../Repo_Current_State.md)。
 
 旧版部署流程依赖 SSH Collector 和原始日志采集，已经停用，禁止继续按旧流程部署。旧 `xray-ops-log-collector` 容器已删除，不能作为回退方案恢复。
 

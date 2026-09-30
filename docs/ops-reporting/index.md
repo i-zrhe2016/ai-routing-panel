@@ -1,8 +1,8 @@
 # Prometheus 与脱敏归因节点运维分析
 
-> 状态：Prometheus 采集、脱敏归因快照与影子日报已部署，正式验收待完成
-> 权威范围：本专题边界与模块导航
-> 最后核验日期：2026-08-26
+> Type: Architecture
+> Status: Active
+> Scope: 运维分析模块职责、数据来源、隔离边界与历史部署记录
 
 本专题使用 Prometheus 时序指标生成普通数据面与 AI 数据面的运维结论和日报，并可用脱敏 Xray counter 快照补充 user/inbound 流量归因。
 
@@ -19,22 +19,12 @@
 
 [查看 PlantUML 源文件](diagrams/monitoring-reporting.puml)
 
-## 模块导航
-
-| 模块 | 文档 |
-| --- | --- |
-| exporter 安装、最小权限和防火墙 | [exporter-deployment.md](exporter-deployment.md) |
-| Prometheus targets、labels 与查询约束 | [prometheus-targets.md](prometheus-targets.md) |
-| 确定性规则能力与边界 | [fault-classification.md](fault-classification.md) |
-| 日报生成与报告契约 | [daily-reporter.md](daily-reporter.md)、[report-contract.md](report-contract.md) |
-| SQLite 审计与历史归档 | [report-run-audit.md](report-run-audit.md) |
-| 灰度、验收和回滚 | [rollout.md](rollout.md)、[acceptance.md](acceptance.md) |
-| 日常排障 | [troubleshooting.md](troubleshooting.md) |
+完整专题导航见 [README](../../README.md#prometheus-only-运维分析)。
 
 旧版 SSH 日志采集器、原始日志入库和日志解析流程不属于本方案，不应部署或作为回退路径保留。
 
-## 当前生产状态
+## 历史部署记录（2026-08-05）
 
 截至 2026-08-05，控制面 Prometheus 的 7 个 targets 均可抓取，日报器以 `rules_only` 影子模式运行。AI 数据面位于 NAT 后，指标通过只绑定控制面回环地址的 SSH 隧道抓取；该隧道只承载 exporter HTTP，不改变 Xray 业务链路。
 
-旧 Collector 容器已经删除，旧采集表的数据已清空；`report_runs` 审计和已发布报告继续保留。首份 2026-08-04 影子报告因统计窗口早于 Prometheus 上线而为 `unknown`，属于历史样本不足，不代表业务故障。完整 30 分钟观察门禁按运维决定跳过，因此当前状态仍是影子运行而非正式验收通过。
+旧 Collector 容器已经删除，旧采集表的数据已清空；`report_runs` 审计和已发布报告继续保留。首份 2026-08-04 影子报告因统计窗口早于 Prometheus 上线而为 `unknown`，属于历史样本不足，不代表业务故障。完整 30 分钟观察门禁按运维决定跳过，因此该次记录仅证明影子运行，不代表当前正式验收通过；已核实的仓库状态见 [仓库当前状态](../Repo_Current_State.md)。

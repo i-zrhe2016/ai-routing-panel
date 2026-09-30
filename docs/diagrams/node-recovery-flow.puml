@@ -1,10 +1,7 @@
 @startuml
-!theme plain
+!include style.iuml
 title Xray node backup validation and replacement
 left to right direction
-skinparam shadowing false
-skinparam ArrowColor #334155
-skinparam defaultFontName Arial
 
 actor "Operator" as operator
 cloud "Local backup /\nCloudflare R2" as archive #F9E79F

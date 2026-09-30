@@ -2,7 +2,7 @@
 
 > Type: Runbook
 > Status: Active
-> Scope: Scheduled disaster archive generation, validation, encryption, and R2 upload
+> Scope: 定时灾备归档生成、完整性校验、加密与 R2 上传
 
 本模块只说明如何生成加密灾备归档并上传到 Cloudflare R2。它不负责故障切换或在线热备；节点快速恢复的准备命令见[节点备份完整性与快速恢复](node-recovery.md)。
 
@@ -15,18 +15,9 @@
 
 ## 归档流程
 
-```mermaid
-flowchart LR
-    P[panel.db] --> B[SQLite 快照]
-    C[DB_BACKUP_EXTRA_PATHS<br/>控制面配置文件/目录] --> D[灾备 tar.gz]
-    U[data/uploads<br/>业务附件] --> D
-    B --> D
-    N[普通数据面<br/>只读 SSH] --> D
-    I[AI 数据面节点<br/>只读 SSH] --> D
-    D --> E[AES-256-GCM 加密]
-    E --> F[Cloudflare R2<br/>异地灾备通道]
-    D --> H[本地 backups 保留期]
-```
+![灾备归档与加密上传流程](diagrams/disaster-backup-flow.svg)
+
+[PlantUML 源文件](diagrams/disaster-backup-flow.puml)
 
 任务入口是 `scripts/run_db_backup_cycle.py`：
 
@@ -39,12 +30,12 @@ flowchart LR
 
 单次任务的组件边界如下：
 
-```text
-backup_db.py              只负责 SQLite 快照
-collect_remote_backup.py  只负责 SSH 只读采集和 staging manifest
-build_backup_bundle.py    只负责文件收集、归档和校验元数据
-upload_backup_r2.py        只负责 R2 S3 兼容 API 上传和记录
-```
+| 组件 | 单一职责 |
+| --- | --- |
+| `backup_db.py` | SQLite 一致性快照 |
+| `collect_remote_backup.py` | 节点只读采集与 staging manifest |
+| `build_backup_bundle.py` | 文件收集、归档与校验元数据 |
+| `upload_backup_r2.py` | AES-256-GCM 加密、R2 上传与记录 |
 
 ## 默认收集内容
 

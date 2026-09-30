@@ -1,5 +1,9 @@
 # AI 节点部署与纳管
 
+> Type: Runbook
+> Status: Active
+> Scope: AI 节点部署、SSH 管理、日志指标读取与受控配置同步
+
 ## 模块职责
 
 AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI 域名流量并通过 `freedom` 直出。本文件说明可选的本机 Docker 节点，以及显式启用远端 SSH 节点时的边界。
@@ -8,21 +12,9 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 
 ## 当前拓扑
 
-```text
-控制面
-  └─ SSH 纳管 → 台湾 AI 节点
-                    ├─▶ :27166（VLESS + REALITY）
-                    └─▶ 独立 AI 日志与监控
+![AI 节点业务与管理边界](diagrams/ai-node-deployment.svg)
 
-主数据面
-  └─ VLESS + REALITY
-       │
-       ▼
-  AI 主上游：台湾 AI 节点
-       │
-       ▼
-  freedom 直出
-```
+[PlantUML 源文件](diagrams/ai-node-deployment.puml)
 
 两个端点职责不同：
 
@@ -73,11 +65,11 @@ AI 节点使用 `AI_NODE_*` 独立 UUID、REALITY 私钥、公钥和 Short ID，
 
 本机 Docker 模式下的 AI 节点容器部署为：
 
-```text
-xray-ai-node        → host network → :27166（业务端口，不得修改）
-                    → redacted-ip-007:31097（Xray metrics，不得公网开放）
-                    → app/xray/logs/ai-access.log、ai-error.log
-```
+| 输出 | 本机 Docker 部署边界 |
+| --- | --- |
+| 业务端口 | host network，`:27166`，不得修改 |
+| Xray metrics | 回环地址 `:31097`，不得公网开放 |
+| 日志 | `app/xray/logs/ai-access.log`、`ai-error.log` |
 
 部署或变更本机监控容器时，不得删除或重建 `xray-ai-node` 业务容器。
 
@@ -129,10 +121,7 @@ Xray access log 不包含按目标拆分的字节数，因此这些指标表示�
 本机 Docker 节点不需要 SSH。生产切换目标为远端台湾 AI 节点时，控制面直接通过内网 SSH 连接目标主机，
 不挂载或传递私钥：
 
-```text
-控制面 `<control-plane-host>`
-  └─ SSH 直连 → 普通数据面 `<normal-data-plane-host>:22`
-```
+控制面通过 SSH 直连普通数据面 `<normal-data-plane-host>:22`；认证和主机指纹要求见[内网 SSH 纳管](ssh-key-access.md)。
 
 远端 SSH 纳管时强制：
 
@@ -254,12 +243,8 @@ nc -zv redacted-ip-004 27166
 
 回滚使用控制面运行时配置，不涉及远端宿主机路径：
 
-```text
-备份文件
-  → app/xray/runtime/config-ai-node.json
-  → docker restart xray-ai-node
-  → 比较宿主/容器哈希
-  → 验证 27166 和完整 REALITY 握手
-```
+![本机 AI 节点配置回滚](diagrams/ai-node-rollback.svg)
+
+[PlantUML 源文件](diagrams/ai-node-rollback.puml)
 
 备份文件包含敏感凭据，权限必须为 `0600`，不得提交到 Git 或复制到日志、工单和聊天记录。

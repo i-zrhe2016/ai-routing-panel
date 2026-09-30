@@ -1,5 +1,5 @@
 @startuml
-!theme plain
+!include style.iuml
 title Read-only node configuration backup
 left to right direction
 

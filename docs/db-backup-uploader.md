@@ -1,15 +1,21 @@
 # Cloudflare R2 灾备上传
 
+> Type: Runbook
+> Status: Active
+> Scope: Cloudflare R2 灾备上传
+
 本项目生成包含 SQLite 数据库和部署配置的灾备归档，使用应用侧 AES-256-GCM 加密后，通过 Cloudflare R2 的 S3 兼容 API 保存。R2 只用于低频、异地、离线灾难恢复，不参与故障切换或快速恢复。
 
 ## 流程
 
-```text
-backup_db.py                 SQLite 一致性快照
-collect_remote_backup.py     只读采集普通数据面配置；远端 AI 模式可选
-build_backup_bundle.py       tar.gz + SHA-256 manifest
-upload_backup_r2.py          R2 S3 API 上传
-```
+归档数据流见[灾备归档流程](disaster-backup.md#归档流程)。
+
+| 组件 | 单一职责 |
+| --- | --- |
+| `backup_db.py` | SQLite 一致性快照 |
+| `collect_remote_backup.py` | 节点只读采集与 staging manifest |
+| `build_backup_bundle.py` | 文件收集、归档与校验元数据 |
+| `upload_backup_r2.py` | AES-256-GCM 加密、R2 上传与记录 |
 
 当 `DB_BACKUP_R2_ENABLED=0` 时，只生成本地归档；当设置为 `1` 时，必须同时提供完整 R2 配置，上传失败会返回非零，但不会删除本地归档。
 

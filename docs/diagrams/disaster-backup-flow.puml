@@ -1,0 +1,29 @@
+@startuml
+!include style.iuml
+title 灾备归档与加密上传流程
+left to right direction
+database "panel.db" as db
+component "SQLite 一致性快照" as snapshot
+folder "控制面配置\nDB_BACKUP_EXTRA_PATHS" as config
+folder "业务附件\ndata/uploads" as uploads
+component "节点只读采集\n同机挂载 / 远端 SSH" as nodes
+component "灾备 tar.gz\n文件与恢复清单" as bundle
+component "恢复完整性与 SHA-256 校验" as validate
+component "AES-256-GCM 加密" as encrypt
+cloud "Cloudflare R2\n异地离线归档" as r2
+folder "本地 backups\n按保留期清理" as local
+db --> snapshot
+snapshot --> bundle
+config --> bundle
+uploads --> bundle
+nodes --> bundle
+bundle --> validate
+validate --> encrypt : 校验通过且启用 R2
+encrypt --> r2
+bundle --> local
+note bottom of validate
+必需恢复材料不完整时阻止上传。
+R2 不参与 DNS 切换或在线热备。
+end note
+
+@enduml

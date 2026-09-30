@@ -1,13 +1,8 @@
 @startuml
-!theme plain
+!include style.iuml
 title 三节点与 AI 路由人工切换拓扑
 
 left to right direction
-skinparam componentStyle rectangle
-skinparam shadowing false
-skinparam ArrowColor #53708C
-skinparam componentBorderColor #53708C
-skinparam componentBackgroundColor #F7F9FC
 
 actor "客户端" as client
 component "控制面\n管理与编排" as panel

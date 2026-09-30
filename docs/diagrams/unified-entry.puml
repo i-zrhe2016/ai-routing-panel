@@ -1,0 +1,24 @@
+@startuml
+!include style.iuml
+title 统一 443 入口与旧端口兼容
+left to right direction
+actor "新 Clash / V2Ray 订阅" as fresh
+actor "未更新的旧客户端" as legacy
+actor "HTTPS 订阅 / 网站" as https
+component "旧端口 TCP 转发器\nPROXY v2：原端口与源 IP" as forwarder
+component "HAProxy :443\n按 SNI 与原端口分流" as gateway
+component "独立用户 UUID\nREALITY 入站 / Unix socket" as modern
+component "旧端口兼容 REALITY 入站\nUnix socket" as compatible
+component "原 HTTPS 服务\n127.0.0.1:18443" as web
+fresh --> gateway
+legacy --> forwarder
+forwarder --> gateway : 来自 127.0.0.2 的内部 PROXY 头
+https --> gateway
+gateway --> modern : REALITY SNI / 新连接
+gateway --> compatible : REALITY SNI / 原端口
+gateway --> web : 其他 SNI
+note bottom of gateway
+公网连接不接受客户端伪造的 PROXY 头。
+end note
+
+@enduml

@@ -1,6 +1,8 @@
 # Prometheus Targets 与 Labels
 
-> 权威范围：抓取目标、标签基数和查询身份
+> Type: Reference
+> Status: Active
+> Scope: Prometheus Targets 与 Labels
 
 ## Target 设计
 
@@ -19,11 +21,21 @@
 
 禁止把 UUID、订阅 token、域名、客户端 IP、错误文本或请求路径放入标签。高基数字段既增加存储成本，也可能泄漏业务信息。
 
-## 当前生产 Targets
+## 当前配置 Targets
 
-当前配置共有 8 个 targets：控制面面板、控制面 node-exporter/cAdvisor、普通数据面的 node-exporter/cAdvisor、AI 数据面的 node-exporter/cAdvisor，以及 Prometheus 自身。普通数据面的 node-exporter/cAdvisor 使用控制面可达的内网地址 `100.116.187.106`，避免经公网地址访问被数据面防火墙丢弃。AI 本机备用的 Xray `/debug/vars` 不作为 Prometheus 独立 target，而由面板 `/metrics` 聚合并鉴权后暴露。
+权威定义是 [monitoring/prometheus/prometheus.yml](../../monitoring/prometheus/prometheus.yml)，当前包含 8 个静态 targets：
 
-生产节点序列必须提供稳定的 `node_id`、`node_role`、`environment` 和 `region`。当前 `node_id` 使用 `control-01`、`normal-01`、`ai-01`，环境为 `production`。权威地域尚未确认时使用受控值 `unknown`，不得猜测机房位置。
+| 角色 | 抓取目标 | 稳定身份 |
+| --- | --- | --- |
+| 面板 | 控制面回环 `:18080/metrics` | `control-01` |
+| 控制面 node-exporter / cAdvisor | 控制面回环 `:9100` / `:18081` | `control-01` |
+| 普通数据面 node-exporter / cAdvisor | 普通数据面 Tailscale DNS `:19100` / `:18081` | `normal-01` |
+| 台湾 AI node-exporter / cAdvisor | 台湾节点 Tailscale DNS `:9100` / `:18081` | `ai-taiwan` |
+| Prometheus | `localhost:9090` | 由 Prometheus 默认 target labels 标识 |
+
+AI Xray `/debug/vars` 不作为 Prometheus 独立 target，而由面板受控读取后通过鉴权的 `/metrics` 聚合暴露。配置中的目标数量不等同于线上抓取健康，仍须检查运行时 `/targets`。
+
+节点资源序列必须提供稳定的 `node_id`、`node_role`、`environment` 和 `region`。当前节点身份为 `control-01`、`normal-01`、`ai-taiwan`，环境为 `production`，台湾 AI 节点地域为 `taiwan`；未确认地域使用 `unknown`。
 
 ## 查询约束
 

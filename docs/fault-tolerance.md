@@ -1,5 +1,13 @@
 # 三节点故障容错
 
+> Type: Architecture
+> Status: Active
+> Scope: 控制面、普通数据面与 AI 数据面的单点和组合故障保证边界
+
+![三节点与 AI 路由人工切换拓扑](diagrams/manual-failover-topology.svg)
+
+[PlantUML 源文件](diagrams/manual-failover-topology.puml)
+
 本文定义“服务正常运行”的范围：默认指已经拿到订阅或客户端配置的用户，其代理数据流量继续可用；控制面管理页面、登录、订阅生成和自动运维属于管理服务，控制面自身故障时不承诺继续可用。
 
 ## 单点故障目标

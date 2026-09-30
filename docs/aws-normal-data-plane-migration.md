@@ -1,5 +1,9 @@
 # AWS 普通数据面迁移与回退
 
+> Type: Runbook
+> Status: Active
+> Scope: AWS 普通数据面迁移与回退
+
 本文记录普通 Xray 数据面从当前 DMIT 主机迁移到 AWS 节点的灰度流程。控制面和 AI 数据面不迁移。
 
 ![AWS 普通数据面迁移与回退拓扑](diagrams/aws-normal-data-plane-migration.svg)

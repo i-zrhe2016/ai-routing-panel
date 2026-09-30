@@ -1,5 +1,9 @@
 # 内网 SSH 纳管
 
+> Type: Runbook
+> Status: Active
+> Scope: 内网 SSH 纳管
+
 本文说明控制面通过内网 SSH 管理数据面。当前控制面为
 `<control-plane-host>`，普通数据面为 `<normal-data-plane-host>`。
 

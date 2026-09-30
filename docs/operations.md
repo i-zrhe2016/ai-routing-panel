@@ -2,7 +2,7 @@
 
 > Type: Runbook
 > Status: Active
-> Scope: Operating, monitoring, and diagnosing the panel and its managed nodes
+> Scope: 面板和受管节点的运行检查、指标观测与日常排障
 
 ## 健康检查
 
@@ -80,7 +80,7 @@ scrape_configs:
 
 > ✅ **当前入口**：Grafana 通过 `https://xray.zrhe2016.cc/grafana/` 访问，Cloudflare Access 是公网认证边界；Grafana 的 `3001` 仅供本机 Nginx 反代使用。Cloudflare Access 邮箱会由 Nginx 转为 Grafana Auth Proxy 用户标识，认证后不再显示 Grafana 登录页。
 
-> 前置项：要看**数据面（DMIT `redacted-ip-011`）**的系统资源，需在该机部署一份 node_exporter，并在 `monitoring/prometheus/prometheus.yml` 取消 `job_name: node` 下 DMIT target 的注释后 reload；否则 Observability 里的主机指标只反映面板主机。
+> 前置项：数据面必须部署 node-exporter 和 cAdvisor，并允许控制面经 Tailscale 抓取。仓库已配置普通数据面与台湾 AI 节点 targets；地址、端口和标签见[Prometheus 目标配置](ops-reporting/prometheus-targets.md#当前配置-targets)。
 
 ### 监控栈启停
 

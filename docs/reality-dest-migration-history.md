@@ -1,11 +1,17 @@
-# Reality dest 修复 + 多端口(最终状态)
+# REALITY dest 修复与多端口迁移历史
+
+> Type: State
+> Status: Superseded
+> Scope: 历史 REALITY dest 修复、多端口回退与当次验证记录
+
+本页是历史记录，不声明当前生产拓扑。现行入口能力见[统一 443 入口](unified-entry.md)，已核实状态见[仓库当前状态](Repo_Current_State.md)。
 
 状态:**已回退到多端口架构;保留了 Reality dest 修复。生产数据面真实数据验证通过。**
 
 ## 拓扑(务必记住)
 - 控制面/面板:`redacted-ip-008`(DigitalOcean),容器 `xray-routing-panel`
 - 生产数据面:`redacted-ip-011`(DMIT 独立公网 IP),容器 `xray-reality-local`
-- 面板通过内网 **SSH**(`root@100.116.187.106:22`)，不使用私钥
+- 面板通过内网 **SSH**(`root@<normal-data-plane-host>:22`)，不使用私钥
   同步本地渲染的 `runtime/config.json` 到远端同路径并 `docker restart` 远端容器。
 - 控制面上也有一个同名 `xray-reality-local` 本地容器,**那不是生产**,别搞混。
 

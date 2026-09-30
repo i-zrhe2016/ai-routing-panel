@@ -1,5 +1,9 @@
 # Fluent Bit 日志采集
 
+> Type: Runbook
+> Status: Active
+> Scope: Fluent Bit 日志采集
+
 本模块支持控制面、普通数据面和 AI 数据面三个角色采集 Docker 主机日志和关键错误日志；当前实际部署的是控制面和普通数据面，两者经 Tailscale 发送到 Loki，再由控制面 Grafana 查询，AI 数据面的日志仍保留在节点本机。日志中心与 Grafana 都运行在控制面主机上，不额外启动一台日志主机。
 
 ![Fluent Bit log collection](diagrams/logging-fluent-bit.svg)
@@ -187,11 +191,11 @@ tag:log-store  = Loki 日志中心
 
 最小访问关系：
 
-```text
-tag:log-agent  -> tag:log-store:3100
-Grafana host   -> tag:log-store:3100
-运维终端       -> tag:log-store:3100（按需）
-```
+| 来源 | 允许访问 |
+| --- | --- |
+| `tag:log-agent` | `tag:log-store:3100` |
+| Grafana 主机 | `tag:log-store:3100` |
+| 运维终端 | `tag:log-store:3100`，按需授权 |
 
 不要开放公网 `3100`。Loki 的 `auth_enabled` 首期保持关闭，安全边界由 Tailscale ACL 和主机防火墙提供；如果未来日志中心跨出 tailnet，再增加 TLS 和 Loki 认证，不在 Agent 配置中提交密钥。
 

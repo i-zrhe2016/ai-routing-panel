@@ -1,6 +1,8 @@
 # Prometheus-only 故障排查
 
-> 权威范围：target、查询和报告故障；不包含 SSH 或原始日志排查
+> Type: Runbook
+> Status: Active
+> Scope: Prometheus-only 故障排查
 
 ## 2026-08-31 目标抓取恢复记录
 

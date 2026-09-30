@@ -1,6 +1,8 @@
 # Exporter 部署与网络隔离
 
-> 权威范围：数据面 exporter 的安装、权限和防火墙
+> Type: Runbook
+> Status: Active
+> Scope: Exporter 部署与网络隔离
 
 ## 部署原则
 
@@ -24,16 +26,20 @@ exporter 优先监听管理网地址。没有管理网时，防火墙只允许 P
 
 验收时从 Prometheus 主机确认可抓取，再从非授权主机确认连接被拒绝。云安全组与主机防火墙必须同时检查；如果经过反向代理，应启用 TLS/认证且仍限制来源。
 
-## AI 数据面 NAT 部署
+## 当前抓取链路
 
-AI 数据面没有可直达的 exporter 公网端口。控制面使用 `xray-ai-exporter-tunnel.service` 通过既有管理 SSH 连接转发指标：
+仓库的 [Prometheus 配置](../../monitoring/prometheus/prometheus.yml) 通过 Tailscale 直接抓取普通数据面和台湾 AI 节点；当前 target 与 labels 见[目标配置](prometheus-targets.md#当前配置-targets)。网络隔离图展示此链路，实际上线仍须执行来源限制和可达性验收。
 
-```text
-Prometheus → redacted-ip-007:19101 → AI node-exporter:9100
-Prometheus → redacted-ip-007:18082 → AI cAdvisor:8080
-```
+## 历史 AI 数据面 NAT 隧道方案
 
-本地转发端口只能绑定 `redacted-ip-007`，SSH 必须启用严格主机密钥校验、连接失败退出、keepalive 和自动重启。Prometheus 使用 host 网络读取回环端口，但自身仍只监听 `redacted-ip-007:9090`。不得为了监控向公网新增 AI exporter NAT 映射，也不得修改 AI Xray 业务端口。
+早期 AI 数据面没有可直达的 exporter 公网端口，控制面使用 `xray-ai-exporter-tunnel.service` 通过管理 SSH 转发指标。以下保留该方案的端口与隔离要求，当前仓库抓取链路不使用这些回环转发端口：
+
+| Prometheus 回环入口 | AI 节点目标 |
+| --- | --- |
+| `127.0.0.1:19101` | node-exporter `:9100` |
+| `127.0.0.1:18082` | cAdvisor `:8080` |
+
+使用历史隧道方案时，本地转发端口只能绑定 `127.0.0.1`，SSH 必须启用严格主机密钥校验、连接失败退出、keepalive 和自动重启。Prometheus 使用 host 网络读取回环端口，自身 API 也仅绑定回环地址。不得为了监控向公网新增 AI exporter NAT 映射，也不得修改 AI Xray 业务端口。
 
 隧道只转发 exporter HTTP。日报器不持有 SSH 凭据，也不通过该隧道执行命令；SSH 凭据仅由控制面的 systemd 隧道服务读取。
 

@@ -1,5 +1,9 @@
 # AI 节点独立凭据
 
+> Type: Reference
+> Status: Active
+> Scope: AI 隧道凭据来源、inbound 与 outbound 匹配、安全比对和轮换
+
 ## 模块职责
 
 本文件定义主数据面 `ai_proxy` outbound 与 AI 节点 VLESS + REALITY inbound 之间的认证契约。部署步骤见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)。
@@ -8,14 +12,9 @@
 
 AI 节点拥有独立于主数据面的 REALITY 身份：
 
-```text
-主数据面服务端凭据          AI 隧道凭据
-app/xray/.env              AI 节点权威配置
-      │                           │
-      ├─ 服务客户端连接           ├─ AI inbound 私钥
-      │                           └─ 主数据面 ai_proxy outbound 参数
-      └─ 不得覆盖 AI 凭据
-```
+![普通数据面与 AI 隧道凭据边界](diagrams/ai-credential-boundaries.svg)
+
+[PlantUML 源文件](diagrams/ai-credential-boundaries.puml)
 
 禁止把主数据面的 `XRAY_CLIENT_UUID`、`XRAY_REALITY_*`、`XRAY_SERVER_NAME` 直接写入 AI 节点配置。
 
@@ -45,11 +44,9 @@ TCP 可达只能证明地址和端口开放，不能证明上述认证字段匹�
 
 排障时不得输出原始 UUID、私钥、公钥、Short ID 或 SNI。两端分别计算每个字段的 SHA-256，只比较摘要：
 
-```text
-主数据面：field → SHA-256 ─┐
-                           ├─ 只输出 match=true/false
-AI 节点：field → SHA-256 ──┘
-```
+![AI 隧道参数安全比对](diagrams/ai-credential-comparison.svg)
+
+[PlantUML 源文件](diagrams/ai-credential-comparison.puml)
 
 至少比较：
 
