@@ -99,8 +99,8 @@
 ### 灾备归档、完整性与节点恢复组件
 
 - 入口代码：`scripts/run_db_backup_cycle.py`、`scripts/collect_remote_backup.py`、`scripts/build_backup_bundle.py`、`scripts/node_recovery.py`、`scripts/upload_backup_r2.py`
-- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件，并通过严格只读 SSH 收集普通数据面的实际配置；控制面 AI 运行时产物随目录归档，远端 AI 节点保持独立配置
-- `collect_remote_backup.py` 只负责 SSH、校验和 staging；`build_backup_bundle.py` 负责归档及两个 manifest；`node_recovery.py` 负责归档验证和替换节点目录准备；`upload_backup_r2.py` 只负责加密、R2 上传和记录写入
+- 先由 `scripts/backup_db.py` 生成新的 `panel.db` 备份，再按 `DB_BACKUP_EXTRA_PATHS` 收集控制面文件；同机普通数据面通过 broker 的只读挂载采集，远端普通/AI 数据面使用严格只读 Tailscale SSH，控制面 AI 运行时产物随目录归档
+- `collect_remote_backup.py` 负责节点文件读取、校验和 staging；`build_backup_bundle.py` 负责归档及两个 manifest；`node_recovery.py` 负责归档验证和替换节点目录准备；`upload_backup_r2.py` 只负责加密、R2 上传和记录写入
 - 按配置调用 Cloudflare R2 做加密归档的异地保存，不进入快速恢复或故障切换路径
 
 ## 节点模式判定

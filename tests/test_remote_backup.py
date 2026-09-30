@@ -119,6 +119,110 @@ class RemoteBackupTest(unittest.TestCase):
         self.assertEqual(result, response)
         broker.assert_called_once_with(node, 12, 2048)
 
+    def test_local_target_uses_broker_from_backup_worker(self):
+        node = self.module.RemoteNode(
+            role="normal-data-plane",
+            target="local",
+            paths=("/root/xray-routing-panel/app/xray/runtime/config.json",),
+            known_hosts="/tmp/known_hosts",
+        )
+        response = {"version": 1, "role": node.role, "files": []}
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "tailscale-broker"}, clear=False):
+            with patch.object(self.module, "_read_broker_remote", return_value=response) as broker:
+                result = self.module.read_remote(node, 12, 2048)
+
+        self.assertEqual(result, response)
+        broker.assert_called_once_with(node, 12, 2048)
+
+    def test_local_target_reads_required_files_and_marks_local_source(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "deploy"
+            runtime = root / "app" / "xray" / "runtime"
+            runtime.mkdir(parents=True)
+            config = runtime / "config.json"
+            config.write_bytes(b'{"inbounds": []}\n')
+            env_file = root / "app" / "xray" / ".env"
+            env_file.write_bytes(b"XRAY_PORT=443\n")
+            node = self.module.RemoteNode(
+                role="normal-data-plane",
+                target="local",
+                paths=(str(config), str(env_file)),
+                known_hosts="/tmp/known_hosts",
+                required_paths=(str(config), str(env_file)),
+                restore_root=str(root),
+            )
+            with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "tailscale"}, clear=False):
+                with patch.object(
+                    self.module,
+                    "_tailscale_executable",
+                    side_effect=AssertionError("local collection must not start SSH"),
+                ):
+                    payload = self.module.read_remote(node, 12, 2048)
+
+            self.assertTrue(all(item["status"] == "ok" for item in payload["files"]))
+            self.assertEqual(
+                base64.b64decode(payload["files"][0]["data_base64"]), config.read_bytes()
+            )
+            collected = self.module.write_collection(Path(tmpdir) / "staging", node, payload)
+            self.assertTrue(collected["recoveryReady"])
+            self.assertEqual(collected["source"], "local-filesystem")
+
+    def test_local_target_rejects_paths_outside_root_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "deploy"
+            runtime = root / "app" / "xray" / "runtime"
+            runtime.mkdir(parents=True)
+            outside = Path(tmpdir) / "outside.env"
+            outside.write_text("outside\n", encoding="utf-8")
+            link = runtime / "linked.env"
+            link.symlink_to(outside)
+            node = self.module.RemoteNode(
+                role="normal-data-plane",
+                target="local",
+                paths=(str(outside), str(link)),
+                known_hosts="/tmp/known_hosts",
+                restore_root=str(root),
+            )
+            with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "tailscale"}, clear=False):
+                payload = self.module.read_remote(node, 12, 2048)
+
+        self.assertEqual(payload["files"][0]["status"], "outside_root")
+        self.assertEqual(payload["files"][1]["status"], "not_regular_file")
+        self.assertNotIn("data_base64", payload["files"][0])
+        self.assertNotIn("data_base64", payload["files"][1])
+
+    def test_local_target_enforces_file_size_and_regular_file_limits(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            large = root / "large.json"
+            large.write_bytes(b"1234")
+            directory = root / "directory"
+            directory.mkdir()
+            node = self.module.RemoteNode(
+                role="normal-data-plane",
+                target="local",
+                paths=(str(large), str(directory)),
+                known_hosts="/tmp/known_hosts",
+                restore_root=str(root),
+            )
+            with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "tailscale"}, clear=False):
+                payload = self.module.read_remote(node, 12, 3)
+
+        self.assertEqual(payload["files"][0]["status"], "too_large")
+        self.assertEqual(payload["files"][1]["status"], "not_regular_file")
+
+    def test_local_target_is_restricted_to_normal_data_plane(self):
+        node = self.module.RemoteNode(
+            role="ai-data-plane",
+            target="local",
+            paths=("/root/xray-routing-panel/app/xray/runtime/config.json",),
+            known_hosts="/tmp/known_hosts",
+            restore_root="/root/xray-routing-panel",
+        )
+        with patch.dict(os.environ, {"DB_BACKUP_SSH_TRANSPORT": "tailscale"}, clear=False):
+            with self.assertRaisesRegex(ValueError, "only supported for the normal data plane"):
+                self.module.read_remote(node, 12, 2048)
+
     def test_tailscale_transport_rejects_openssh_options(self):
         node = self.module.RemoteNode(
             role="normal-data-plane",

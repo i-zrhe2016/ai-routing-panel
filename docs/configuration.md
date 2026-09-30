@@ -152,7 +152,9 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `DB_BACKUP_BUNDLE_DIR` / `DB_BACKUP_BUNDLE_KEEP_DAYS` | 本地归档目录和保留天数 |
 | `DB_BACKUP_SSH_COLLECTION_ENABLED` | 是否启用只读远端节点采集；Compose 默认 `0`，示例 `.env` 设为 `1` |
 | `DB_BACKUP_SSH_COLLECTION_REQUIRED` | 是否将远端恢复完整性作为上传门禁；Compose 默认 `0`，示例 `.env` 设为 `1` |
-| `DB_BACKUP_DATAPLANE_SSH_TARGET` | 普通数据面 Tailscale SSH 目标；未设置时回退到 `DATAPLANE_SSH_TARGET`，启用完整性门禁时必须提供目标 |
+| `DB_BACKUP_DATAPLANE_SSH_TARGET` | 普通数据面目标；远端节点使用 Tailscale SSH，数据面与控制面同机时设为 `local`；未设置时回退到 `DATAPLANE_SSH_TARGET` |
+| `DB_BACKUP_DATAPLANE_LOCAL_RUNTIME_HOST` / `DB_BACKUP_DATAPLANE_LOCAL_ENV_HOST` | `local` 目标对应的宿主机 runtime 目录和 `.env` 文件；只读挂载到隔离 broker，默认使用禁用占位路径 |
+| `DB_BACKUP_DATAPLANE_DEPLOY_ROOT` | 普通数据面部署根目录；local 模式只允许从此根目录读取，默认 `/root/xray-routing-panel` |
 | `DB_BACKUP_AI_NODE_SSH_TARGETS` | 远端 AI 节点目标列表，按逗号或换行分隔；兼容 `AI_NODE_SSH_TARGETS` 和单目标变量，每个目标生成独立恢复角色 |
 | `AI_NODE_IDS` | 按顺序对应 AI 目标并用于恢复角色后缀；没有远端 AI 目标时，本机 AI 备用由 `DB_BACKUP_EXTRA_PATHS` 归档 |
 | `DB_BACKUP_SSH_TRANSPORT` | Compose 默认 `tailscale-broker`；直接运行采集器可用 `tailscale`，兼容环境可用 `openssh` |
