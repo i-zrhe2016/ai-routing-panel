@@ -1,6 +1,6 @@
 @startuml
 !include style.iuml
-title Tailscale Fluent Bit log collection
+title Tailscale 网络中的 Fluent Bit 日志采集
 left to right direction
 
 package "Tailscale tailnet" #F3F4F6 {

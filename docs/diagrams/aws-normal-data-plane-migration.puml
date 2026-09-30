@@ -1,6 +1,8 @@
 @startuml
 !include style.iuml
 left to right direction
+title AWS 普通数据面切换后的当前链路
+title AWS 普通数据面切换后的当前链路
 
 actor "客户端" as client
 cloud "Cloudflare DNS\nprimary → AWS 公网 IP\nbackup → 控制面公网 IP" as dns
@@ -24,7 +26,8 @@ aws --> subscription
 aws --> monitoring
 
 note bottom of aws
+图示为切换后的当前状态：primary DNS 指向 AWS。
 control-plane-host 仅用于 Tailscale 管理。
-公网 DNS 必须使用 redacted-ip-010。
+公网 DNS 必须使用 redacted-ip-010；回退源仅供人工恢复。
 end note
 @enduml

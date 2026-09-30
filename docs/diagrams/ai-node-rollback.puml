@@ -7,6 +7,10 @@ start
 :docker restart xray-ai-node;
 :比较宿主机与容器配置哈希;
 :验证 27166 和完整 REALITY 握手;
+note right
+仅适用于由控制面本机 Docker 管理的 AI 节点。
+生产远端 AI 节点以其自身配置为权威来源。
+end note
 stop
 
 @enduml

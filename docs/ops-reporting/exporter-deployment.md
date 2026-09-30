@@ -18,13 +18,13 @@ exporter 使用非 root 专用账号、只读文件系统和最小 capability。
 
 ## 监听与防火墙
 
-exporter 优先监听管理网地址。没有管理网时，防火墙只允许 Prometheus 主机 IP 到指标端口，并显式拒绝其他来源；不得使用 `redacted-ip-001/0` 放行。
+exporter 优先监听管理网地址。Compose 使用 `EXPORTER_BIND_ADDRESS` 设置 node-exporter 和 cAdvisor 的宿主机绑定地址，默认值是 `0.0.0.0`；生产部署应显式检查并设置实际地址。若监听 `0.0.0.0`，云安全组与主机防火墙必须只允许 Prometheus 抓取源到指标端口，并拒绝其他来源；不得使用 `redacted-ip-001/0` 放行。
 
 ![Exporter network isolation](diagrams/exporter-network-isolation.svg)
 
 [查看 PlantUML 源文件](diagrams/exporter-network-isolation.puml)
 
-验收时从 Prometheus 主机确认可抓取，再从非授权主机确认连接被拒绝。云安全组与主机防火墙必须同时检查；如果经过反向代理，应启用 TLS/认证且仍限制来源。
+验收时先核对容器实际发布的宿主机地址与端口，再从 Prometheus 主机确认可抓取，并从非授权主机确认连接被拒绝。如果经过反向代理，应启用 TLS/认证且仍限制来源。
 
 ## 当前抓取链路
 

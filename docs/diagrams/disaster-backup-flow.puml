@@ -3,6 +3,7 @@
 title 灾备归档与加密上传流程
 left to right direction
 database "panel.db" as db
+database "ops.db（可选）" as opsdb
 component "SQLite 一致性快照" as snapshot
 folder "控制面配置\nDB_BACKUP_EXTRA_PATHS" as config
 folder "业务附件\ndata/uploads" as uploads
@@ -13,6 +14,7 @@ component "AES-256-GCM 加密" as encrypt
 cloud "Cloudflare R2\n异地离线归档" as r2
 folder "本地 backups\n按保留期清理" as local
 db --> snapshot
+opsdb --> snapshot : 存在时生成独立快照
 snapshot --> bundle
 config --> bundle
 uploads --> bundle

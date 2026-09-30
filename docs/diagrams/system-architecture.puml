@@ -1,21 +1,23 @@
 @startuml
 !include style.iuml
-left to right direction
+top to bottom direction
 
 title Xray Routing Panel：组件与主要链路
 
 actor "代理客户端" as client
 cloud "Cloudflare DNS\n主 / 备用入口解析" as dns #E0F2FE
-node "普通数据面" as normal #ECFDF5 {
-  component "Xray VLESS + REALITY\n加载动态 AI 域名路由" as normalXray #D1FAE5
-}
-node "独立 AI 数据面" as ai #FFF7ED {
-  component "AI Xray\n独立凭据 / freedom 出站" as aiXray #FED7AA
-}
 cloud "互联网" as internet #F3F4F6
 
+node "代理数据面" as planes #ECFDF5 {
+  node "普通数据面" as normal {
+    component "Xray VLESS + REALITY\n加载动态 AI 域名路由" as normalXray #D1FAE5
+  }
+  node "独立 AI 数据面" as ai #FFF7ED {
+    component "AI Xray\n独立凭据 / freedom 出站" as aiXray #FED7AA
+  }
+}
 node "控制面" as control #EFF6FF {
-  component "Routing Panel\nFlask / React 管理后台" as panel #DBEAFE
+  component "Routing Panel\nFlask / React / DNS 与节点管理" as panel #DBEAFE
   component "AI 域名管理器\n分类 / 候选选择 / 产物生成" as manager #CFFAFE
   database "panel.db\n业务与配置状态" as db #E5E7EB
   component "可选备用 Xray\nrelay / freedom" as backup #FEF3C7
@@ -32,19 +34,15 @@ panel --> db
 panel --> manager : 调度与人工模式
 manager ..> normalXray : 日志观测 / 路由产物
 panel ..> normalXray : 配置与节点管理
-panel ..> aiXray : SSH 管理 / 受控指标读取
-panel ..> dns : DNS 故障切换
-panel ..> backup : 备用配置与管理
 client ..> backup : DNS 切换后的入口
 backup ..> aiXray : AI 可用时 relay
 backup ..> internet : AI 不可用时直出
 
-normal ..> observability : Tailscale 指标
-ai ..> observability : Tailscale 指标
+planes ..> observability : Tailscale 指标
 control ..> observability : 面板与主机指标
 
-note bottom of control
-控制面负责编排，正常代理流量由数据面承载。
+note right of control
+控制面负责 DNS 与节点编排，正常代理流量由数据面承载。
 控制面离线时，已下发的配置仍可工作。
 详细监控、日志与灾备流程见对应专题。
 end note

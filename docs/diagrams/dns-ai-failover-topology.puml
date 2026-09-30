@@ -1,6 +1,6 @@
 @startuml
 !include style.iuml
-title 单个 AI 候选故障时的流量路径
+title 多候选配置下 AI 候选故障时的流量路径
 left to right direction
 actor "客户端" as client
 cloud "互联网" as internet
@@ -10,4 +10,9 @@ client --> entry : DNS 保持 primary
 entry --> internet : 普通流量 / freedom
 entry --> ai : auto 模式选择
 ai --> internet : freedom
+note bottom of ai
+此路径要求存在另一已配置且可达的 AI 候选。
+当前生产只配置台湾主候选，因此不会触发候选间切换；
+无可用候选时移除动态 AI 路由并由普通数据面直出。
+end note
 @enduml

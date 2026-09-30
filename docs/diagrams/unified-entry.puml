@@ -9,10 +9,10 @@ component "旧端口 TCP 转发器\nPROXY v2：原端口与源 IP" as forwarder
 component "HAProxy :443\n按 SNI 与原端口分流" as gateway
 component "独立用户 UUID\nREALITY 入站 / Unix socket" as modern
 component "旧端口兼容 REALITY 入站\nUnix socket" as compatible
-component "原 HTTPS 服务\n127.0.0.1:18443" as web
+component "原 HTTPS 服务\n服务器IP:18443" as web
 fresh --> gateway
 legacy --> forwarder
-forwarder --> gateway : 来自 127.0.0.2 的内部 PROXY 头
+forwarder --> gateway : 来自 服务器IP 的内部 PROXY 头
 https --> gateway
 gateway --> modern : REALITY SNI / 新连接
 gateway --> compatible : REALITY SNI / 原端口
