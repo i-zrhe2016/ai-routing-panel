@@ -99,7 +99,7 @@ docker compose -f monitoring/docker-compose.monitoring.yml up -d prometheus graf
 
 日志采集边界见 [Fluent Bit 日志采集](docs/logging-fluent-bit.md)。
 
-当前生产环境的控制面为内网地址 `100.92.231.104`，同时运行本机 AI 备用；普通数据面为 `100.116.187.106`，由控制面通过内网 SSH 直连纳管。控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
+当前生产环境的控制面为内网地址 `<control-plane Tailscale IP>`，同时运行本机 AI 备用；普通数据面为 `<data-plane Tailscale IP>`，由控制面通过内网 SSH 直连纳管。控制面业务日志已进入 Loki。实际路径、验收结果和回滚方式见 [当前生产部署](docs/logging-fluent-bit.md#当前生产部署)。
 
 启用配置归档并通过 Cloudflare R2 保存异地灾备版本（不用于快速恢复）：
 
@@ -113,7 +113,7 @@ DB_BACKUP_ENCRYPTION_PASSWORD='separate-archive-password' \
 docker compose up -d --build xray-routing-panel-db-backup
 ```
 
-控制面额外文件和本机 AI 配置通过 `DB_BACKUP_EXTRA_PATHS` 归档，普通数据面实际配置由只读 SSH 采集；完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)、[远端节点配置采集](docs/remote-node-backup.md)和[节点快速恢复](docs/node-recovery.md)。
+控制面额外文件和本机 AI 配置通过 `DB_BACKUP_EXTRA_PATHS` 归档。Compose 默认关闭远端节点采集；启用完整节点模式后，备份容器才会通过隔离 broker 以只读 Tailscale SSH 采集普通数据面和已配置的远端 AI 节点。完整边界见[灾备归档与 R2 上传通道](docs/disaster-backup.md)、[远端节点配置采集](docs/remote-node-backup.md)和[节点快速恢复](docs/node-recovery.md)。
 
 ### 默认访问地址
 
