@@ -69,6 +69,10 @@ python3 scripts/node_recovery.py validate \
 
 ## 完整灾备包恢复脚本
 
+![完整灾备包的隔离恢复准备](diagrams/disaster-restore-preparation.svg)
+
+[PlantUML 源文件](diagrams/disaster-restore-preparation.puml)
+
 如果需要同时准备控制面、数据库、用户附件和两个节点的配置，使用
 `scripts/restore_backup.py`。它支持本地明文 `tar.gz` 和从 R2 下载的加密
 `.enc` 文件；加密密码只能通过受保护的密码文件或环境变量提供，不要写进命令

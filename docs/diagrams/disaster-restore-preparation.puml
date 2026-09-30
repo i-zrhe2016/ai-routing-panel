@@ -1,0 +1,46 @@
+@startuml
+!include style.iuml
+title 完整灾备包的隔离恢复准备
+
+start
+:选择本地 tar.gz 或 R2 下载的 .enc;
+if (加密归档？) then (是)
+  :从受保护文件或环境变量读取密码\n验证并解密到临时文件;
+endif
+:校验归档路径、文件大小与 SHA-256\n检查两层 manifest;
+if (归档校验通过？) then (是)
+else (否)
+  :返回失败，不发布恢复树;
+  stop
+endif
+if (必需数据库与节点材料完整？) then (是)
+else (否)
+  if (显式使用 --allow-incomplete？) then (是)
+    :记录部分恢复状态;
+  else (否)
+    :写入前拒绝恢复准备;
+    stop
+  endif
+endif
+:检查输出目录\n已有非空目录需显式 --force;
+:在目标目录旁创建临时恢复树\n写入数据库、配置、附件与节点材料;
+:生成 restore-report.json;
+:发布隔离恢复树;
+if (准备与发布成功？) then (是)
+  :返回准备结果与完整性状态;
+else (否)
+  :清理临时树\n更新已有目录失败时回滚已替换文件;
+  stop
+endif
+partition 人工部署与验收 {
+  :检查恢复报告\n恢复 Secret、网络、防火墙与管理身份;
+  :停止目标服务\n替换数据库与配置，执行配置测试;
+  :启动并检查节点健康与真实业务连接;
+  :验收通过后切换 DNS 或恢复流量;
+}
+note right
+  restore_backup.py 只准备隔离恢复树；
+  不执行 SSH、Docker 或线上流量切换。
+end note
+stop
+@enduml

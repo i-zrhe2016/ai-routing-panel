@@ -136,6 +136,12 @@ AI 节点当前目标使用 `ssh` 模式；未设置远端目标时才使用 `do
 
 ## 主要数据流
 
+![端口变更的配置应用与补偿](diagrams/config-apply-transaction.svg)
+
+[PlantUML 源文件](diagrams/config-apply-transaction.puml)
+
+此图对应 `app/xray/apply.py` 的事务编排，区分直接重载与外部 reloader，并标出失败后的补偿边界。
+
 1. 管理员在 Web UI 或 `POST /api/ports` 修改端口状态。
 2. `panel.db` 持久化端口、租户、流量和 AI 聚合数据。
 3. `panel-ports.json` 记录当前有效监听端口。

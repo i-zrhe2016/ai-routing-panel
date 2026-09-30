@@ -12,6 +12,10 @@
 
 ## 生成流程
 
+![日报生成、失败边界与发布](diagrams/daily-report-publication.svg)
+
+[PlantUML 源文件](diagrams/daily-report-publication.puml)
+
 1. 验证 Prometheus 可用性、必需 labels 和 target 唯一性。
 2. 对前一自然日执行版本化 range queries，计算覆盖率、counter reset 和两个数据面的日流量增量。
 3. 从 SQLite 读取 `xray-ops-attribution-sampler` 写入的脱敏 user/inbound counter 快照，计算报告窗口内的增量归因。

@@ -6,6 +6,10 @@
 
 ## 当前入口
 
+![管理控制台访问与写操作校验](diagrams/panel-access-decision.svg)
+
+[PlantUML 源文件](diagrams/panel-access-decision.puml)
+
 控制面**没有登录界面**：能否访问完全由客户端来源地址决定。
 
 - 内网直连：`http://<控制面内网地址>:18080`

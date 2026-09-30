@@ -30,6 +30,32 @@
 | `xray-reality-backup` | 普通数据面故障时提供备用入口 |
 | `upload_backup_r2.py` | 使用 AES-256-GCM 加密灾备归档并通过 R2 S3 API 上传 |
 
+## 流量与故障切换
+
+正常运行时，普通流量由普通数据面直出，命中 AI 域名规则的流量送往独立 AI 节点：
+
+![正常运行时的 DNS 与流量路径](docs/diagrams/dns-primary-topology.svg)
+
+[PlantUML 源文件](docs/diagrams/dns-primary-topology.puml) · [AI 路由与候选选择](docs/ai-routing.md#ai-上游选择)
+
+普通数据面故障且备用能力已启用时，DNS 切到控制面备用入口；AI 节点可用时走 relay：
+
+![普通数据面故障后的备用 relay 路径](docs/diagrams/dns-backup-relay-topology.svg)
+
+[PlantUML 源文件](docs/diagrams/dns-backup-relay-topology.puml) · [完整故障场景与回切](docs/dns-failover.md) · [容错边界](docs/fault-tolerance.md)
+
+AI 候选全部不可用时，流量按所在入口回退直出。AI 候选切换与 DNS 入口切换的判定分别见上述专题。
+
+## 灾备链路
+
+数据库快照、配置、业务附件与节点材料组成可校验归档，启用 R2 时再加密上传：
+
+![灾备归档与加密上传流程](docs/diagrams/disaster-backup-flow.svg)
+
+[PlantUML 源文件](docs/diagrams/disaster-backup-flow.puml) · [灾备归档](docs/disaster-backup.md) · [完整恢复准备](docs/node-recovery.md#完整灾备包恢复脚本)
+
+R2 保存离线归档，恢复脚本先准备隔离目录；服务替换与流量切换仍需人工验收。
+
 ## 快速开始
 
 ### 环境要求

@@ -1,0 +1,34 @@
+@startuml
+!include ../../diagrams/style.iuml
+title 日报生成、失败边界与发布
+
+start
+:确定 Asia/Shanghai 前一自然日窗口;
+:查询 Prometheus\n检查 labels、唯一性、覆盖率与 counter reset;
+:汇总脱敏 counter 快照\n小时 AI 域名报告与只读 panel.db 聚合;
+:执行确定性规则\n保留 unknown 与数据源缺口;
+if (显式 rules_only 维护运行？) then (是)
+  :使用规则结果;
+else (正常运行)
+  :调用 Codex\n输入有界指标与域名摘要;
+  if (调用与输出契约校验成功？) then (是)
+    :合并符合契约的报告结果;
+  else (否)
+    :记录运行失败\n不自动降级、不发布报告;
+    stop
+  endif
+endif
+:校验统一结果\n生成 JSON 与 Markdown;
+if (结果校验与原子发布成功？) then (是)
+else (否)
+  :记录失败，不发布半份报告;
+  stop
+endif
+:归档到 ops-daily-reports/<year>\n提交报告目录，按推送配置同步远端;
+:记录 report_runs 与归档索引;
+note right
+  Reporter 不读取原始日志、不执行节点修复。
+  历史数据缺口不能由当前状态倒推填补。
+end note
+stop
+@enduml

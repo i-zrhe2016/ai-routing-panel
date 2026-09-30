@@ -53,6 +53,10 @@ AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALIT
 
 ## AI 上游选择
 
+![AI 出口模式与候选选择](diagrams/ai-upstream-selection.svg)
+
+[PlantUML 源文件](diagrams/ai-upstream-selection.puml)
+
 AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 - 主上游 + 追加备用：

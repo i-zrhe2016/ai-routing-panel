@@ -1,0 +1,36 @@
+@startuml
+!include style.iuml
+title 管理控制台访问与写操作校验
+
+start
+:客户端访问控制面;
+if (通过宿主机网络与防火墙？) then (是)
+  :应用读取 request.remote_addr;
+else (否)
+  :连接在网络层被阻断;
+  stop
+endif
+if (来源属于 PANEL_ALLOWED_NETWORKS？) then (是)
+  :进入管理页面或管理 API;
+else (否)
+  :返回 403\nAPI 返回 forbidden_source;
+  :记录 panel.access.denied;
+  stop
+endif
+if (管理写操作？) then (是)
+  if (CSRF 令牌有效？) then (是)
+    :执行业务操作;
+  else (否)
+    :拒绝写操作;
+    stop
+  endif
+else (读取)
+  :返回页面或只读数据;
+endif
+note right
+  管理控制台没有管理员登录。
+  Host 和客户端伪造的代理头不参与来源放行。
+  租户与客户接口另有各自认证要求。
+end note
+stop
+@enduml

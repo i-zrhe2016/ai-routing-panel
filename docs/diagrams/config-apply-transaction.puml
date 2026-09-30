@@ -1,0 +1,48 @@
+@startuml
+!include style.iuml
+title 端口变更的配置应用与补偿
+
+actor "调用方" as caller
+participant "XrayApplyService" as apply
+database "SQLite" as db
+participant "运行时配置与订阅文件" as files
+participant "数据面与备用 Xray" as nodes
+
+caller -> apply : apply_mutation(operation)
+activate apply
+apply -> apply : 获取跨进程文件锁与写锁\n同步流量状态
+apply -> db : BEGIN IMMEDIATE\n执行业务变更 / 清理过期与超额端口
+apply -> files : 保存旧配置与订阅内容
+group 应用阶段（任一步异常转入补偿）
+  apply -> files : 写 panel-ports.json\n渲染完整配置与订阅
+  apply -> nodes : 配置校验 / 按后端能力同步
+  opt 外部 reloader 模式
+    apply -> files : 校验通过后创建 .pending-apply
+  end
+  opt 已启用控制面备用 Xray
+    apply -> nodes : 重载备用配置
+  end
+  alt 直接重载模式
+    apply -> nodes : 重启普通数据面
+  else 外部 reloader 模式
+    note over files, nodes
+      watcher 负责校验、重启和确认新进程，
+      成功后清除 pending 标记。
+    end note
+  end
+end
+alt 应用阶段及数据库提交成功
+  apply -> db : COMMIT
+  apply --> caller : 返回变更结果
+else 应用阶段或提交异常
+  apply -> db : ROLLBACK
+  apply -> files : 恢复旧配置、订阅与端口清单
+  apply -> nodes : 尽力同步旧配置\n对已尝试重启的节点执行补偿重载
+  note over apply, nodes
+    补偿失败记录 rollback_failed；
+    不把文件恢复等同于运行状态已恢复。
+  end note
+  apply --> caller : 返回原始失败
+end
+deactivate apply
+@enduml
