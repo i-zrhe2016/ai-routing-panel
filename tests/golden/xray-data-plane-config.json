@@ -1,0 +1,127 @@
+{
+  "api": {
+    "listen": "127.0.0.1:10085",
+    "services": [
+      "StatsService",
+      "HandlerService"
+    ],
+    "tag": "api"
+  },
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": 31098,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "flow": "xtls-rprx-vision",
+            "id": "11111111-1111-1111-1111-111111111111"
+          }
+        ],
+        "decryption": "none"
+      },
+      "sniffing": {
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "enabled": true,
+        "routeOnly": true
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "realitySettings": {
+          "dest": "www.microsoft.com:443",
+          "privateKey": "synthetic-normal-private-key",
+          "serverNames": [
+            "www.microsoft.com"
+          ],
+          "shortIds": [
+            "0123456789abcdef"
+          ],
+          "show": false,
+          "xver": 0
+        },
+        "security": "reality",
+        "sockopt": {
+          "tcpFastOpen": true,
+          "tcpKeepAliveIdle": 180,
+          "tcpKeepAliveInterval": 30
+        }
+      },
+      "tag": "panel-31098"
+    }
+  ],
+  "log": {
+    "access": "/var/log/xray/access.log",
+    "error": "/var/log/xray/error.log",
+    "loglevel": "warning"
+  },
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "block"
+    },
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "ai.example.net",
+            "port": 443,
+            "users": [
+              {
+                "encryption": "none",
+                "flow": "xtls-rprx-vision",
+                "id": "22222222-2222-2222-2222-222222222222"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "realitySettings": {
+          "fingerprint": "chrome",
+          "publicKey": "synthetic-ai-public-key",
+          "serverName": "www.amazon.com",
+          "shortId": "fedcba9876543210"
+        },
+        "security": "reality"
+      },
+      "tag": "ai_proxy"
+    }
+  ],
+  "policy": {
+    "system": {
+      "statsInboundDownlink": true,
+      "statsInboundUplink": true
+    }
+  },
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "network": "udp",
+        "outboundTag": "block",
+        "port": 443,
+        "type": "field"
+      },
+      {
+        "domain": [
+          "domain:chatgpt.com",
+          "domain:openai.com"
+        ],
+        "outboundTag": "ai_proxy",
+        "type": "field"
+      }
+    ]
+  },
+  "stats": {}
+}

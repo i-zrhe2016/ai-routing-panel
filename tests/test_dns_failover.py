@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -7,6 +8,9 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+
+
+FAILOVER_GOLDEN = Path(__file__).resolve().parent / "golden" / "dns-failover-defaults.json"
 
 
 def load_state_module(temp_root, extra_env=None):
@@ -44,8 +48,8 @@ def load_state_module(temp_root, extra_env=None):
     os.environ["CF_DNS_RECORD_NAME"] = "edge.example.com"
     os.environ["CF_DNS_RECORD_PROXIED"] = "0"
     os.environ["CF_DNS_RECORD_TTL"] = "60"
-    os.environ["DNS_FAILOVER_PRIMARY_CONTENT"] = "1.1.1.1"
-    os.environ["DNS_FAILOVER_BACKUP_CONTENT"] = "2.2.2.2"
+    os.environ["DNS_FAILOVER_PRIMARY_CONTENT"] = "192.0.2.1"
+    os.environ["DNS_FAILOVER_BACKUP_CONTENT"] = "198.51.100.2"
     os.environ["DNS_FAILOVER_BACKUP_LABEL"] = "控制面备用节点"
     if extra_env:
         for key, value in extra_env.items():
@@ -119,6 +123,68 @@ class DnsFailoverTest(unittest.TestCase):
         }
         state.refresh_dns_failover_record_snapshot()
 
+    def test_dns_failover_threshold_defaults_are_three_failures_and_two_successes(self):
+        os.environ.pop("DNS_FAILOVER_FAILURE_THRESHOLD", None)
+        os.environ.pop("DNS_FAILOVER_RECOVERY_THRESHOLD", None)
+        for module_name in list(sys.modules):
+            if module_name == "app.config" or module_name.startswith("app.config."):
+                sys.modules.pop(module_name, None)
+
+        config = importlib.import_module("app.config")
+
+        self.assertEqual(config.DNS_FAILOVER_FAILURE_THRESHOLD, 3)
+        self.assertEqual(config.DNS_FAILOVER_RECOVERY_THRESHOLD, 2)
+
+    def test_default_threshold_sequence_matches_the_golden_transition_contract(self):
+        scenario = json.loads(FAILOVER_GOLDEN.read_text(encoding="utf-8"))
+        thresholds = scenario["thresholds"]
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_FAILURE_THRESHOLD": str(thresholds["failure"]),
+                "DNS_FAILOVER_RECOVERY_THRESHOLD": str(thresholds["recovery"]),
+            }
+        )
+        self.seed_record(state, "192.0.2.1")
+        self.assertEqual(state.dns_failover_status()["failure_threshold"], thresholds["failure"])
+        self.assertEqual(state.dns_failover_status()["recovery_threshold"], thresholds["recovery"])
+
+        current_record = {"content": "192.0.2.1"}
+        state.dns_failover_manager.get_record = lambda: {
+            "content": current_record["content"],
+            "ttl": 60,
+            "proxied": False,
+        }
+        probe_results = iter(scenario["probes"])
+
+        def probe_once():
+            healthy = next(probe_results) == "success"
+            return {"ok": healthy, "error": "" if healthy else "synthetic timeout"}
+
+        state.dns_failover_manager.probe_once = probe_once
+        provider_updates = []
+
+        def sync_target(target, primary_content=None, backup_content=None):
+            provider_updates.append(target)
+            current_record["content"] = "192.0.2.1" if target == "primary" else "198.51.100.2"
+            return {"content": current_record["content"], "ttl": 60, "proxied": False}
+
+        state.dns_failover_manager.sync_target = sync_target
+        actual = []
+        for _probe in scenario["probes"]:
+            status = state.run_dns_failover_check()
+            actual.append(
+                {
+                    "current_target": status["current_target"],
+                    "consecutive_failures": status["consecutive_failures"],
+                    "consecutive_successes": status["consecutive_successes"],
+                    "last_switch_reason": status["last_switch_reason"],
+                    "provider_updates": list(provider_updates),
+                }
+            )
+
+        self.assertEqual(actual, scenario["expected"])
+        self.assertEqual(provider_updates, ["backup", "primary", "backup"])
+
     def test_dns_failover_status_disabled(self):
         state, _state_module = self.build_state({"DNS_FAILOVER_ENABLED": "0"})
 
@@ -144,14 +210,14 @@ class DnsFailoverTest(unittest.TestCase):
                 "DNS_FAILOVER_BACKUP_CONTENT": "",
             }
         )
-        state.data_plane.resolve_public_ip = lambda timeout_seconds=5: "1.1.1.1"
-        state.resolve_dns_failover_contents.__globals__["resolve_public_ip"] = lambda timeout=5.0: "2.2.2.2"
+        state.data_plane.resolve_public_ip = lambda timeout_seconds=5: "192.0.2.1"
+        state.resolve_dns_failover_contents.__globals__["resolve_public_ip"] = lambda timeout=5.0: "198.51.100.2"
 
         status = state.dns_failover_status()
 
         self.assertTrue(status["configured"])
-        self.assertEqual(status["primary_content"], "1.1.1.1")
-        self.assertEqual(status["backup_content"], "2.2.2.2")
+        self.assertEqual(status["primary_content"], "192.0.2.1")
+        self.assertEqual(status["backup_content"], "198.51.100.2")
 
     def test_dns_failover_requires_explicit_backup_when_control_plane_backup_disabled(self):
         state, _state_module = self.build_state(
@@ -168,11 +234,11 @@ class DnsFailoverTest(unittest.TestCase):
 
     def test_dns_failover_switches_to_backup_after_threshold(self):
         state, _state_module = self.build_state()
-        self.seed_record(state, "1.1.1.1")
+        self.seed_record(state, "192.0.2.1")
         state.dns_failover_manager.probe_once = lambda: {"ok": False, "error": "timeout"}
         switch_calls = []
         state.dns_failover_manager.sync_target = lambda target, primary_content=None, backup_content=None: switch_calls.append(target) or {
-            "content": "2.2.2.2",
+            "content": "198.51.100.2",
             "ttl": 60,
             "proxied": False,
         }
@@ -187,11 +253,11 @@ class DnsFailoverTest(unittest.TestCase):
 
     def test_dns_failover_does_not_repeat_backup_switch(self):
         state, _state_module = self.build_state()
-        self.seed_record(state, "2.2.2.2")
+        self.seed_record(state, "198.51.100.2")
         state.dns_failover_manager.probe_once = lambda: {"ok": False, "error": "timeout"}
         switch_calls = []
         state.dns_failover_manager.sync_target = lambda target, primary_content=None, backup_content=None: switch_calls.append(target) or {
-            "content": "2.2.2.2",
+            "content": "198.51.100.2",
             "ttl": 60,
             "proxied": False,
         }
@@ -204,7 +270,7 @@ class DnsFailoverTest(unittest.TestCase):
 
     def test_dns_failover_can_fail_over_again_after_recovery(self):
         state, _state_module = self.build_state()
-        self.seed_record(state, "1.1.1.1")
+        self.seed_record(state, "192.0.2.1")
         probe_results = iter(
             [
                 {"ok": False, "error": "first outage"},
@@ -216,7 +282,7 @@ class DnsFailoverTest(unittest.TestCase):
             ]
         )
         switch_calls = []
-        current_record = {"content": "1.1.1.1"}
+        current_record = {"content": "192.0.2.1"}
 
         state.dns_failover_manager.probe_once = lambda: next(probe_results)
         state.dns_failover_manager.get_record = lambda: {
@@ -227,7 +293,7 @@ class DnsFailoverTest(unittest.TestCase):
 
         def sync_target(target, primary_content=None, backup_content=None):
             switch_calls.append(target)
-            current_record["content"] = "1.1.1.1" if target == "primary" else "2.2.2.2"
+            current_record["content"] = "192.0.2.1" if target == "primary" else "198.51.100.2"
             return {
                 "content": current_record["content"],
                 "ttl": 60,
@@ -293,11 +359,11 @@ class DnsFailoverTest(unittest.TestCase):
 
     def test_dns_failover_recovers_to_primary_after_threshold(self):
         state, _state_module = self.build_state()
-        self.seed_record(state, "2.2.2.2")
+        self.seed_record(state, "198.51.100.2")
         state.dns_failover_manager.probe_once = lambda: {"ok": True, "error": ""}
         switch_calls = []
         state.dns_failover_manager.sync_target = lambda target, primary_content=None, backup_content=None: switch_calls.append(target) or {
-            "content": "1.1.1.1",
+            "content": "192.0.2.1",
             "ttl": 60,
             "proxied": False,
         }
@@ -312,7 +378,7 @@ class DnsFailoverTest(unittest.TestCase):
 
     def test_dns_failover_api_failure_records_error(self):
         state, state_module = self.build_state()
-        self.seed_record(state, "1.1.1.1")
+        self.seed_record(state, "192.0.2.1")
         state.dns_failover_manager.probe_once = lambda: {"ok": False, "error": "timeout"}
 
         def fail_switch(_target, primary_content=None, backup_content=None):
@@ -330,9 +396,9 @@ class DnsFailoverTest(unittest.TestCase):
 
     def test_manual_switch_updates_state(self):
         state, _state_module = self.build_state()
-        self.seed_record(state, "1.1.1.1")
+        self.seed_record(state, "192.0.2.1")
         state.dns_failover_manager.sync_target = lambda _target, primary_content=None, backup_content=None: {
-            "content": "2.2.2.2",
+            "content": "198.51.100.2",
             "ttl": 60,
             "proxied": False,
         }
@@ -341,7 +407,7 @@ class DnsFailoverTest(unittest.TestCase):
 
         self.assertEqual(status["current_target"], "backup")
         self.assertEqual(status["last_switch_reason"], "manual_switch")
-        self.assertEqual(status["record_content"], "2.2.2.2")
+        self.assertEqual(status["record_content"], "198.51.100.2")
 
     def test_peak_window_prefers_backup_during_configured_hours(self):
         state, _state_module = self.build_state(
@@ -395,7 +461,7 @@ class DnsFailoverTest(unittest.TestCase):
                 "DNS_FAILOVER_PEAK_TIMEZONE": "+00:00",
             }
         )
-        self.seed_record(state, "1.1.1.1")
+        self.seed_record(state, "192.0.2.1")
         state.dns_failover_peak_window_status = lambda now=None: {
             "enabled": True,
             "configured": True,
@@ -407,7 +473,7 @@ class DnsFailoverTest(unittest.TestCase):
         state.dns_failover_manager.probe_once = lambda: {"ok": True, "error": ""}
         switch_calls = []
         state.dns_failover_manager.sync_target = lambda target, primary_content=None, backup_content=None: switch_calls.append(target) or {
-            "content": "2.2.2.2",
+            "content": "198.51.100.2",
             "ttl": 60,
             "proxied": False,
         }
