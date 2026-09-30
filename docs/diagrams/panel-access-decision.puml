@@ -7,21 +7,21 @@ start
 if (通过宿主机网络与防火墙？) then (是)
   :应用读取 request.remote_addr;
 else (否)
-  :连接在网络层被阻断;
+  :网络层丢弃连接\n应用无请求记录;
   stop
 endif
 if (来源属于 PANEL_ALLOWED_NETWORKS？) then (是)
   :进入管理页面或管理 API;
 else (否)
-  :返回 403\nAPI 返回 forbidden_source;
-  :记录 panel.access.denied;
+  :应用拒绝来源\n页面/API 返回 403;
+  :API 错误码 forbidden_source\n记录 panel.access.denied;
   stop
 endif
 if (管理写操作？) then (是)
   if (CSRF 令牌有效？) then (是)
     :执行业务操作;
   else (否)
-    :拒绝写操作;
+    :CSRF 校验拒绝写操作\n返回 403;
     stop
   endif
 else (读取)

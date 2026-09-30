@@ -21,9 +21,9 @@
 3. 从 SQLite 读取 `xray-ops-attribution-sampler` 写入的脱敏 user/inbound counter 快照，计算报告窗口内的增量归因。
 4. 读取 AI 管理器的小时域名报表和 `panel.db` 的 `ai_domains` / `ai_domain_observations`，汇总分类、每日新增域名、每个域名的命中次数与流量导向；相同域名在窗口内发生出口变化时保留为 `mixed`。
 5. 将标准化指标与有界的 AI 域名摘要交给确定性规则和 Codex；域名逐项的 `source`、`model`、`reason` 来自管理器每小时分类结果，日报不会重新猜测历史分类。Codex 缺失、认证失败、调用失败或输出校验失败时，本次日报运行失败，不生成或发布规则-only 报告。
-6. 从同一份已校验结果生成 JSON 和 Markdown，并原子发布。
-7. 将 Markdown 和 JSON 复制到仓库内 `ops-daily-reports/<year>/`，只提交该目录并推送到 GitHub。
-8. 仅把本次运行元数据和报告归档索引写入 SQLite。
+6. 从同一份已校验结果生成 JSON 和 Markdown，并原子写入本地报告目录。
+7. 将本次运行状态、报告路径和摘要写入 SQLite `report_runs`，标记本地报告成功。
+8. 成功报告再复制到仓库内 `ops-daily-reports/<year>/`，只提交该目录并按配置推送到 GitHub。
 
 Prometheus 查询失败、标签冲突或覆盖不足时仍应生成明确标注缺口的规则报告；无法校验规则结果或无法原子发布时，本次运行失败且不发布半份报告。
 `--rules-only` 或 `OPS_FORCE_RULES_ONLY=1` 仅用于明确的影子/维护运行，不是 Codex 失败时的自动降级路径。
@@ -125,7 +125,7 @@ ops-daily-reports/<year>/<date>.md
 ops-daily-reports/<year>/<date>.json
 ```
 
-如果仓库落后于 upstream、GitHub 凭据不可用或推送失败，日报文件仍保留在 `/data/xray-ops/reports`，调度器记录 `report_github_publish_failed` 日志并在下一轮继续尝试发布已完成日报。
+如果仓库落后于 upstream、GitHub 凭据不可用或推送失败，本地日报和 `report_runs` 成功状态仍保留；调度器记录 `report_github_publish_failed` 日志，并在下一轮继续尝试发布已完成日报。GitHub 发布状态不会撤销本地报告成功。
 
 ## 职责边界
 

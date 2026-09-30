@@ -1,34 +1,23 @@
 @startuml
 !include style.iuml
-title Xray node backup validation and replacement
-left to right direction
+title Xray 节点校验与替换
 
-actor "Operator" as operator
-cloud "Local backup /\nCloudflare R2" as archive #F9E79F
-component "node_recovery.py\nvalidate\nSHA-256 + path checks" as validator #D7BDE2
-component "node_recovery.py\nprepare\nportable node layout" as preparer #FAD7A0
-node "New empty host\nDocker + network ready" as host #E0F2FE
-component "docker-compose.node.yml\nstandalone Xray" as compose #A9DFBF
-node "Normal data plane\nor AI data plane" as node #DCFCE7
-database "Shared panel.db\ninside archive" as db #D3D3D3
-
-operator --> archive : select last complete bundle
-archive --> validator : read archive
-validator --> db : verify database hash
-validator --> preparer : recoveryReady=true
-preparer --> host : write only validated files
-host --> compose : docker compose up -d
-compose --> node : start Xray
-operator --> node : Tailscale / firewall / endpoint check
-operator --> host : health and traffic verification
-
-note bottom of validator
-  Invalid hashes, missing required files,
-  duplicate members, and traversal paths fail closed.
+start
+:选择最近一个 recoveryReady 归档;
+:validate 校验归档、SHA-256 与安全路径;
+if (panel.db 与节点必需材料完整？) then (是)
+  :确认目标节点恢复清单;
+else (否)
+  :停止，不准备恢复目录;
+  stop
+endif
+:prepare 仅复制已校验的节点文件\n生成便携恢复树;
+:写入新空主机;
+:启动独立 docker-compose.node.yml;
+:人工检查 Tailscale、防火墙、端点、健康与业务流量;
+note right
+  重复归档成员、路径穿越、哈希不符或缺少必需文件都会失败关闭。
+  SSH key、known_hosts、云凭据和基础设施配置由人工提供。
 end note
-
-note bottom of preparer
-  SSH keys, known_hosts, cloud credentials,
-  and infrastructure provisioning remain external secrets.
-end note
+stop
 @enduml

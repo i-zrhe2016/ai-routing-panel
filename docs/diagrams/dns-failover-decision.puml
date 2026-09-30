@@ -3,17 +3,22 @@
 title DNS 自动切换与回切判定
 start
 :记录探测结果\n更新连续失败与连续成功计数;
-if (当前 DNS 指向 primary？) then (是)
+if (当前高峰窗口配置有效？) then (是)
+  :按时区窗口确定 preferred_target\n窗口内 backup，窗口外 primary;
+else (否)
+  :preferred_target = primary;
+endif
+if (当前 DNS 已指向 preferred_target？) then (是)
   if (连续失败达到\nDNS_FAILOVER_FAILURE_THRESHOLD？) then (是)
-    :切到 backup\nauto_failover;
+    :切到另一个目标\nauto_failover 或 peak_failover;
   else (否)
-    :保持 primary;
+    :保持 preferred_target;
   endif
-else (backup)
-  if (连续成功达到\nDNS_FAILOVER_RECOVERY_THRESHOLD？) then (是)
-    :切回 primary\nauto_recovery;
+else (alternate)
+  if (探测成功且连续成功达到\nDNS_FAILOVER_RECOVERY_THRESHOLD？) then (是)
+    :切回 preferred_target\nauto_recovery 或 peak_recovery;
   else (否)
-    :保持 backup;
+    :保持当前 alternate;
   endif
 endif
 stop

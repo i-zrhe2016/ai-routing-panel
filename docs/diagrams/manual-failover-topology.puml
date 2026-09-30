@@ -9,13 +9,14 @@ component "控制面\n管理与编排" as panel
 component "普通数据面\n主入口" as data
 component "主 AI 上游\n台湾 AI 节点" as primary
 component "控制面备用 Xray\n数据面故障时接管" as backup
+cloud "互联网" as internet
 
 client --> data : 正常代理流量
 data --> primary : AI 域名\nauto / 人工主
-data --> data : 直出 / AI 人工回退
+data --> internet : 普通直出 / AI 回退
 client --> backup : DNS 手动或自动切换
 backup --> primary : relay
-backup --> backup : AI 节点故障时直出
+backup --> internet : AI 节点故障时 freedom 直出
 panel ..> data : 探测 / 配置 / 重启
 panel ..> primary : 探测主候选
 panel ..> backup : 渲染 relay / direct

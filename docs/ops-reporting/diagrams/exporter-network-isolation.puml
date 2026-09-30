@@ -2,7 +2,7 @@
 !include ../../diagrams/style.iuml
 left to right direction
 
-title Exporter Network Isolation
+title Exporter 网络隔离
 
 actor "Untrusted Internet Client" as publicClient
 
@@ -11,13 +11,13 @@ node "Control Plane" as control #EFF6FF {
 }
 
 node "Normal Data Plane" as normal #ECFDF5 {
-  component "Host Firewall" as normalFirewall #FEF3C7
+  component "Host Firewall\nEXPORTER_BIND_ADDRESS\nCompose default: 0.0.0.0" as normalFirewall #FEF3C7
   component "node-exporter" as normalNode #F8FAFC
   component "cAdvisor" as normalCadvisor #F8FAFC
 }
 
 node "Taiwan AI Data Plane" as ai #FFF7ED {
-  component "Tailscale + Host Firewall\nno public exporter mapping" as aiFirewall #FEF3C7
+  component "Tailscale + Host Firewall\nEXPORTER_BIND_ADDRESS\nCompose default: 0.0.0.0" as aiFirewall #FEF3C7
   component "node-exporter" as aiNode #F8FAFC
   component "cAdvisor" as aiCadvisor #F8FAFC
 }
@@ -38,5 +38,10 @@ legend right
   |<#FEF3C7> | Network enforcement |
   |<#FEE2E2> | Metrics storage/query |
 endlegend
+
+note bottom of aiFirewall
+  Check the effective host port binding.
+  Firewall and cloud security group must allow only scrape sources.
+end note
 
 @enduml

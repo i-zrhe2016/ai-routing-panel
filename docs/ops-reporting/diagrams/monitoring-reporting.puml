@@ -1,8 +1,8 @@
 @startuml
 !include ../../diagrams/style.iuml
-left to right direction
+top to bottom direction
 
-title Prometheus-only Monitoring and Daily Reporting
+title Prometheus 监控与运维日报
 
 node "Control Plane" as control #EFF6FF {
   component "Panel /metrics\nBearer protected" as panelMetrics #DBEAFE
@@ -10,8 +10,9 @@ node "Control Plane" as control #EFF6FF {
   component "Prometheus\nloopback API :9090" as prometheus #FEE2E2
   component "Grafana" as grafana #F3E8FF
   component "Daily Reporter\nrules + Codex" as reporter #DCFCE7
+  component "Optional attribution sampler\nHMAC counters" as sampler #FAD7A0
   folder "Atomic JSON / Markdown" as reportFiles #FEF3C7
-  database "SQLite\nreport_runs audit" as audit #E5E7EB
+  database "ops.db\nreport_runs + optional counter snapshots" as audit #E5E7EB
 }
 
 node "Normal Data Plane" as normal #ECFDF5 {
@@ -26,14 +27,16 @@ node "Taiwan AI Data Plane\nTailscale management network" as ai #FFF7ED {
 
 panelMetrics --> prometheus : authenticated scrape
 controlExporter --> prometheus : host metrics
-normalNode --> prometheus : restricted scrape
-normalCadvisor --> prometheus : restricted scrape
-aiNode --> prometheus : restricted Tailscale scrape :9100
-aiCadvisor --> prometheus : restricted Tailscale scrape :18081
+normal --> prometheus : restricted scrape\nnode-exporter :19100 / cAdvisor :18081
+ai --> prometheus : Tailscale scrape\nnode-exporter :9100 / cAdvisor :18081
+normal ..> sampler : optional stats SSH
+ai ..> sampler : optional stats SSH
 prometheus --> grafana : dashboards
 prometheus --> reporter : HTTP range queries
 reporter --> reportFiles
 reporter --> audit
+sampler --> audit : redacted counter snapshots
+audit --> reporter : optional report-window deltas
 
 component "Legacy SSH/raw-log Collector" as legacy #FECACA
 legacy -[hidden]-> reporter

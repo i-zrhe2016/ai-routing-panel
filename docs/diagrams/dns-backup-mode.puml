@@ -2,6 +2,7 @@
 !include style.iuml
 title 备用 Xray 模式维护
 start
+:执行本轮周期检查;
 :探测普通数据面与 AI 候选池;
 if (当前处于 backup 模式？) then (是)
   if (至少一个 AI 候选可达？) then (是)
@@ -16,7 +17,7 @@ else (primary)
   :备用 Xray 待命;
 endif
 if (本轮从 backup 回切 primary？) then (是)
-  :恢复 relay 配置供下次接管;
+  :恢复预配置 relay\n供下次备用接管使用;
 endif
 stop
 

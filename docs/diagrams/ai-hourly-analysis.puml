@@ -1,46 +1,34 @@
 @startuml
 !include style.iuml
+title AI 域名每小时分析与路由应用
 
-title Hourly AI Domain Analysis and Routing
-
-participant "DMIT Normal Xray" as dmit
-participant "runner.py\n(interval=3600s)" as runner
-participant "manager.py\n(orchestration)" as manager
-participant "observations.py" as observations
-participant "classifier.py" as classifier
-database "panel.db\nai_domains + observations" as db
-participant "candidates.py + selector.py" as selector
-participant "artifact.py" as artifact
-participant "dynamic-routing.json" as rules
-participant "Selected AI upstream" as ai
-
-== Every hour ==
-runner -> manager : Run one analysis/apply cycle
-manager -> dmit : Read access.log delta over SSH
-dmit --> observations : accepted destination records
-observations --> manager : domain observations
-manager -> classifier : Classify pending domains
-classifier --> manager : domain decisions
-manager -> selector : Probe and select AI candidate
-selector --> manager : primary / backup / fallback
-
-loop each observed domain
-  alt classification = ai
-    manager -> db : Upsert AI domain and hourly hit window
-    manager -> artifact : Build routing fragment and report
-    artifact -> rules : Write domain -> ai_proxy
-    rules --> dmit : Reload generated routing fragment
-    dmit -> ai : Relay AI domain via VLESS + REALITY
-  else classification != ai or still unknown
-    manager -> artifact : Omit domain from routing fragment
-    artifact -> rules : Write artifact without domain
-    dmit -> dmit : Use default freedom outbound
-  end
-end
-
-note over dmit,rules
-  Only AI domains enter dynamic-routing.json.
-  Non-AI and unresolved domains exit directly from the DMIT data plane.
+start
+partition "观测与分类" {
+  :读取普通数据面的 access.log 增量;
+  :更新观测窗口并分类待处理域名;
+  :汇总所有已分类 AI 域名;
+}
+partition "配置生成与应用" {
+  :按人工模式或候选优先级探测上游;
+  :生成完整 Xray 配置\nAI 域名写入 dynamic-routing.json;
+  :校验配置并同步目标数据面文件;
+  if (需应用新配置或重试待应用配置？) then (是)
+    if (已启用外部 reloader？) then (是)
+      :标记待应用\n交由 watcher 校验并重载;
+    else (否)
+      :直接重载受管 Xray;
+    endif
+  else (否)
+    :保留当前运行配置;
+  endif
+}
+partition "历史与持久化" {
+  :写入小时报表、panel.db\n和分类/日志状态;
+}
+note right
+  非 AI 与未分类域名不进入动态路由，
+  继续使用普通数据面的 freedom 出站。
+  报表持久化失败不会撤销已成功应用的配置。
 end note
-
+stop
 @enduml

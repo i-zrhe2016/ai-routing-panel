@@ -18,17 +18,27 @@ else (正常运行)
     stop
   endif
 endif
-:校验统一结果\n生成 JSON 与 Markdown;
-if (结果校验与原子发布成功？) then (是)
+:校验统一结果\n原子写入本地 JSON 与 Markdown;
+if (结果校验与本地原子写入成功？) then (是)
 else (否)
-  :记录失败，不发布半份报告;
+  :记录失败，不保留半份本地报告;
   stop
 endif
-:归档到 ops-daily-reports/<year>\n提交报告目录，按推送配置同步远端;
-:记录 report_runs 与归档索引;
+:将 report_runs 标记为 success\n记录本地 JSON/Markdown 路径与摘要;
+if (启用 GitHub 归档？) then (是)
+  :复制到 ops-daily-reports/<year>\n提交报告目录并按配置推送;
+  if (GitHub 发布成功？) then (是)
+    :发布完成;
+  else (否)
+    :记录发布失败\n保留本地成功报告供后续重试;
+  endif
+else (否)
+  :跳过 GitHub 发布;
+endif
 note right
   Reporter 不读取原始日志、不执行节点修复。
   历史数据缺口不能由当前状态倒推填补。
+  GitHub 推送失败不会撤销本地报告成功状态。
 end note
 stop
 @enduml
