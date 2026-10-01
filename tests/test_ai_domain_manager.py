@@ -845,6 +845,14 @@ class AiDomainManagerTest(unittest.TestCase):
         ):
             self.assertTrue(classifier.matches_forced_ai_route_domain(domain))
 
+    def test_dola_domain_family_is_forced_to_ai_route(self):
+        for domain in ("dola.com", "www.dola.com"):
+            self.assertTrue(classifier.matches_forced_ai_route_domain(domain))
+
+    def test_ipip0_domain_family_is_forced_to_ai_route(self):
+        for domain in ("ipip0.net", "www.ipip0.net"):
+            self.assertTrue(classifier.matches_forced_ai_route_domain(domain))
+
     def test_aws_domain_families_are_forced_to_ai_route(self):
         for domain in (
             "s3.amazonaws.com",
