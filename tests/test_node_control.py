@@ -1212,6 +1212,23 @@ class NodeControlTest(unittest.TestCase):
 
         self.assertEqual(calls, ["pull", "render"])
 
+    def test_render_xray_config_passes_configured_dynamic_routing_file(self):
+        dynamic_routing_path = self.root / "node" / "runtime" / "dynamic-routing.json"
+        os.environ["XRAY_DYNAMIC_ROUTING_PATH"] = str(dynamic_routing_path)
+        state_module = load_state_module(self.root)
+        state = state_module.PanelState()
+        commands = []
+
+        state.run_command = lambda command, error_prefix, timeout=None: commands.append(command)
+
+        state.render_xray_config()
+
+        command = commands[0]
+        self.assertEqual(
+            command[command.index("--dynamic-routing-file") + 1],
+            str(dynamic_routing_path),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ from ..config import (
     DATAPLANE_EXTERNAL_RELOADER_ENABLED,
     XRAY_CLIENT_CONFIG_PATH,
     XRAY_CONFIG_PATH,
+    XRAY_DYNAMIC_ROUTING_PATH,
     XRAY_ENV_FILE_PATH,
     XRAY_PANEL_PORTS_PATH,
 )
@@ -363,6 +364,8 @@ class XrayApplyService:
             str(XRAY_CLIENT_CONFIG_PATH),
             "--share-out",
             str(share_path),
+            "--dynamic-routing-file",
+            str(XRAY_DYNAMIC_ROUTING_PATH),
             "--panel-ports-file",
             str(XRAY_PANEL_PORTS_PATH),
         ]
