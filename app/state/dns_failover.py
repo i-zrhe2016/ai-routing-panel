@@ -37,7 +37,7 @@ class DnsFailoverService:
     def _backup_xray_mode(self):
         if self.backup_xray is None:
             return "disabled"
-        return self.backup_xray.backup_xray_mode()
+        return self.backup_xray.backup_config_mode()
 
     def ensure_dns_failover_schema(self, conn):
         conn.executescript(
@@ -272,6 +272,7 @@ class DnsFailoverService:
             "control_plane_backup_xray_enabled": bool(CONTROL_PLANE_BACKUP_XRAY_ENABLED),
             "control_plane_backup_xray_label": "控制面备用 Xray",
             "backup_xray_mode": self._backup_xray_mode(),
+            "backup_relay_target": self.backup_xray.backup_relay_target() if self.backup_xray else None,
             "fast_propagation_note": "已使用低 TTL；非代理记录建议保持 60 秒以尽快生效。",
             "peak_window": peak_window,
         }

@@ -160,6 +160,8 @@ def _configure_synthetic_dashboard_state(state):
     state.ai_routing.ai_routing_status = lambda sync_error="": {
         "status": "applied",
         "route_status": "applied",
+        "report_generated_at": "2026-01-02T03:04:05+00:00",
+        "config_apply_status": "direct",
         "ai_candidates": [
             {"selected": True, "is_reachable": True, "label": "ai-synthetic"}
         ],

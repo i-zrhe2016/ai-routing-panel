@@ -1,7 +1,9 @@
 """Transactional Xray configuration application orchestration."""
 
+import ipaddress
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -476,6 +478,51 @@ class XrayApplyService:
             return "disabled"
         url = self.resolve_backup_upstream_url()
         return "relay" if url else "direct"
+
+    def _backup_default_outbound(self):
+        if not CONTROL_PLANE_BACKUP_XRAY_ENABLED:
+            return None
+        try:
+            config = json.loads(XRAY_CONFIG_PATH.with_name("config-backup.json").read_text(encoding="utf-8"))
+            outbounds = config.get("outbounds")
+            # Xray falls back to its first outbound when no rule matches.
+            outbound = outbounds[0] if isinstance(outbounds, list) and outbounds else None
+            return outbound if isinstance(outbound, dict) and outbound.get("tag") == "direct" else None
+        except (OSError, ValueError, TypeError, AttributeError):
+            return None
+
+    def backup_config_mode(self):
+        """Read the rendered mode without changing backup maintenance policy."""
+        if not CONTROL_PLANE_BACKUP_XRAY_ENABLED:
+            return "disabled"
+        outbound = self._backup_default_outbound() or {}
+        protocol = outbound.get("protocol")
+        return {"freedom": "direct", "vless": "relay"}.get(protocol, "unknown") if isinstance(protocol, str) else "unknown"
+
+    def backup_relay_target(self):
+        """Expose only the rendered default relay destination, never credentials."""
+        outbound = self._backup_default_outbound() or {}
+        if outbound.get("protocol") != "vless":
+            return None
+        try:
+            targets = outbound.get("settings", {}).get("vnext")
+            if not isinstance(targets, list) or len(targets) != 1 or not isinstance(targets[0], dict):
+                return None
+            host, port = targets[0].get("address"), targets[0].get("port")
+            if not isinstance(host, str) or not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+                return None
+            if "%" in host:
+                return None
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                domain = r"(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
+                domain += r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.?"
+                if len(host) > 253 or not re.fullmatch(domain, host):
+                    return None
+            return {"upstream_host": host, "upstream_port": port}
+        except (ValueError, TypeError, AttributeError):
+            return None
 
     def sync_backup_xray_mode(self):
         """Re-render and restart the backup Xray when its mode changes."""

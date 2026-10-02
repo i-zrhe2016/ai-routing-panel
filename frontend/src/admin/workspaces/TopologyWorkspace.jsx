@@ -6,8 +6,8 @@ export default function TopologyWorkspace() {
   const panel = usePanel();
   return (
     <div className="workspace-section">
-      <section className="cc-page-intro"><div><h1>流量拓扑</h1><p>从入口到出口，查看当前路由、备用路径和每个 AI 候选的探测状态。</p></div></section>
-      <Panel title="当前流量路径" description="点击节点查看详情，路由状态随控制台同步更新。"><TrafficTopology panel={panel} /></Panel>
+      <section className="cc-page-intro"><div><h1>流量拓扑</h1><p>查看普通与 AI 域名的实际分流规则、备用入口出口，以及配置应用和探测状态。</p></div></section>
+      <Panel title="域名分流与出口" description="普通直出与 AI 分流可同时存在；备用入口按自身配置转发全部域名。"><TrafficTopology panel={panel} /></Panel>
     </div>
   );
 }

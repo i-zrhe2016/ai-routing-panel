@@ -296,72 +296,55 @@ docker compose --profile backup-xray logs -f xray-reality-backup
 
 流量路径见[备用直出拓扑](#场景④-双节点故障数据面--ai-节点)。
 
-### 状态图例
+### 后台路由快照
 
-- `●` 运行中（绿色 / ok）
-- `❌` 故障（红色 / bad）
-- `🔵` 接管中（蓝色 / info）
-- `⏸` 待命（灰色 / neutral）
-
-### Sidebar 汇总
-
-侧边栏显示三节点缩略状态：`2/3 运行中` + 当前流量导向节点名。
-
-### 数据来源
-
-`/api/dashboard` 的 `meta` 新增 `nodes` 数组和 `traffic_routing` 对象：
+后台图示和交互见[管理后台与流量拓扑](development.md#前端开发)。`/api/dashboard` 的
+`meta.traffic_routing` 描述域名分流配置及其应用证据；节点管理健康不等于端到端流量健康。
+`scenario` 是说明文本，`path` 才是路径枚举。
 
 ```json
 {
-  "meta": {
-    "nodes": [
-      {
-        "role": "data_plane",
-        "label": "普通数据面",
-        "status": "running",
-        "status_label": "运行中",
-        "target": "redacted-ip-011",
-        "reachable": true,
-        "xray_running": true,
-        "supports_restart": true,
-        "last_error": ""
-      },
-      {
-        "role": "ai_node",
-        "label": "AI 节点",
-        "status": "running",
-        "status_label": "运行中",
-        "target": "远端 SSH",
-        "reachable": true,
-        "xray_running": true,
-        "supports_restart": true,
-        "last_error": ""
-      },
-      {
-        "role": "control_plane_backup",
-        "label": "控制面备用",
-        "status": "standby",
-        "status_label": "待命",
-        "target": "本机",
-        "reachable": true,
-        "xray_running": false,
-        "supports_restart": false,
-        "last_error": ""
-      }
-    ],
-    "traffic_routing": {
-      "entry_node": "data_plane",
-      "exit_node": "ai_node",
-      "normal_exit": "direct",
-      "scenario": "normal",
-      "scenario_label": "正常运行",
-      "backup_mode": "relay"
-    }
-  }
+  "path": "normal_ai",
+  "label": "普通直出 + AI→AI 主节点",
+  "scenario": "普通及未分类域名直出；已分类 AI 域名转发到所选上游。",
+  "route_status": "已应用分流",
+  "is_degraded": false,
+  "waiting_for_switch": false,
+  "entry_node": "普通数据面",
+  "transit_nodes": ["AI 主节点"],
+  "exit_node": "普通直出 / AI 主节点出口",
+  "ordinary_direct_state": "active",
+  "ai_branch_state": "active",
+  "traffic_scope": "split_domains"
 }
 ```
 
-`scenario` 取值：`normal` / `ai_node_down` / `data_plane_down` / `both_down`。
+`path` 取值与含义：
+
+| 路径 | 配置含义 |
+| --- | --- |
+| `normal_ai` | 报告确认应用 AI 分流，普通直出仍保留；探测失败可使 AI 分支显示 blocked |
+| `normal_ai_pending` | 默认普通直出保留，AI 报告、应用或选中候选证据尚未确认 |
+| `normal_direct` | 已确认不启用 AI 分流，全部域名使用普通直出 |
+| `normal_fallback` | 报告确认 AI 分流已回退到普通直出 |
+| `dns_backup_relay_ai` | DNS 记录指向备用，实际备用配置将全部域名中继；不要求中继目标是当前 AI 候选 |
+| `dns_backup_direct` | DNS 记录指向备用，实际备用配置将全部域名直出 |
+| `dns_backup_unknown` | DNS 记录指向备用，但实际备用出口尚未确认 |
+| `dns_backup_pending` | 主入口状态尚未确认，DNS 记录仍指向主入口 |
+| `unknown` | 入口或配置证据不足 |
+
+分支状态取值为 `active`、`standby`、`blocked`、`unknown`；`active` 描述图中有证据的配置路径，
+不表示观测到实时字节或流量占比。`traffic_scope` 为普通数据面的 `split_domains` 或备用入口的
+`all_traffic`，协议阻断规则仍优先执行。
+
+`meta.ai_routing_status.report_generated_at` 保留带时区的原始报告时间；
+`config_apply_status` 保留 `direct`、`unchanged`、`delegated`、`unmanaged`、`not_needed`，缺失或非法值为
+`unknown`。只有已确认应用的报告及明确业务探测能标记 AI 分支；外部 watcher 接管本身不等于应用完成。
+
+`meta.dns_failover_status.backup_xray_mode` 从实际渲染的备用默认出口读取 `relay`、`direct`、`disabled`
+或 `unknown`；供运维维护使用的期望模式判断保持独立。`backup_relay_target` 只返回经校验的
+`upstream_host` 和 `upstream_port`，无法读取、非中继或不合法时为 `null`，不暴露用户或连接凭据。
+DNS 目标来自控制面记录，客户端缓存、长连接及配置重载状态仍可能使实际路径暂时不同。
 
 ## API 接口
 

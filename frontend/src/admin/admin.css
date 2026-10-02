@@ -784,61 +784,6 @@ textarea.a-input { height: auto; min-height: 100px; padding-top: 10px; resize: v
   gap: var(--space-6);
 }
 
-/* Probe, failure and diagnosis lists -------------------------------------- */
-
-.cc-probe-list,
-.cc-failure-list {
-  display: grid;
-  gap: var(--space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cc-probe-row {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  background: var(--c-surface-muted);
-}
-
-.cc-probe-row__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: 13px;
-}
-
-.cc-probe-row__head strong { color: var(--c-text); font-family: var(--font-mono); }
-
-.cc-probe-row__head small { margin-left: auto; color: var(--c-text-soft); }
-
-.cc-failure-list li {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid #ebc6c3;
-  border-radius: var(--r-md);
-  background: #fdf6f5;
-}
-
-.cc-failure-list div { display: flex; gap: var(--space-3); align-items: baseline; }
-
-.cc-failure-list strong { font-family: var(--font-mono); color: var(--c-text); }
-
-.cc-failure-list span { color: var(--c-text-muted); font-size: 13px; }
-
-.cc-failure-list p { margin: 6px 0 0; color: var(--c-danger); font-size: 13px; }
-
-.cc-failure-list time { display: block; margin-top: 4px; color: var(--c-text-soft); font-size: 12px; }
-
-.cc-diagnosis h4 {
-  margin: var(--space-6) 0 var(--space-3);
-  color: var(--c-text);
-  font-size: 14px;
-}
-
-.cc-diagnosis__source { margin: 0 0 var(--space-3); color: var(--c-text-soft); font-size: 12px; }
-
 /* Routing control --------------------------------------------------------- */
 
 .cc-route-cards {
