@@ -127,22 +127,11 @@ AI_NODE_DOCKER_BIN = os.environ.get("AI_NODE_DOCKER_BIN", "docker").strip() or "
 AI_NODE_RESTART_COMMAND = os.environ.get("AI_NODE_RESTART_COMMAND", "").strip()
 AI_NODE_CONFIG_PATH = os.environ.get("AI_NODE_CONFIG_PATH", "/etc/xray/config.json").strip()
 AI_NODE_API_SERVER = os.environ.get("AI_NODE_API_SERVER", "127.0.0.1:10085").strip()
-AI_NODE_METRICS_URL = (
-    os.environ.get("AI_NODE_METRICS_URL") or "http://127.0.0.1:31097/debug/vars"
-).strip()
 _AI_NODE_REMOTE_MODE = bool(AI_NODE_SSH_TARGETS or AI_NODE_SSH_TARGET)
 AI_NODE_ACCESS_LOG_PATH = (
     os.environ.get("AI_NODE_ACCESS_LOG_PATH")
     or ("/var/log/xray/ai-access.log" if _AI_NODE_REMOTE_MODE else str(BASE_DIR / "xray" / "logs" / "ai-access.log"))
 ).strip()
-AI_NODE_DESTINATION_WINDOW_SECONDS = parse_positive_env_int(
-    os.environ.get("AI_NODE_DESTINATION_WINDOW_SECONDS", "600"),
-    "AI_NODE_DESTINATION_WINDOW_SECONDS",
-)
-AI_NODE_DESTINATION_MAX_LABELS = parse_positive_env_int(
-    os.environ.get("AI_NODE_DESTINATION_MAX_LABELS", "50"),
-    "AI_NODE_DESTINATION_MAX_LABELS",
-)
 AI_NODE_PROBE_HOST = os.environ.get("AI_NODE_PROBE_HOST", "").strip()
 AI_NODE_CONFIG_OUT = Path(
     os.environ.get("AI_NODE_CONFIG_OUT", XRAY_CONFIG_PATH.parent / "config-ai-node.json")
@@ -217,18 +206,6 @@ PANEL_SLOW_REQUEST_MS = parse_nonnegative_env_int(
     os.environ.get("PANEL_SLOW_REQUEST_MS", "1000"),
     "PANEL_SLOW_REQUEST_MS",
 )
-# Prometheus /metrics scrape token. Empty disables the endpoint (returns 404) so
-# the internet-facing panel never exposes metrics unauthenticated.
-METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "").strip()
-# TTL (seconds) for caching the data-plane running check — the one SSH call on the
-# /metrics path — so frequent/concurrent scrapes never stack SSH round trips.
-METRICS_DP_TTL = float(os.environ.get("METRICS_DP_TTL", "30"))
-# Browser-reachable base URL of the Grafana behind the monitoring stack (e.g.
-# "http://panel-host:3000"). When set, the admin "监控" tab embeds Grafana panels
-# (d-solo iframes) from it; empty disables the tab's charts (shows a hint instead).
-GRAFANA_PUBLIC_URL = os.environ.get("GRAFANA_PUBLIC_URL", "").strip().rstrip("/")
-# UID of the embed-focused Grafana dashboard the 监控 tab pulls single panels from.
-GRAFANA_OBSERVABILITY_UID = os.environ.get("GRAFANA_OBSERVABILITY_UID", "xray-observability").strip() or "xray-observability"
 
 DEFAULT_UPSTREAM_HOST = os.environ.get("DEFAULT_UPSTREAM_HOST", "127.0.0.1")
 DEFAULT_UPSTREAM_PORT = int(os.environ.get("DEFAULT_UPSTREAM_PORT", "443"))

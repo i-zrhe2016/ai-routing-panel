@@ -101,7 +101,7 @@ def bundle_enabled():
 def collect_remote_backup(staging_dir):
     required = env_enabled("DB_BACKUP_SSH_COLLECTION_REQUIRED", "0")
     # Keep the node collector's dedicated empty staging directory separate
-    # from optional snapshots (for example ops.db) written by this cycle.
+    # from other staged artifacts written by this cycle.
     node_staging_dir = Path(staging_dir) / "nodes"
     result = collect_remote_configs(
         node_staging_dir,
@@ -246,11 +246,6 @@ def main():
     with tempfile.TemporaryDirectory(prefix="xray-remote-backup-") as staging_dir:
         named_paths = []
         bundle_is_enabled = bundle_enabled()
-        ops_db_path = str(os.environ.get("DB_BACKUP_OPS_DB_PATH", "")).strip()
-        if bundle_is_enabled and ops_db_path:
-            ops_snapshot = snapshot_optional_database(ops_db_path, staging_dir, "ops.db")
-            if ops_snapshot:
-                named_paths.append(ops_snapshot)
         if bundle_is_enabled and env_enabled("DB_BACKUP_SSH_COLLECTION_ENABLED", "0"):
             named_paths.append((collect_remote_backup(staging_dir), "nodes"))
         elif bundle_is_enabled:

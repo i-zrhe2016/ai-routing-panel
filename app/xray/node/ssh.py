@@ -300,9 +300,6 @@ class SSHBackend(NodeBackend):
             skip_until_newline,
         )
 
-    def read_metrics_payload(self, metrics_url, timeout_seconds):
-        return self.files.read_metrics_payload(metrics_url, timeout_seconds)
-
     def run_statsquery(self, timeout_seconds, pattern):
         if not self.supports_stats():
             return None

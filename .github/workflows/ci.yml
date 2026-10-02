@@ -1,7 +1,6 @@
 name: CI
 
-# The daily reporter pushes archive commits straight to main, so main itself
-# needs the same verification a pull request gets.
+# Verify pull requests and changes to the default branch.
 on:
   pull_request:
     branches: [main]

@@ -32,7 +32,6 @@ GET,HEAD,OPTIONS|/customer/subscriptions/<int:service_subscription_id>|customer_
 GET,HEAD,OPTIONS|/customer/subscriptions|customer_subscriptions|app.web.customer_views|source-allowlist+customer-session
 GET,HEAD,OPTIONS|/healthz|healthz|app.web.health|source-allowlist
 GET,HEAD,OPTIONS|/home|landing_page|app.web.customer_views|source-allowlist
-GET,HEAD,OPTIONS|/metrics|metrics|app.web.metrics|source-allowlist
 GET,HEAD,OPTIONS|/payment-proofs/<int:submission_id>|payment_proof_file|app.web.subscription_views|source-allowlist+optional-customer-ownership
 GET,HEAD,OPTIONS|/plans|plans_page|app.web.customer_views|source-allowlist
 GET,HEAD,OPTIONS|/portal/<path:subpath>|portal_shell_path|app.web.portal_views|source-allowlist

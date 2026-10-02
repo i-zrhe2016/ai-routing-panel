@@ -1669,30 +1669,6 @@ a {
 
 .cc-card--error { border-color: var(--c-danger); }
 
-/* Grafana embeds ---------------------------------------------------------- */
-
-.cc-grafana-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-}
-
-.cc-grafana-panel {
-  overflow: hidden;
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  background: var(--c-surface);
-}
-
-.cc-grafana-panel.is-wide { grid-column: 1 / -1; }
-
-.cc-grafana-panel iframe {
-  display: block;
-  width: 100%;
-  height: 260px;
-  border: 0;
-}
-
 /* Commerce lists ---------------------------------------------------------- */
 
 .plan-list,
@@ -1706,8 +1682,6 @@ a {
   background: var(--c-primary-soft);
 }
 
-@media (max-width: 1024px) {.cc-grafana-grid { grid-template-columns: minmax(0, 1fr); }.cc-grafana-panel.is-wide { grid-column: auto; }
-}
 
 @media (max-width: 768px) {.cc-checklist__item { grid-template-columns: minmax(0, 1fr); }.cc-port-detail { gap: var(--space-4); }
 }

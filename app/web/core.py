@@ -24,8 +24,6 @@ from ..config import (
     CUSTOMER_SESSION_ID_KEY,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
-    GRAFANA_OBSERVABILITY_UID,
-    GRAFANA_PUBLIC_URL,
     PANEL_HOST,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
@@ -73,7 +71,6 @@ _VIEW_MODULES = (
     "customer_api",
     "customer_views",
     "health",
-    "metrics",
     "portal_views",
     "subscription_views",
     "tenant_views",
@@ -477,8 +474,6 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
             "traffic_routing": traffic_routing,
             "backup_xray_mode": backup_xray_mode,
             "ai_domain_stats": application.ai_routing.query_ai_domain_overview(sync_error=ai_sync_error),
-            "grafana_url": GRAFANA_PUBLIC_URL,
-            "grafana_observability_uid": GRAFANA_OBSERVABILITY_UID,
         },
         "summary": summary,
         "subscription": subscription,
@@ -802,8 +797,8 @@ def json_tenant_auth_required():
 def json_validate_csrf():
     # Returns a JSON 400 tuple when the CSRF token is missing/invalid, else None,
     # so JSON endpoints stay JSON instead of aborting to an HTML error page.
-    token = request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
-    if not validate_csrf_token(token):
+    csrf_value = request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
+    if not validate_csrf_token(csrf_value):
         return json_error_response("CSRF token 无效。", 400)
     return None
 
@@ -859,10 +854,10 @@ def get_authenticated_customer():
 
 
 def require_csrf():
-    token = request.headers.get("X-CSRF-Token", "")
-    if not token:
-        token = request.form.get("csrf_token", "")
-    if not validate_csrf_token(token):
+    csrf_value = request.headers.get("X-CSRF-Token", "")
+    if not csrf_value:
+        csrf_value = request.form.get("csrf_token", "")
+    if not validate_csrf_token(csrf_value):
         abort(400, description="CSRF token 无效。")
 
 

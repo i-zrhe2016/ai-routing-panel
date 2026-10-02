@@ -1,5 +1,4 @@
 import { useConfirm } from "../components/ConfirmDialog.jsx";
-import { GrafanaPanels, GrafanaToolbar, HOST_PANELS, useGrafana } from "../components/GrafanaPanels.jsx";
 import { FlowPath } from "../components/charts/index.jsx";
 import { MetricCard, Panel, StatusPill } from "../components/ui.jsx";
 import { buildHostInventory, hostStateLabel, hostTone } from "../lib/hosts.js";
@@ -8,7 +7,6 @@ import { usePanel } from "../state/PanelProvider.jsx";
 export default function HostsWorkspace() {
   const panel = usePanel();
   const confirm = useConfirm();
-  const grafana = useGrafana(panel.meta);
   const hosts = buildHostInventory(panel.panel, panel.insights);
   const reachable = hosts.filter((host) => host.reachable).length;
   const running = hosts.filter((host) => host.running === true).length;
@@ -134,15 +132,6 @@ export default function HostsWorkspace() {
         {!hosts.length ? <div className="cc-empty">控制面未返回任何纳管主机。</div> : null}
       </div>
 
-      <Panel
-        kicker="HOST RESOURCES"
-        title="主机资源"
-        description="CPU、内存、磁盘和负载来自 Prometheus，由 Grafana 出图。"
-        actions={null}
-      >
-        <GrafanaToolbar grafana={grafana} />
-        <GrafanaPanels grafana={grafana} panels={HOST_PANELS} />
-      </Panel>
 
       {confirm.dialog}
     </div>

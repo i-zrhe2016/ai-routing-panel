@@ -448,21 +448,6 @@ curl -u admin:secret http://redacted-ip-007:18080/api/ai-routing/switch \
 
 恢复自动只清除人工覆盖，不立即运行 AI 管理器；下一轮管理器探测成功后才重新应用 AI 动态路由。
 
-## 监控指标
-
-`/metrics` 端点暴露以下 DNS failover 相关 Prometheus 指标：
-
-| 指标 | 类型 | 标签 | 说明 |
-| --- | --- | --- | --- |
-| `xray_panel_dns_failover_enabled` | gauge | — | DNS failover 是否启用 |
-| `xray_panel_dns_failover_target_info` | gauge | `target`, `record_content` | 当前 DNS 指向（1.0 常量）|
-| `xray_panel_dns_failover_last_probe_healthy` | gauge | — | 最近探测是否成功（1/0）|
-| `xray_panel_dns_failover_consecutive_failures` | gauge | — | 连续失败次数 |
-| `xray_panel_dns_failover_consecutive_successes` | gauge | — | 连续成功次数 |
-| `xray_panel_dns_failover_peak_window_active` | gauge | — | 高峰窗口是否活跃 |
-
-> 指标需要 `METRICS_TOKEN` 鉴权，未设置时 `/metrics` 返回 404。
-
 ## 排障
 
 ### 自动切换没有发生

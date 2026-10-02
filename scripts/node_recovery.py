@@ -379,14 +379,6 @@ def build_node_recovery_manifest(
     shared_ready = database.get("status") == "ok"
     nodes = [normal, *ai_nodes]
     configured_nodes = [node for node in nodes if node.get("configured")]
-    optional_databases = {
-        "name": "ops-database",
-        "restorePath": "data/xray-ops/ops.db",
-        "status": "ok" if "database/ops.db" in indexed else "missing",
-        "required": False,
-    }
-    if "database/ops.db" in indexed:
-        optional_databases["archivePath"] = "database/ops.db"
     recovery_ready = bool(configured_nodes) and shared_ready and all(
         node.get("recoveryReady") for node in configured_nodes
     )
@@ -398,7 +390,7 @@ def build_node_recovery_manifest(
         "sharedState": {
             "recoveryReady": shared_ready,
             "requiredArtifacts": [database],
-            "optionalArtifacts": [optional_databases],
+            "optionalArtifacts": [],
         },
         "nodes": nodes,
         "configuredRoles": [node["role"] for node in configured_nodes],

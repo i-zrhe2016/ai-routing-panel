@@ -33,7 +33,7 @@ export default function TrafficWorkspace() {
         <div>
           <p className="section-kicker">TRAFFIC</p>
           <h2>流量与端口负载</h2>
-          <p>累计计数来自 Xray 统计接口，日粒度历史来自控制面自身的 traffic_daily 表，两者都无需浏览器直接解析 /metrics。</p>
+          <p>累计计数来自 Xray 统计接口，日粒度历史来自控制面自身的 traffic_daily 表。</p>
         </div>
         <div className="cc-toolbar__group">
           {RANGES.map((range) => (
