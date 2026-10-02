@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 from ..config import (
@@ -489,9 +490,22 @@ class AiRoutingService:
         if not isinstance(panel_target, dict):
             panel_target = None
 
+        generated_at = str(payload.get("generated_at") or "").strip() or None
+        try:
+            if datetime.fromisoformat(generated_at).utcoffset() is None:
+                generated_at = None
+        except (ValueError, TypeError):
+            generated_at = None
+        config_apply_status = route_status.get("config_apply_status")
+        if not isinstance(config_apply_status, str) or config_apply_status not in {
+            "direct", "unchanged", "delegated", "unmanaged", "not_needed"
+        }:
+            config_apply_status = "unknown"
+
         return {
-            "generated_at": str(payload.get("generated_at") or "").strip() or None,
-            "generated_at_display": format_optional_display_time(payload.get("generated_at")),
+            "generated_at": generated_at,
+            "config_apply_status": config_apply_status,
+            "generated_at_display": format_optional_display_time(generated_at),
             "window_start": str(payload.get("window_start") or "").strip() or None,
             "window_start_display": format_optional_display_time(payload.get("window_start")),
             "window_end": str(payload.get("window_end") or "").strip() or None,
@@ -625,6 +639,10 @@ class AiRoutingService:
             "status_label": status_label,
             "status_tone": tone,
             "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "report_generated_at": report["generated_at"] if report else None,
+            "config_apply_status": (
+                report["config_apply_status"] if report and status_code == report["route_status"] else "unknown"
+            ),
             "report_generated_at_display": report["generated_at_display"] if report else "暂无",
             "current_ai_domains": report["ai_domain_count"] if report else 0,
             "total_ai_domains": aggregate["total_ai_domains"],

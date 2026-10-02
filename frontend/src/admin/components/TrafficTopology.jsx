@@ -2,10 +2,10 @@ import { useId, useState } from "react";
 import { buildTrafficTopology, TOPOLOGY_STATES } from "../lib/topology.js";
 import "./traffic-topology.css";
 
-const COLUMN = { client: 0, entry: 1, ai: 2, direct: 2, exit: 3 };
+const COLUMN = { client: 0, entry: 1, ai: 2, relay: 2, direct: 2, exit: 3 };
 function layout(nodes) {
   const columns = [0, 1, 2, 3].map((column) => nodes.filter((node) => COLUMN[node.kind] === column));
-  const height = Math.max(280, columns[2].length * 88 + 72);
+  const height = Math.max(320, Math.max(columns[2].length, columns[3].length) * 94 + 90);
   const minHeight = Math.max(280, (columns[2].length + 1) * 78);
   return { height, minHeight, nodes: nodes.map((node) => {
     const column = COLUMN[node.kind];
@@ -22,24 +22,30 @@ export default function TrafficTopology({ panel, compact = false }) {
   const selected = nodes.find(({ id }) => id === selectedId) || nodes[0];
   const detailsId = useId();
   const summaryId = useId();
+  const arrowId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const routes = graph.edges.filter((edge) => nodes.find((node) => node.id === edge.from)?.kind === "entry");
   return (
     <section className={`traffic-topology${compact ? " traffic-topology--compact" : ""}`} aria-label="流量拓扑图" aria-describedby={summaryId}>
       <div className="traffic-topology__heading">
         <div><span className="traffic-topology__eyebrow">TRAFFIC FLOW</span><p className="traffic-topology__route" aria-live="polite">{graph.label}</p></div>
-        <span className="traffic-topology__snapshot">路由快照</span>
+        <span className="traffic-topology__snapshot">配置与探测快照</span>
       </div>
       <p id={summaryId} className="traffic-topology__summary">{graph.scenario}</p>
+      <div className="traffic-topology__metadata"><span>AI 报告 <strong>{graph.reportTime}</strong></span><span>DNS 记录目标 <strong>{graph.dnsTarget}</strong></span></div>
       <ul className="traffic-topology__legend" aria-label="链路状态图例">
         {Object.entries(TOPOLOGY_STATES).map(([state, label]) => <li key={state}><i className={`traffic-topology__key is-${state}`} aria-hidden="true" />{label}</li>)}
       </ul>
       {graph.warning ? <p className="traffic-topology__notice" role="status">{graph.warning}</p> : null}
+      <p className="traffic-topology__scroll-hint">横向滚动查看完整入口与出口；点击节点查看详情。</p>
+      <div className="traffic-topology__viewport" role="region" aria-label="拓扑连线与节点" tabIndex={0}>
       <div className="traffic-topology__canvas" style={{ aspectRatio: `960 / ${height}`, minHeight }}>
         <svg viewBox={`0 0 960 ${height}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <defs><marker id={arrowId} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" /></marker></defs>
           {graph.edges.map((edge) => {
             const from = nodes.find(({ id }) => id === edge.from);
             const to = nodes.find(({ id }) => id === edge.to);
             const x1 = from.x + 78, x2 = to.x - 78, mid = (x1 + x2) / 2;
-            return <path key={edge.id} className={`traffic-topology__edge is-${edge.state}`} d={`M ${x1} ${from.y} C ${mid} ${from.y}, ${mid} ${to.y}, ${x2} ${to.y}`} vectorEffect="non-scaling-stroke" />;
+            return <path key={edge.id} className={`traffic-topology__edge is-${edge.state}`} d={`M ${x1} ${from.y} C ${mid} ${from.y}, ${mid} ${to.y}, ${x2} ${to.y}`} vectorEffect="non-scaling-stroke" markerEnd={`url(#${arrowId})`} />;
           })}
         </svg>
         {nodes.map((node) => <button
@@ -55,13 +61,17 @@ export default function TrafficTopology({ panel, compact = false }) {
           <span className="traffic-topology__node-state"><i aria-hidden="true" />{TOPOLOGY_STATES[node.state]}</span>
         </button>)}
       </div>
+      </div>
+      <ul className="traffic-topology__routes" aria-label="按域名类型划分的出口">
+        {routes.map((edge) => <li key={edge.id} className={`is-${edge.state}`}><i className={`traffic-topology__key is-${edge.state}`} aria-hidden="true" /><div><strong>{edge.trafficClass}</strong><span>{nodes.find((node) => node.id === edge.from).label} → {nodes.find((node) => node.id === edge.to).label}</span></div><small>{TOPOLOGY_STATES[edge.state]}</small></li>)}
+      </ul>
       <div className="traffic-topology__detail" id={detailsId} aria-label="所选节点详情" role="region" aria-live="polite">
         <div className="traffic-topology__detail-heading"><strong>{selected.label}</strong><span>{selected.role} · {TOPOLOGY_STATES[selected.state]}</span></div>
         {selected.address ? <p className="traffic-topology__address">{selected.address}</p> : null}
-        {selected.probeLabel ? <p>{selected.probeLabel} · {selected.selected ? "报告已选中" : "未选中"}</p> : null}
+        {selected.probeLabel ? <p>{selected.probeLabel}{selected.kind === "ai" ? ` · ${selected.selected ? "报告已选中" : "未选中"}` : ""}</p> : null}
         <p>{selected.description}</p>
       </div>
-      <p className="traffic-topology__footnote">当前路由不代表链路吞吐量。节点和连线依据路由报告与候选探测，未展示边级流量或速率。</p>
+      <p className="traffic-topology__footnote">图中配置路径不代表实时吞吐量或目标网站健康。协议限制与阻断规则仍优先执行；DNS 缓存可能使客户端继续使用原入口。</p>
     </section>
   );
 }

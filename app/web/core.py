@@ -488,51 +488,42 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
 
 
 def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, dns_failover_status):
-    """Describe the current traffic-routing path for the dashboard flow diagram."""
-    dp_ok = bool(data_plane_status.get("reachable"))
-    ai_candidates = ai_routing_status.get("ai_candidates")
-    if not isinstance(ai_candidates, list):
-        ai_candidates = []
-    selected_ai_candidate = next(
-        (
-            candidate
-            for candidate in ai_candidates
-            if isinstance(candidate, dict) and candidate.get("selected") is True
-        ),
-        None,
-    )
-    selected_ai_has_probe = selected_ai_candidate is not None and selected_ai_candidate.get("is_reachable") in {
-        True,
-        False,
-    }
-    # The AI routing report is the source of truth for the traffic path. The
-    # SSH-managed node status only describes the control channel and may be
-    # unavailable while the selected REALITY candidate is serving traffic.
-    ai_ok = (
-        bool(selected_ai_candidate.get("is_reachable"))
-        if selected_ai_has_probe
-        else bool(ai_node_status.get("reachable"))
-    )
+    """Describe routing configuration and its evidence, not measured traffic."""
+    dp_ok = data_plane_status.get("reachable") is True
+    candidates = ai_routing_status.get("ai_candidates")
+    candidates = [item for item in candidates if isinstance(item, dict)] if isinstance(candidates, list) else []
+    selected = [item for item in candidates if item.get("selected") is True]
+    selected_ai = selected[0] if len(selected) == 1 else None
     ai_label = str(
-        (selected_ai_candidate or {}).get("label")
-        or (selected_ai_candidate or {}).get("candidate_label")
-        or "AI 节点"
+        (selected_ai or {}).get("label") or (selected_ai or {}).get("candidate_label") or "AI 节点"
     ).strip() or "AI 节点"
-    ai_route_status = str(
-        ai_routing_status.get("route_status") or ai_routing_status.get("status") or ""
-    ).strip()
-    ai_fallback = ai_route_status in {
-        "fallback_to_primary",
-        "manual_fallback",
-        "manual_target_unreachable",
-        "probe_error",
-    }
-    dns_target = str(dns_failover_status.get("current_target") or "primary").strip()
-    backup_enabled = bool(dns_failover_status.get("enabled") and dns_failover_status.get("configured"))
-    backup_xray_enabled = bool(dns_failover_status.get("control_plane_backup_xray_enabled"))
-    backup_mode = "relay" if backup_xray_enabled and ai_ok else "direct"
+    ai_status = str(ai_routing_status.get("route_status") or ai_routing_status.get("status") or "unknown").strip()
+    apply_status = ai_routing_status.get("config_apply_status")
+    try:
+        stamp = datetime.fromisoformat(str(ai_routing_status.get("report_generated_at") or ""))
+        valid_stamp = stamp.utcoffset() is not None
+    except (ValueError, TypeError):
+        valid_stamp = False
+    confirmed = (
+        valid_stamp and isinstance(apply_status, str) and apply_status in {"direct", "unchanged"}
+        and not ai_routing_status.get("sync_error")
+    )
+    backup_enabled = dns_failover_status.get("enabled") is True and dns_failover_status.get("configured") is True
+    dns_target = dns_failover_status.get("current_target")
+    dns_known = not dns_failover_status.get("enabled") or (
+        isinstance(dns_target, str) and dns_target in {"primary", "backup"}
+    )
+    backup_mode = dns_failover_status.get("backup_xray_mode")
 
-    def route(path, label, scenario, entry, transit, exit_node, status, degraded=False, waiting=False):
+    def probe_state(candidate):
+        if candidate is None or candidate.get("is_reachable") is None:
+            return "unknown"
+        if candidate.get("is_reachable") is True:
+            return "active"
+        return "blocked" if candidate.get("is_reachable") is False else "unknown"
+
+    def route(path, label, scenario, entry, transit, exit_node, status, *, ordinary="unknown", ai="unknown",
+              scope="split_domains", degraded=False, waiting=False):
         return {
             "path": path,
             "label": label,
@@ -543,49 +534,59 @@ def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, 
             "entry_node": entry,
             "transit_nodes": transit,
             "exit_node": exit_node,
+            "ordinary_direct_state": ordinary,
+            "ai_branch_state": ai,
+            "traffic_scope": scope,
         }
 
+    if not dns_known or (dns_target == "backup" and not backup_enabled):
+        return route("unknown", "入口状态未确认", "DNS 目标或备用入口配置尚未确认。", "入口未确认", [],
+                     "出口未确认", "未知", degraded=True)
+
     if dns_target == "backup" and backup_enabled:
-        if backup_mode == "relay" and ai_ok:
-            return route(
-                "dns_backup_relay_ai",
-                f"DNS→控制面备用→{ai_label}",
-                f"数据面故障，控制面备用 relay 到{ai_label}",
-                "控制面备用",
-                [ai_label],
-                f"{ai_label} freedom 直出",
-                "备用 relay",
-                True,
-            )
-        return route("dns_backup_direct", "DNS→控制面备用→freedom 直出", "双节点故障，控制面备用 freedom 直出", "控制面备用", [], "控制面备用 freedom 直出", "备用直出", True)
+        if backup_mode == "relay":
+            target = dns_failover_status.get("backup_relay_target")
+            target = target if isinstance(target, dict) else {}
+            host, port = target.get("upstream_host"), target.get("upstream_port")
+            relay_label = f"{host}:{port}" if host and port else "备用 relay 上游未确认"
+            matching = next((item for item in candidates if host and port
+                             and str(item.get("upstream_host", "")).lower() == str(host).lower()
+                             and item.get("upstream_port") == port), None)
+            return route("dns_backup_relay_ai", f"DNS→控制面备用→{relay_label}",
+                         "DNS 记录指向备用入口；配置将所有流量中继到备用上游，候选探测不改变中继模式。",
+                         "控制面备用", [relay_label], "备用上游出口", "备用 relay",
+                         ordinary="standby", ai=probe_state(matching), scope="all_traffic", degraded=True)
+        if backup_mode == "direct":
+            return route("dns_backup_direct", "DNS→控制面备用→freedom 直出",
+                         "DNS 记录指向备用入口；配置将所有流量从备用入口直出。",
+                         "控制面备用", [], "控制面备用 freedom 直出", "备用直出",
+                         ordinary="active", ai="standby", scope="all_traffic", degraded=True)
+        return route("dns_backup_unknown", "DNS→控制面备用（出口未确认）", "备用出口配置尚未确认。",
+                     "控制面备用", [], "出口未确认", "未知", scope="all_traffic", degraded=True)
 
     if not dp_ok and backup_enabled:
-        return route("dns_backup_pending", "DNS 待切换到控制面备用", "数据面故障，等待 DNS 切换", "当前 DNS 入口", [], "等待切换", "待切换", True, True)
+        return route("dns_backup_pending", "DNS 主入口状态未确认", "普通数据面状态未确认，DNS 仍指向主入口。",
+                     "当前 DNS 入口", [], "等待确认", "待切换", degraded=True, waiting=True)
+    if not dp_ok:
+        return route("unknown", "状态未知", "普通数据面状态待确认。", "入口未确认", [], "出口未确认",
+                     "未知", degraded=True)
 
-    if dp_ok and ai_ok and not ai_fallback:
-        return route(
-            "normal_ai",
-            f"数据面→{ai_label}直出",
-            f"正常：AI 流量经{ai_label}直出",
-            "普通数据面",
-            [ai_label],
-            f"{ai_label} freedom 直出",
-            "正常",
-        )
-
-    if dp_ok and (not ai_ok or ai_fallback):
-        reason = (
-            "AI 路由被人工强制回退，AI 流量改走数据面直出"
-            if ai_route_status == "manual_fallback"
-            else f"{ai_label}不可达，AI 流量回退到数据面直出"
-        )
-        status = "人工回退" if ai_route_status == "manual_fallback" else "AI 回退"
-        return route("normal_fallback", "数据面→freedom 直出", reason, "普通数据面", [], "普通数据面 freedom 直出", status, True)
-
-    if dp_ok:
-        return route("normal_direct", "数据面→freedom 直出", "正常：流量经数据面直出", "普通数据面", [], "普通数据面 freedom 直出", "正常")
-
-    return route("unknown", "状态未知", "节点状态待确认", "入口未确认", [], "出口未确认", "未知", True)
+    if confirmed and ai_status in {"disabled", "idle", "pending_proxy_template"}:
+        return route("normal_direct", "数据面→freedom 直出", "路由报告确认未启用 AI 分流，流量从普通数据面直出。",
+                     "普通数据面", [], "普通数据面 freedom 直出", "直出", ordinary="active", ai="standby")
+    if confirmed and ai_status in {"fallback_to_primary", "manual_fallback", "manual_target_unreachable", "probe_error"}:
+        return route("normal_fallback", "数据面→freedom 直出", "路由报告确认 AI 分流已回退到普通数据面直出。",
+                     "普通数据面", [], "普通数据面 freedom 直出", "AI 回退",
+                     ordinary="active", ai="standby", degraded=True)
+    if confirmed and ai_status == "applied" and selected_ai is not None:
+        state = probe_state(selected_ai)
+        return route("normal_ai", f"普通直出 + AI→{ai_label}",
+                     "普通及未分类域名走数据面直出；已分类 AI 域名按已应用规则转发到所选 AI 上游。",
+                     "普通数据面", [ai_label], f"普通直出 / {ai_label}出口", "已应用分流",
+                     ordinary="active", ai=state, degraded=state != "active")
+    return route("normal_ai_pending", "普通直出 · AI 分流待确认", "普通直出默认路径保留；AI 配置应用或选中候选证据尚未确认。",
+                 "普通数据面", [], "普通数据面 freedom 直出 / AI 未确认", "AI 待确认",
+                 ordinary="active", ai="unknown", degraded=True)
 
 
 def build_tenant_dashboard_state(tenant_token, message="", level="info"):

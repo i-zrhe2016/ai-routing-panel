@@ -49,6 +49,8 @@
             "selected": true
           }
         ],
+        "config_apply_status": "direct",
+        "report_generated_at": "2026-01-02T03:04:05+00:00",
         "route_status": "applied",
         "status": "applied"
       },
@@ -107,13 +109,16 @@
       "tenant_panel_prefix": "/tenant/",
       "timezone_label": "<timezone>",
       "traffic_routing": {
+        "ai_branch_state": "active",
         "entry_node": "普通数据面",
-        "exit_node": "ai-synthetic freedom 直出",
+        "exit_node": "普通直出 / ai-synthetic出口",
         "is_degraded": false,
-        "label": "数据面→ai-synthetic直出",
+        "label": "普通直出 + AI→ai-synthetic",
+        "ordinary_direct_state": "active",
         "path": "normal_ai",
-        "route_status": "正常",
-        "scenario": "正常：AI 流量经ai-synthetic直出",
+        "route_status": "已应用分流",
+        "scenario": "普通及未分类域名走数据面直出；已分类 AI 域名按已应用规则转发到所选 AI 上游。",
+        "traffic_scope": "split_domains",
         "transit_nodes": [
           "ai-synthetic"
         ],

@@ -15,7 +15,7 @@ function renderConsole(api, props = {}) {
   );
 }
 
-const WORKSPACE_LABELS = ["总览", "主机", "流量", "故障排查", "AI 路由", "交付", "流量拓扑"];
+const WORKSPACE_LABELS = ["总览", "主机", "流量", "AI 路由", "交付", "流量拓扑"];
 
 describe("console shell", () => {
   it("renders every workspace and loads the dashboard on mount", async () => {
@@ -24,6 +24,7 @@ describe("console shell", () => {
 
     await waitFor(() => expect(api.calls.some((call) => call.url === "/api/dashboard")).toBe(true));
     const nav = await screen.findByRole("navigation", { name: "控制台工作区" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(6);
     for (const label of WORKSPACE_LABELS) {
       expect(within(nav).getByText(label)).toBeTruthy();
     }
@@ -41,19 +42,20 @@ describe("console shell", () => {
     }
   });
 
-  it("removes commerce and embedded monitoring even when legacy metadata is supplied", async () => {
+  it("removes diagnostics, commerce and embedded monitoring even when legacy metadata is supplied", async () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     const { container } = renderConsole(api);
     await screen.findByRole("heading", { name: "系统总览" });
     const nav = screen.getByRole("navigation", { name: "控制台工作区" });
-    expect(within(nav).queryByRole("button", { name: /订单与套餐|可观测/ })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: /订单与套餐|可观测|故障排查/ })).toBeNull();
     expect(screen.queryByText("待审订单")).toBeNull();
+    expect(screen.queryByRole("button", { name: "故障排查" })).toBeNull();
     expect(screen.queryByRole("button", { name: "查看订单" })).toBeNull();
     for (const label of WORKSPACE_LABELS) {
       await user.click(within(nav).getByRole("button", { name: new RegExp(`^${label}(?:\\s|$)`) }));
       expect(container.querySelector("iframe")).toBeNull();
-      expect(screen.queryByText(/Grafana|Prometheus|新增套餐|商业设置|订单审核/)).toBeNull();
+      expect(screen.queryByText(/Grafana|Prometheus|新增套餐|商业设置|订单审核|故障后排查/)).toBeNull();
     }
     expect(api.calls.some((call) => /\/api\/(plans|orders|commerce-settings)/.test(call.url))).toBe(false);
   });
@@ -115,6 +117,13 @@ describe("console shell", () => {
     });
   });
 
+  it("opens the retained topology from the overview attention panel", async () => {
+    const user = userEvent.setup();
+    renderConsole(createFakeApi());
+    await user.click(await screen.findByRole("button", { name: "查看流量路径" }));
+    expect(await screen.findByRole("heading", { name: "流量拓扑", level: 1 })).toBeTruthy();
+  });
+
   it("opens the full traffic topology from the overview", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
@@ -152,8 +161,8 @@ describe("api client", () => {
     renderConsole(undefined);
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const nav = await screen.findByRole("navigation", { name: "控制台工作区" });
-    await user.click(within(nav).getByRole("button", { name: /故障排查/ }));
-    await user.click(await screen.findByRole("button", { name: "运行数据面体检" }));
+    await user.click(within(nav).getByRole("button", { name: /主机/ }));
+    await user.click(await screen.findByRole("button", { name: "数据面体检" }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url]) => url === "/api/data-plane/diagnose");
