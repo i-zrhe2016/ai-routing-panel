@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-10-02 @ 4af773d
+Last verified: 2026-10-02 @ 5cedd7f
 
 ## Current Focus
 
@@ -8,6 +8,7 @@ Last verified: 2026-10-02 @ 4af773d
 
 ## Implemented
 
+- 统一入口部署提供 Docker 启动前的失效 Unix socket 清理，保留活跃 socket、普通文件和符号链接；已在当前 VPS 启用并验证异常退出残留后的恢复，见 [统一入口部署](unified-entry.md)。
 - 本机及可达 AI 节点的监控、集中日志采集、运维日报服务与专用数据已删除；旧 Loki 接收节点离线，其数据未核验。备份恢复跳过旧运维数据库及部署配置。
 - 台湾 AI 节点是当前唯一配置的 AI 主候选；原不可用主节点已从节点清单、路由候选和运行中的控制面容器环境中移除。
 - `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 可将带独立凭据的 fallback 分享链接提升为候选 0；单候选可作为主节点，过期的 `backup` 状态会归一化，人工固定备用仍要求至少两个候选。
