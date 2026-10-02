@@ -42,7 +42,7 @@
 - 从当前运行态复制 Xray 26.5.3 配置，保留 `31098、31333、31335–31340` 共 8 个入口；
 - 运行 Xray 配置校验、Tailscale TCP 探测和 `www.amazon.com` SNI REALITY 握手，均通过；
 - 部署 `verge-sub` 订阅服务并设为开机自启；
-- 部署 Node Exporter、cAdvisor 和 Fluent Bit，控制面可通过 Tailscale 读取监控端点；
+- 控制面通过 Tailscale 管理 Xray，业务流量统计沿用 Xray API 和本地访问日志；
 - 原数据面和原订阅服务未停止，仍可直接回退。
 
 ## AWS 安全组门禁
@@ -52,7 +52,7 @@ AWS 实例本地防火墙和绑定安全组已放行并验证以下公网 TCP �
 - `443`：订阅 HTTPS；
 - `31098、31333、31335、31336、31337、31338、31339、31340`：Xray REALITY 入口。
 
-`19100`、`18081` 只应通过 Tailscale 访问，不要开放到公网。当前 AWS 实例角色无 `ec2:DescribeSecurityGroups` 权限，不能由实例自身修改安全组。
+当前 AWS 实例角色无 `ec2:DescribeSecurityGroups` 权限，不能由实例自身修改安全组。
 
 ## 切换顺序
 

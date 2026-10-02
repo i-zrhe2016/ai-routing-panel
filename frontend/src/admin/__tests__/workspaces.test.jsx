@@ -256,26 +256,16 @@ describe("routing workspace", () => {
   });
 });
 
-describe("observability workspace", () => {
-  it("embeds the Grafana panels when the base URL is configured", async () => {
+describe("retired monitoring integration", () => {
+  it("keeps host management available without monitoring navigation or embeds", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
     await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
-    await openWorkspace(user, "可观测");
-
-    const frames = await screen.findAllByTitle(/使用率|流量|速率/);
-    expect(frames.length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: /Grafana 观测面板/ })).toBeTruthy();
-  });
-
-  it("shows the configuration hint without a Grafana URL", async () => {
-    const user = userEvent.setup();
-    const dashboard = makeDashboard();
-    dashboard.meta = { ...dashboard.meta, grafana_url: "" };
-    renderConsole(createFakeApi({ dashboard }));
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
-    await openWorkspace(user, "可观测");
-
-    expect(await screen.findByText("监控未配置")).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "控制台工作区" });
+    expect(within(nav).queryByRole("button", { name: /可观测/ })).toBeNull();
+    await openWorkspace(user, "主机");
+    expect(await screen.findByRole("heading", { name: "主机与数据面" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "主机资源" })).toBeNull();
+    expect(document.querySelector("iframe")).toBeNull();
   });
 });

@@ -15,7 +15,7 @@ function renderConsole(api, props = {}) {
   );
 }
 
-const WORKSPACE_LABELS = ["总览", "主机", "流量", "故障排查", "AI 路由", "交付", "订单与套餐", "可观测"];
+const WORKSPACE_LABELS = ["总览", "主机", "流量", "故障排查", "AI 路由", "交付", "订单与套餐"];
 
 describe("console shell", () => {
   it("renders every workspace and loads the dashboard on mount", async () => {

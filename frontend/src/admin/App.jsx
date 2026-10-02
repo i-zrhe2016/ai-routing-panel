@@ -8,7 +8,6 @@ import CommerceWorkspace from "./workspaces/CommerceWorkspace.jsx";
 import DeliveryWorkspace from "./workspaces/DeliveryWorkspace.jsx";
 import DiagnosticsWorkspace from "./workspaces/DiagnosticsWorkspace.jsx";
 import HostsWorkspace from "./workspaces/HostsWorkspace.jsx";
-import ObservabilityWorkspace from "./workspaces/ObservabilityWorkspace.jsx";
 import OverviewWorkspace from "./workspaces/OverviewWorkspace.jsx";
 import RoutingWorkspace from "./workspaces/RoutingWorkspace.jsx";
 import TrafficWorkspace from "./workspaces/TrafficWorkspace.jsx";
@@ -23,7 +22,6 @@ const WORKSPACES = [
   { key: "routing", label: "AI 路由", description: "出口、探测与切换", blurb: "解释当前 AI 出口、候选健康、人工策略和故障切换。" },
   { key: "delivery", label: "交付", description: "端口与租户凭据", blurb: "管理监听入口、租户配额与每个端口的独立订阅凭据。" },
   { key: "commerce", label: "订单与套餐", description: "售卖、审核与开通", blurb: "管理套餐、订单审核与自动开通。" },
-  { key: "observe", label: "可观测", description: "Prometheus 与 Grafana", blurb: "从指标和 Grafana 深入排查资源与流量异常。" },
 ];
 
 const WORKSPACE_COMPONENTS = {
@@ -34,7 +32,6 @@ const WORKSPACE_COMPONENTS = {
   routing: RoutingWorkspace,
   delivery: DeliveryWorkspace,
   commerce: CommerceWorkspace,
-  observe: ObservabilityWorkspace,
 };
 
 export default function App() {

@@ -1,8 +1,7 @@
 """Structured, redacted application logging for the control plane.
 
 The logger deliberately has no database or network dependency. It writes one
-JSON object per line to stdout/stderr and lets the existing Fluent Bit agent
-provide buffering and delivery guarantees.
+JSON object per line to stdout/stderr for local application diagnostics.
 """
 
 from __future__ import annotations

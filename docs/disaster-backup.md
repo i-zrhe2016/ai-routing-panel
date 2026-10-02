@@ -42,11 +42,10 @@
 Docker Compose 的备份容器默认收集：
 
 - 当次生成的 `panel.db` 一致性快照
-- `/srv/xray-ops/ops.db` 的独立 SQLite 在线快照（存在时）
-- Compose、ops-reporting Compose、`.env`/`.env.ops-reporting`
+- Compose 和 `.env`
 - Xray `.env`、渲染运行配置、报告、备份脚本和 `data/uploads`
 
-项目目录和 `/srv/xray-ops` 均只读挂载到备份容器；缺失的可选文件会记录在 manifest 中，不阻断 `panel.db` 备份。远端节点采集默认关闭；启用完整节点模式后，归档还会加入：
+项目目录只读挂载到备份容器；缺失的可选文件会记录在 manifest 中，不阻断 `panel.db` 备份。远端节点采集默认关闭；启用完整节点模式后，归档还会加入：
 
 ```text
 database/
@@ -67,7 +66,6 @@ node-recovery-manifest.json
 | --- | --- | --- |
 | `DB_BACKUP_BUNDLE_ENABLED` | `1` | 是否生成灾备归档；关闭后仍保留单独 `.db` 快照 |
 | `DB_BACKUP_EXTRA_PATHS` | Compose 中的显式项目配置 allowlist | 逗号或换行分隔的文件、目录或 glob；不存在的可选路径会记录并跳过 |
-| `DB_BACKUP_OPS_DB_PATH` | `/ops-data/ops.db` | 可选运维 SQLite 数据库；使用 SQLite backup API 生成一致性副本后纳入归档 |
 | `DB_BACKUP_BUNDLE_DIR` | `DB_BACKUP_DIR` | 灾备归档本地目录 |
 | `DB_BACKUP_BUNDLE_KEEP_DAYS` | `DB_BACKUP_KEEP_DAYS` | 本地灾备归档保留天数，`0` 表示不清理 |
 | `DB_BACKUP_BUNDLE_PREFIX` | `DB_BACKUP_PREFIX` | 归档名前缀 |

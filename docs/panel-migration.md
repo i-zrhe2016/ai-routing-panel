@@ -6,7 +6,7 @@
 
 本文档用于把当前这套 `xray-routing-panel` 从旧机器迁移到新机器。
 
-> 本页说明控制面数据与服务迁移。普通多端口模式由 Xray 监听代理入口；启用[统一 443 入口](unified-entry.md)时由 HAProxy 分流。已有 Nginx、HTTPS 订阅与 Grafana 反代须按部署实际独立迁移。
+> 本页说明控制面数据与服务迁移。普通多端口模式由 Xray 监听代理入口；启用[统一 443 入口](unified-entry.md)时由 HAProxy 分流。已有 Nginx 与 HTTPS 订阅须按部署实际独立迁移。
 
 ## 迁移目标
 

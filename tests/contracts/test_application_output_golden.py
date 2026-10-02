@@ -214,7 +214,8 @@ def _seed_synthetic_port(state):
 def test_dashboard_and_tenant_api_match_synthetic_goldens(tmp_path, monkeypatch, request):
     monkeypatch.setenv("PANEL_ALLOWED_NETWORKS", "127.0.0.1/32,::1/128")
     monkeypatch.setenv("DNS_FAILOVER_ENABLED", "0")
-    monkeypatch.delenv("GRAFANA_PUBLIC_URL", raising=False)
+    monkeypatch.setenv("GRAFANA_PUBLIC_URL", "https://retired-grafana.example.com")
+    monkeypatch.setenv("GRAFANA_OBSERVABILITY_UID", "retired-dashboard")
 
     helper_environment = (
         "DATA_DIR",
@@ -256,6 +257,8 @@ def test_dashboard_and_tenant_api_match_synthetic_goldens(tmp_path, monkeypatch,
 
     empty_dashboard = client.get("/api/dashboard")
     assert empty_dashboard.status_code == 200
+    assert "grafana_url" not in empty_dashboard.get_json()["dashboard"]["meta"]
+    assert "grafana_observability_uid" not in empty_dashboard.get_json()["dashboard"]["meta"]
     _write_or_compare_json(
         GOLDEN_DIR / "dashboard-empty.json",
         _normalize_dashboard(empty_dashboard.get_json()),

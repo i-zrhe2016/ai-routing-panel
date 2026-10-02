@@ -71,8 +71,6 @@
         "current_target": "primary",
         "enabled": false
       },
-      "grafana_observability_uid": "xray-observability",
-      "grafana_url": "",
       "nodes": [
         {
           "configured": true,

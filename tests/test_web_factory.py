@@ -23,7 +23,7 @@ def test_create_app_registers_routes_and_keeps_the_exact_application():
     assert web.application is core.application
     assert web.state is core.state
     assert web.health.state is core.state
-    assert {"healthz", "index", "api_dashboard", "metrics"} <= set(flask_app.view_functions)
+    assert {"healthz", "index", "api_dashboard"} <= set(flask_app.view_functions)
 
 
 def test_create_app_resolves_state_for_the_current_flask_application():
@@ -60,24 +60,16 @@ def test_create_app_resolves_state_for_the_current_flask_application():
         assert client.get("/healthz").json["data_plane_running"] is False
 
 
-def test_metrics_cache_is_scoped_to_the_current_flask_application():
-    from app import web
-    from app.web import metrics
+def test_retired_metrics_endpoint_is_not_registered():
+    from app.web import create_app
 
-    class FakeApplication:
-        def __init__(self, data_plane_running):
-            self._data_plane_running = data_plane_running
+    flask_app = create_app(object())
 
-        def data_plane_running(self):
-            return self._data_plane_running
-
-    first_flask_app = web.create_app(FakeApplication(True))
-    second_flask_app = web.create_app(FakeApplication(False))
-
-    with first_flask_app.app_context():
-        assert metrics._data_plane_running_cached() == 1
-    with second_flask_app.app_context():
-        assert metrics._data_plane_running_cached() == 0
+    assert "metrics" not in flask_app.view_functions
+    assert "/metrics" not in {rule.rule for rule in flask_app.url_map.iter_rules()}
+    with flask_app.test_client() as client:
+        assert client.get("/metrics").status_code == 404
+        assert client.get("/metrics", headers={"Authorization": "Bearer dummy-scrape-token"}).status_code == 404
 
 
 def test_create_app_does_not_construct_panel_state(monkeypatch):

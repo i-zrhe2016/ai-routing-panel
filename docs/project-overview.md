@@ -14,7 +14,6 @@
 | 普通数据面 | 承载代理流量，按动态域名规则选择 AI 上游 | [AI 路由](ai-routing.md) |
 | AI 数据面 | 使用独立凭据接收 AI 流量并独立出站 | [AI 节点部署](ai-node-deployment.md)、[凭据契约](ai-node-credentials.md) |
 | 故障切换 | 选择 AI 候选、回退直出，切换 DNS 到控制面备用入口 | [DNS 故障切换](dns-failover.md)、[三节点容错](fault-tolerance.md) |
-| 可观测性 | Prometheus/Grafana 指标、Loki 日志和每日运维报告 | [运维](operations.md)、[日志采集](logging-fluent-bit.md)、[日报器](ops-reporting/daily-reporter.md) |
 | 灾备 | SQLite 快照、节点配置采集、完整性校验、加密 R2 上传与隔离恢复 | [灾备归档](disaster-backup.md)、[节点恢复](node-recovery.md) |
 
 控制面负责配置和管理；正常代理流量由普通数据面与 AI 数据面承载。控制面不可用时，已下发的数据面配置仍可工作，管理页面、订阅更新和自动运维的可用性不由此保证。组件拓扑见[架构说明](architecture.md#总览)。
@@ -26,7 +25,7 @@
 3. 按[开发与启动](development.md)启动对应服务。
 4. 按[控制面访问](panel-access.md)限制来源，并使用[运维与排障](operations.md)检查运行状态。
 
-独立 AI 节点、统一 443 入口、DNS 切换、日志和备份均有各自的部署说明，完整入口只在 [README](../README.md#完整文档导航) 维护。
+独立 AI 节点、统一 443 入口、DNS 切换和备份均有各自的部署说明，完整入口只在 [README](../README.md#完整文档导航) 维护。
 
 ## 代码入口
 
@@ -39,6 +38,5 @@
 | `app/xray/ai_routing/` | 域名观测、分类、AI 候选选择和路由产物 |
 | `frontend/src/admin/`、`app/static/admin/` | React 管理后台源码与发布资源 |
 | `scripts/run_db_backup_cycle.py` | 定时备份与归档任务 |
-| `monitoring/` | 指标、Grafana 和日志采集部署配置 |
 
 已核实的实现、限制与当前状态见[仓库当前状态](Repo_Current_State.md)；历史记录不作为当前线上拓扑的依据。

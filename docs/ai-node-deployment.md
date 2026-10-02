@@ -50,71 +50,17 @@ AI 节点运行独立的 VLESS + REALITY Xray，接收主数据面转发的 AI �
 
 AI 节点使用 `AI_NODE_*` 独立 UUID、REALITY 私钥、公钥和 Short ID，不能复用普通数据面的 `XRAY_*` 凭据。
 
-## AI 节点监控采集
+## 本地日志与业务检查
 
-启用本机 Docker 模式时，AI 容器与控制面共享主机监控；业务端口 `27166` 不承担监控流量。Xray
-额外开启仅回环可访问的 expvar 指标端点，面板只提取有界的入站/直出字节计数，
-再由受保护的 `/metrics` 暴露给 Prometheus。`ai-access.log` 保留在本机用于域名/端口
-分析，不进入 Loki；`ai-error.log` 可由控制面 Fluent Bit 采集。
-
-| 端点 | 服务 | 指标路径 | 采集目标 | 说明 |
-| --- | --- | --- | --- | --- |
-| Xray 指标 | AI Xray | `/debug/vars` | 受控 AI 管理地址 | 入站与 `direct` 出站累计字节，仅绑定回环 |
-| 控制面监控端点 | Node Exporter/cAdvisor | `/metrics` | `control-plane` | 控制面主机与本机 AI 容器（如启用）的网络指标 |
-| 面板指标 | Routing Panel | `/metrics` | Prometheus | 汇总 AI Xray 字节指标，需 Bearer X |
-
-本机 Docker 模式下的 AI 节点容器部署为：
-
-| 输出 | 本机 Docker 部署边界 |
-| --- | --- |
-| 业务端口 | host network，`:27166`，不得修改 |
-| Xray metrics | 回环地址 `:31097`，不得公网开放 |
-| 日志 | `app/xray/logs/ai-access.log`、`ai-error.log` |
-
-部署或变更本机监控容器时，不得删除或重建 `xray-ai-node` 业务容器。
-
-本机 Docker 模式下从控制面验证 AI 容器：
+AI 节点的 `ai-access.log` 和 `ai-error.log` 保留在节点本机，供必要的业务排障使用。受管日志路径由 [配置说明](configuration.md#AI-节点纳管变量) 中的 `AI_NODE_ACCESS_LOG_PATH` 指定。本机 Docker 模式下从控制面验证：
 
 ```bash
 docker inspect xray-ai-node --format '{{.State.Running}}|{{.State.Status}}|{{.State.StartedAt}}'
 docker exec xray-ai-node /usr/local/bin/xray run -test -config /etc/xray/config.json
-curl -fsS http://redacted-ip-007:31097/debug/vars >/dev/null
-stat /root/ai-routing-panel/app/xray/logs/ai-access.log /root/ai-routing-panel/app/xray/logs/ai-error.log
-curl -fsS http://redacted-ip-007:9090/api/v1/targets
+stat app/xray/logs/ai-access.log app/xray/logs/ai-error.log
 ```
 
-面板 Prometheus 指标中，`xray_panel_ai_node_metrics_available=1` 表示 Xray
-指标端点可读；`xray_panel_ai_node_traffic_bytes_total` 是 AI 入站方向累计字节，
-`xray_panel_ai_node_egress_bytes_total` 是 AI 节点 `direct` 出站方向累计字节。
-Xray 重启会使其 counter 从零开始，查询应使用 Prometheus 的 `rate()` 或 `increase()`。
-
-域名/端口分析由面板增量读取 `ai-access.log` 中的 `accepted tcp|udp:<目标>:<端口>`
-记录，聚合最近 10 分钟的请求量并只暴露 Top 50，避免把未限制的目标域名直接变成
-Prometheus 标签。可用指标为：
-
-- `xray_panel_ai_destination_requests{domain,port,network}`：最近窗口请求量；
-- `xray_panel_ai_destination_requests_per_second{domain,port,network}`：最近窗口平均请求速率；
-- `xray_panel_ai_destination_last_seen_timestamp_seconds{domain,port,network}`：最后一次请求时间；
-- `xray_panel_ai_destination_other_requests`：因 Top 50 限制未展开的请求量。
-
-例如使用 `topk(20, xray_panel_ai_destination_requests)` 或
-`topk(20, xray_panel_ai_destination_requests_per_second)` 查看高流量域名/端口。
-Xray access log 不包含按目标拆分的字节数，因此这些指标表示请求流量；AI 节点总字节量
-仍以 `xray_panel_ai_node_traffic_bytes_total` 和
-`xray_panel_ai_node_egress_bytes_total` 为准。
-
-本机 Docker 模式下，控制面 cAdvisor 提供 `xray-ai-node` 容器的 CPU、内存和网络总量，
-不替代 Xray 按入站方向的业务计数。
-
-远端 AI 模式下，面板通过同一条已纳管的 SSH 连接在 AI 节点回环读取 Xray
-`/debug/vars`，并增量读取 AI access log；不需要为面板指标开放 AI 业务端口或公网
-指标端口。`AI_NODE_METRICS_URL` 默认使用 `http://127.0.0.1:31097/debug/vars`，
-`AI_NODE_ACCESS_LOG_PATH` 在远端模式下有一个内置回退值 `/var/log/xray/ai-access.log`，
-但远端容器通常把日志目录 bind mount 到容器内 `/var/log/xray`，宿主机上并不存在该路径；
-必须显式填写该目录在宿主机上的实际路径，否则面板会一直读不到日志而相关指标保持为 0。远端 AI 模式仍在
-`monitoring/prometheus/prometheus.yml` 中为节点配置独立 target；当前仅保留
-台湾的 `9100/18081`。Grafana 的 AI 主机面板按
-`node_role="ai_data_plane"` 和 `node_id` 区分节点，容器面板按 `host` 和 `name` 区分容器。
+域名分类与小时报告读取普通数据面的 `access.log`；统计和路由职责见 [AI 路由](ai-routing.md)。
 
 ## SSH 认证边界
 
@@ -148,15 +94,11 @@ AI_NODE_LABELS=AI 台湾
 AI_NODE_CONTAINER_NAMES=xray-ai-node
 AI_NODE_API_SERVERS=127.0.0.1:27166
 AI_NODE_CONFIG_PATHS=
-AI_NODE_METRICS_URL=http://127.0.0.1:31097/debug/vars
-AI_NODE_ACCESS_LOG_PATH=<ai-node-host-log-dir>/ai-access.log
 ```
 
 关键语义：
 
 - `AI_NODE_API_SERVERS=127.0.0.1:27166`：远端 AI 节点通过 SSH 执行本机 TCP 业务端口检查。
-- `AI_NODE_METRICS_URL`：面板读取 AI Xray expvar 的地址；远端 SSH 模式由面板在 AI 节点回环读取，不得改成公网监听。
-- `AI_NODE_ACCESS_LOG_PATH`：面板读取 AI access log 的远端宿主机路径，必须填节点宿主机上的实际文件，而不是容器内路径；远端 AI 节点常把日志目录 bind mount 到容器，此时要写宿主机的部署目录。
 - `AI_NODE_CONFIG_PATH=`：显式留空会使 `supports_sync=false`，禁止控制面上传配置。
 - `AI_NODE_CONTAINER_NAMES=xray-ai-node` 提供远端容器状态检查和重启能力。
 
@@ -171,13 +113,11 @@ AI_NODE_IDS=ai-node-a,ai-node-b
 AI_NODE_LABELS=AI 节点 A,AI 节点 B
 AI_NODE_CONTAINER_NAMES=xray,xray-ai-node
 AI_NODE_API_SERVERS=127.0.0.1:27166,127.0.0.1:27166
-AI_NODE_ACCESS_LOG_PATH=<shared-ai-node-host-log-dir>/ai-access.log
 AI_NODE_CONFIG_PATHS=
 ```
 
-`AI_NODE_CONFIG_PATHS=` 保持为空时，控制面只做 SSH 状态检查和容器重启，不上传共享配置；两台远端
-Xray 的独立凭据和配置仍由各自节点负责。`AI_NODE_ACCESS_LOG_PATH` 是单值变量，所有节点必须使用
-相同的宿主机日志路径；路径不同时无法逐节点覆盖。旧的单节点变量仍可用于兼容部署。逐节点重启 API 为
+`AI_NODE_CONFIG_PATHS=` 保持为空时，控制面只做 SSH 状态检查和容器重启，不上传共享配置；两台远端 Xray 的独立凭据和配置仍由各自节点负责。
+旧的单节点变量仍可用于兼容部署。逐节点重启 API 为
 `POST /api/ai-nodes/<node_id>/restart`。
 
 ## `app/xray/.env` 上游配置

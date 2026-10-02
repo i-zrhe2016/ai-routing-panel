@@ -482,7 +482,8 @@ class TenantPanelTest(unittest.TestCase):
         self.assertIn("AI 域名统计", body)
         self.assertIn("openai.com", body)
         self.assertIn("已应用 AI 路由", body)
-        self.assertIn("2026-06-18 00:00:00", body)
+        expected_report_time = datetime(2026, 6, 18, tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        self.assertIn(expected_report_time, body)
 
 
 class PanelAccessTest(unittest.TestCase):

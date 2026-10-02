@@ -6,7 +6,6 @@ const ICONS = {
   routing: "M4 6h6l2 3h8M4 18h6l2-3h8M12 9v6",
   delivery: "M4 6h16M4 12h16M4 18h10",
   commerce: "M5 7h14l-1 12H6L5 7Zm3 0V5a4 4 0 0 1 8 0v2",
-  observe: "M4 15l4-4 3 3 5-7 4 4M4 20h16",
 };
 
 export default function WorkspaceNav({ items, activeKey, onSelect, badges = {} }) {

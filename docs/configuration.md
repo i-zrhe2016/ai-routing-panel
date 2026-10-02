@@ -19,10 +19,6 @@
 | `PANEL_SECRET_KEY` | Session 签名密钥；不设置则每次启动随机生成 |
 | `PANEL_LOG_LEVEL` | 控制面 JSON 日志最低级别，默认 `INFO` |
 | `PANEL_SLOW_REQUEST_MS` | 慢请求阈值（毫秒），默认 `1000`；普通成功 GET 仍不记录 |
-| `METRICS_TOKEN` | Prometheus `/metrics` 抓取令牌；不设置则 `/metrics` 返回 404，设置后需 `Authorization: X <token>` |
-| `METRICS_DP_TTL` | `/metrics` 缓存数据面存活检测的秒数，默认 `30`（抓取路径上唯一的 SSH 调用） |
-| `GRAFANA_PUBLIC_URL` | 生产统一使用 `https://xray.zrhe2016.cc/grafana/`，由 Cloudflare Access 保护；管理后台 Observability 工作区使用该同源地址 |
-| `GRAFANA_OBSERVABILITY_UID` | Observability 工作区内嵌所用 Grafana dashboard 的 UID，默认 `xray-observability` |
 | `AI_ROUTING_ENABLED` | 是否展示 AI 路由状态和相关统计 |
 | `DATAPLANE_SSH_TARGET` | 远端数据面内网 SSH 目标；默认 `root@<normal-data-plane-host>`（Compose） |
 | `DATAPLANE_SSH_OPTIONS` | SSH 额外参数，按 shell words 解析；认证固定为密码/键盘交互，禁止注入私钥 |
@@ -58,7 +54,6 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 - `PANEL_HEALTH_REQUIRES_XRAY`
 - `PANEL_ALLOWED_NETWORKS`：控制面来源白名单（默认见上表）；控制台没有登录，非白名单来源在路由前返回 403
 
-Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 `monitoring/loki/.env`，Grafana 使用 `monitoring/.env` 中的 `GRAFANA_LOKI_URL`。当前生产采集路径和实际主机角色见 [Fluent Bit 日志采集](logging-fluent-bit.md#当前生产部署)。
 
 ## AI 节点纳管变量
 
@@ -73,16 +68,13 @@ Fluent Bit 日志采集使用 `monitoring/fluent-bit/.env`，远端 Loki 使用 
 | `AI_NODE_SSH_KNOWN_HOSTS` | AI 节点主机密钥文件；默认 `/root/.ssh/known_hosts_ai` |
 | `AI_NODE_CONTAINER_NAME` | 本机 Docker 模式的 AI Xray 容器名；示例为 `xray-ai-node` |
 | `AI_NODE_CONTAINER_NAMES` | 多节点远端容器名，按顺序对应 SSH 目标 |
+| `AI_NODE_ACCESS_LOG_PATH` | 受管 AI 节点访问日志的宿主机实际路径；远端 SSH 使用此路径读取日志，不能填写仅在容器内存在的路径 |
 | `AI_NODE_RESTART_COMMAND` | 自定义重启命令（优先于容器名） |
 | `AI_NODE_RESTART_COMMANDS` | 多节点自定义重启命令，按顺序对应；留空时使用容器名执行 `docker restart` |
 | `AI_NODE_CONFIG_PATH` | AI 节点真实宿主配置路径；显式留空会禁用配置上传 |
 | `AI_NODE_CONFIG_PATHS` | 多节点配置路径；当前多节点纳管建议留空，避免控制面配置覆盖独立节点配置 |
 | `AI_NODE_API_SERVER` | AI 节点 Socket 存活检查地址；远端模式通常填写目标主机回环地址 |
 | `AI_NODE_API_SERVERS` | 多节点 Socket 存活检查地址，按顺序对应；支持远端回环地址，如 `127.0.0.1:27166` |
-| `AI_NODE_METRICS_URL` | 面板读取 AI Xray `/debug/vars` 的地址；远端 SSH 模式通过 AI 节点回环读取，禁止改成公网监听 |
-| `AI_NODE_ACCESS_LOG_PATH` | AI access log 路径；本机 Docker 用容器内 `/app/xray/logs/ai-access.log`，远端 SSH 必须填节点宿主机上的实际路径（容器内 `/var/log/xray` 通常只是 bind mount），只做域名/端口分析 |
-| `AI_NODE_DESTINATION_WINDOW_SECONDS` | AI 域名/端口请求分析窗口，默认 `600` 秒 |
-| `AI_NODE_DESTINATION_MAX_LABELS` | 每次展开的高流量域名/端口 Top 数，默认 `50`，用于限制 Prometheus 标签基数 |
 | `AI_NODE_PROBE_HOST` | AI 节点可达性探测目标；多节点时使用 `AI_NODE_PROBE_HOSTS` 按序对应 |
 | `AI_NODE_PROBE_HOSTS` | 多节点探测目标，按顺序对应；仅用于需要生成分享地址的兼容场景 |
 
@@ -251,8 +243,7 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - `AI_NODE_SSH_TARGET` 或 `AI_NODE_SSH_TARGETS` 生效后，AI 节点模式为 `ssh`；未设置远端目标时才由 `AI_NODE_CONTAINER_NAME=xray-ai-node` 使用本机 Docker 模式
 - 多节点使用 `AI_NODE_SSH_TARGETS`；面板按 `AI_NODE_IDS` / `AI_NODE_LABELS` 分别展示状态，并通过 `POST /api/ai-nodes/<node_id>/restart` 单独重启
 - `AI_NODE_CONFIG_PATH` 非空时控制面才具备上传 `config-ai-node.json` 的能力；生产当前显式留空以禁止上传
-- `AI_NODE_API_SERVER` 用于 AI 业务 Socket 状态检查；`AI_NODE_METRICS_URL` 用于读取仅回环开放的 Xray expvar 流量指标，远端模式通过 SSH 执行读取
-- `AI_NODE_ACCESS_LOG_PATH` 用于读取 AI access log；远端模式通过同一 SSH 纳管通道增量读取，不需要开放公网日志或业务端口
+- `AI_NODE_API_SERVER` 用于 AI 业务 Socket 状态检查
 - AI 节点使用独立 REALITY 凭据，字段契约见 [AI 节点独立凭据](ai-node-credentials.md)
 - 详见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)
 

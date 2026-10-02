@@ -304,6 +304,13 @@ def _database_restore_path(archive_path: str, panel_archive: str, node_manifest:
 
 def _add_plan(plans: list[PlannedFile], seen_destinations: set[str], plan: PlannedFile) -> None:
     destination = _safe_relative(plan.destination, "restore path")
+    # Historical business backups remain usable without resurrecting the retired stack.
+    retired_names = {"docker-compose.ops-reporting.yml", "docker-compose.ops-reporting.deploy.yml", ".env.ops-reporting"}
+    parts = PurePosixPath(destination).parts
+    if (plan.archive_path == "database/ops.db"
+            or any(part in {"monitoring", "xray-ops", "xray_ops", "ops-daily-reports"} for part in parts)
+            or PurePosixPath(destination).name in retired_names):
+        return
     if destination in seen_destinations:
         raise ValueError(f"multiple archive files target the same restore path: {destination}")
     seen_destinations.add(destination)

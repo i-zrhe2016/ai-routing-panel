@@ -100,7 +100,7 @@ class RestoreBackupTest(unittest.TestCase):
                 (output / "data" / "panel.db").read_bytes(),
                 (root / "panel-20260917T030000Z.db").read_bytes(),
             )
-            self.assertTrue((output / "data" / "xray-ops" / "ops.db").is_file())
+            self.assertFalse((output / "data" / "xray-ops" / "ops.db").exists())
             self.assertEqual(
                 (output / "data" / "uploads" / "payment-proofs" / "proof.txt").read_bytes(),
                 b"attachment",
@@ -147,6 +147,27 @@ class RestoreBackupTest(unittest.TestCase):
             self.assertEqual((output / "data").stat().st_mode & 0o777, 0o700)
             report = json.loads((output / "restore-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["report"], "restore-report.json")
+
+    def test_legacy_optional_ops_database_is_not_restored(self):
+        validated = {
+            "backupManifest": {"files": [
+                {"archivePath": "database/panel.db"},
+                {"archivePath": "database/ops.db"},
+                {"archivePath": "config/project/docker-compose.ops-reporting.yml",
+                 "sourcePath": "/project/docker-compose.ops-reporting.yml"},
+                {"archivePath": "config/project/monitoring/loki/loki.yml",
+                 "sourcePath": "/project/monitoring/loki/loki.yml"},
+            ]},
+            "nodeManifest": {
+                "sharedState": {
+                    "requiredArtifacts": [{"name": "panel-database", "archivePath": "database/panel.db"}],
+                    "optionalArtifacts": [{"archivePath": "database/ops.db", "restorePath": "data/xray-ops/ops.db"}],
+                },
+                "nodes": [],
+            },
+        }
+        plans = self.restore._build_restore_plan(validated, allow_incomplete=False)
+        self.assertEqual([p.destination for p in plans if p.category != "metadata"], ["data/panel.db"])
 
     def test_control_source_without_project_data_or_app_keeps_archive_relative_path(self):
         self.assertEqual(

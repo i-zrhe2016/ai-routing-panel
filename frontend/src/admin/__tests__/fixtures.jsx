@@ -10,8 +10,6 @@ export function makeDashboard(overrides = {}) {
       probe_enabled: true,
       probe_dashboard_url: "/probe-dashboard",
       ai_domain_dashboard_url: "/ai-domain-dashboard",
-      grafana_url: "http://grafana.example.com",
-      grafana_observability_uid: "xray-observability",
       data_plane_status: {
         configured: true,
         reachable: true,

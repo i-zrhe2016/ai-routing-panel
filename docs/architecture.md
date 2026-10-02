@@ -27,12 +27,6 @@
 
 三节点单点故障的正式边界见 [fault-tolerance.md](fault-tolerance.md)。控制面故障时，已有客户端的普通代理流量应继续走普通数据面；控制面管理页面、订阅和自动运维不属于数据面可用性保证范围。
 
-## 已部署扩展：Prometheus-only 每日节点运维分析
-
-仓库提供 Prometheus、Grafana 和 `xray-ops-daily-reporter` 部署配置。当前 Prometheus 配置通过 Tailscale 管理网络直接抓取普通数据面和台湾 AI 节点的 exporter。Reporter 查询 Prometheus HTTP API，并可读取本地脱敏归因快照与 AI 域名聚合，生成 JSON/Markdown 报告；详细职责和持久化边界见[每日日报器](ops-reporting/daily-reporter.md)。
-
-该子系统不进入用户流量路径。旧 SSH/raw-log Collector 已从生产删除，Reporter 不挂载 SSH 凭据、不执行远程命令，也不读取 Xray、Docker 或 systemd 原始日志。正常日报通过确定性规则和 Codex 生成报告；`rules_only` 仅用于显式的影子或维护运行。报告生成契约见[每日日报器](ops-reporting/daily-reporter.md)，验收边界见[每日节点运维分析](ops-reporting/index.md)，日常问题见[故障排查手册](ops-reporting/troubleshooting.md)。
-
 ## 组件职责
 
 ### 控制面
@@ -61,7 +55,6 @@
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `config-backup.json`（控制面备用）
 - 对普通数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
 - 对 AI 节点做 SSH 状态检查和重启；未配置远端目标时可使用本机 Docker，配置上传能力由 `AI_NODE_CONFIG_PATH` 单独控制，生产当前保持关闭
-- 读取受控 AI Xray `/debug/vars`，只聚合入站/直出累计字节；以 Prometheus 文本格式暴露 `/metrics`（token 鉴权）。管理后台 Observability 工作区把这些指标经 Grafana（`monitoring/` 栈）以 `d-solo` iframe 内嵌出图，观测数据走 Prometheus，配置/事务数据仍走 `data/panel.db`
 
 ### 普通数据面
 
@@ -75,7 +68,7 @@
 
 - 当前为远端台湾节点上的独立 VLESS + REALITY Xray；也支持部署到本机 Docker 或其他远端独立机器
 - 监听 `AI_UPSTREAM_PORT`，通过 VLESS + REALITY 接收普通数据面 `ai_proxy` outbound 转发的 AI 域名流量
-- freedom 直出，不做域名分类、不运行 `ai_domain_manager`、无 panel-ports；记录独立 AI 日志，并通过受控 metrics 暴露入站与直出字节计数
+- freedom 直出，不做域名分类、不运行 `ai_domain_manager`、无 panel-ports；记录独立 AI 日志
 - 使用独立于普通数据面的 REALITY 凭据；两端隧道字段必须按 [AI 节点独立凭据](ai-node-credentials.md) 保持匹配
 - 本机模式通过 Docker 做状态检查和重启；远端模式通过 SSH 管理。生产当前以空 `AI_NODE_CONFIG_PATH` 禁止自动上传配置
 - 部署见 [AI 节点部署与 SSH 纳管](ai-node-deployment.md)，故障处理见 [ChatGPT 路由排障](chatgpt-routing-troubleshooting.md)
@@ -155,14 +148,6 @@ AI 节点当前目标使用 `ssh` 模式；未设置远端目标时才使用 `do
 11. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
 12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；控制面 AI 运行时产物来自 `config/`，远端 AI 节点保持独立配置，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
 13. 首页读取三节点状态、已配置 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。
-
-AI 观测链路：本机 Docker 的 `xray-ai-node` 将 Xray metrics 绑定到控制面回环地址，
-远端 AI 则由面板通过 SSH 在节点回环读取同一 `/debug/vars`，两者均在面板
-`/metrics` 输出 `xray_panel_ai_node_*`；控制面 cAdvisor 绑定控制面回环地址，
-Prometheus 同时采集 AI 主机的容器级 CPU、内存和网络总量。AI access log 只
-保留在各自节点，集中日志链路仅采集 `ai-error.log`。面板增量读取本机或远端
-`ai-access.log`，在最近窗口内按目标域名、端口和网络协议聚合请求量，输出
-`xray_panel_ai_destination_*` Top 指标；Xray access log 不提供按目标拆分的字节量。
 
 ## 关键运行产物
 

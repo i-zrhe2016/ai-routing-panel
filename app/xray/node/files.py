@@ -7,7 +7,6 @@ import shlex
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from app.xray.file_io import write_text_atomic
 
@@ -191,18 +190,6 @@ print(
         }
     )
 )
-"""
-
-REMOTE_READ_HTTP_JSON_SCRIPT = """
-import sys
-from urllib.request import Request, urlopen
-
-endpoint = sys.argv[1]
-timeout = max(1, int(float(sys.argv[2])))
-request = Request(endpoint, headers={"Accept": "application/json"})
-with urlopen(request, timeout=timeout) as response:
-    payload = response.read(8 * 1024 * 1024)
-sys.stdout.buffer.write(payload)
 """
 
 REMOTE_AI_DOMAINS_SNAPSHOT_SCRIPT = """
@@ -489,29 +476,6 @@ class RemoteFileOperations:
             "skip_until_newline": bool(payload.get("skip_until_newline")),
         }
 
-    def read_metrics_payload(self, metrics_url, timeout_seconds):
-        parsed = urlsplit(str(metrics_url))
-        if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
-            "127.0.0.1",
-            "localhost",
-            "::1",
-        }:
-            raise ValueError("远端 Xray 指标地址必须绑定回环地址")
-        completed = self._run_remote(
-            [
-                "python3",
-                "-c",
-                REMOTE_READ_HTTP_JSON_SCRIPT,
-                str(metrics_url),
-                str(float(timeout_seconds)),
-            ],
-            f"{self.config.label} Xray 指标读取失败",
-            timeout=max(1, float(timeout_seconds)),
-        )
-        try:
-            return json.loads(completed.stdout or "{}")
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"{self.config.label} Xray 指标返回无效 JSON") from exc
 
 
 __all__ = [
@@ -519,7 +483,6 @@ __all__ = [
     "REMOTE_DELETE_FILE_SCRIPT",
     "REMOTE_FILE_DELTA_SCRIPT",
     "REMOTE_READ_FILE_SCRIPT",
-    "REMOTE_READ_HTTP_JSON_SCRIPT",
     "REMOTE_REPLACE_FILE_SCRIPT",
     "REMOTE_WRITE_FILE_SCRIPT",
     "RemoteFileOperations",

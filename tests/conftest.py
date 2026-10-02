@@ -10,7 +10,9 @@ the patch silently misses and real network code runs.
 
 The autouse fixture below snapshots the ``app.*`` modules around each test and
 restores them afterwards, isolating that reload so it cannot leak across files.
-It is behavior-preserving for the application code; it only affects test setup.
+It also restores the retained Web module's route collectors: removing newly
+imported views without rolling back their registrations would append duplicate
+handlers on the next import. It only affects test setup.
 """
 
 import sys
@@ -25,9 +27,19 @@ def _app_module_names():
 @pytest.fixture(autouse=True)
 def _isolate_app_modules():
     saved = {name: sys.modules[name] for name in _app_module_names()}
+    web_core = saved.get("app.web.core")
+    saved_registrations = {
+        name: list(getattr(web_core, name))
+        for name in ("_ROUTES", "_BEFORE_REQUEST", "_TEMPLATE_FILTERS")
+        if web_core is not None
+    }
     try:
         yield
     finally:
+        # The saved core survives module rollback, so its decorator registries
+        # must match the saved view modules rather than retain fresh imports.
+        for name, registrations in saved_registrations.items():
+            getattr(web_core, name)[:] = registrations
         for name in _app_module_names():
             sys.modules.pop(name, None)
         sys.modules.update(saved)

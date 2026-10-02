@@ -177,7 +177,7 @@ class BackupRelayConfigTest(unittest.TestCase):
         from app.xray.render_config import build_backup_relay_outbound, build_server_config
 
         url = (
-            "vless://relay-uuid@nat.qq.pw:443?encryption=none&security=reality"
+            "vless://relay-uuid@example.com:443?encryption=none&security=reality"
             "&sni=www.cloudflare.com&fp=chrome&pbk=PBKEY&sid=0123456789abcdef"
             "&type=tcp&flow=xtls-rprx-vision"
         )
@@ -194,7 +194,7 @@ class BackupRelayConfigTest(unittest.TestCase):
         self.assertEqual(default_outbound["tag"], "direct")
         self.assertEqual(default_outbound["protocol"], "vless")
         vnext = default_outbound["settings"]["vnext"][0]
-        self.assertEqual(vnext["address"], "nat.qq.pw")
+        self.assertEqual(vnext["address"], "example.com")
         self.assertEqual(vnext["port"], 443)
         self.assertEqual(vnext["users"][0]["id"], "relay-uuid")
         self.assertEqual(
@@ -209,18 +209,18 @@ class BackupRelayConfigTest(unittest.TestCase):
         from app.xray.render_config import build_backup_relay_outbound
 
         with self.assertRaises(ValueError):
-            build_backup_relay_outbound("https://nat.qq.pw:443")
+            build_backup_relay_outbound("https://example.com:443")
 
     def test_backup_relay_requires_reality_params(self):
         from app.xray.render_config import build_backup_relay_outbound
 
         with self.assertRaises(ValueError):
-            build_backup_relay_outbound("vless://u@nat.qq.pw:443?security=reality&sni=x")
+            build_backup_relay_outbound("vless://u@example.com:443?security=reality&sni=x")
 
     def test_backup_relay_accepts_plain_security_none(self):
         from app.xray.render_config import build_backup_relay_outbound
 
-        outbound = build_backup_relay_outbound("vless://u@nat.qq.pw:443?type=tcp")
+        outbound = build_backup_relay_outbound("vless://u@example.com:443?type=tcp")
         self.assertEqual(outbound["streamSettings"]["security"], "none")
         self.assertNotIn("realitySettings", outbound["streamSettings"])
 
@@ -258,6 +258,7 @@ class AiNodeConfigTest(unittest.TestCase):
 
         values = self._values()
         values["AI_UPSTREAM_PORT"] = "27166"
+        values["AI_NODE_METRICS_LISTEN"] = "127.0.0.1:31999"
         config = build_ai_node_config(values)
 
         self.assertEqual(config["outbounds"], [{"protocol": "freedom", "tag": "direct"}])
@@ -270,10 +271,7 @@ class AiNodeConfigTest(unittest.TestCase):
                 "error": "/var/log/xray/ai-error.log",
             },
         )
-        self.assertEqual(
-            config["metrics"],
-            {"tag": "ai-metrics", "listen": "127.0.0.1:31097"},
-        )
+        self.assertNotIn("metrics", config)
         self.assertEqual(config["stats"], {})
         self.assertTrue(config["policy"]["system"]["statsInboundUplink"])
         self.assertTrue(config["policy"]["system"]["statsInboundDownlink"])
@@ -373,7 +371,7 @@ class AiNodeConfigTest(unittest.TestCase):
             ai_config = json.loads(ai_node_out.read_text(encoding="utf-8"))
             self.assertEqual(ai_config["outbounds"], [{"protocol": "freedom", "tag": "direct"}])
             self.assertNotIn("routing", ai_config)
-            self.assertEqual(ai_config["metrics"]["listen"], "127.0.0.1:31097")
+            self.assertNotIn("metrics", ai_config)
 
     def test_cli_renders_backup_without_upstream_url(self):
         with tempfile.TemporaryDirectory() as tmpdir:
