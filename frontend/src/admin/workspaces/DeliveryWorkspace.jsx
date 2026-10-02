@@ -35,8 +35,7 @@ export default function DeliveryWorkspace() {
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">DELIVERY</p>
-          <h2>端口与租户交付</h2>
+          <h1>端口与租户交付</h1>
           <p>新增监听入口、维护租户配额与到期时间，并生成每个端口独立的登录地址、凭据和订阅链接。</p>
         </div>
         <span className="cc-status-line">
@@ -44,7 +43,7 @@ export default function DeliveryWorkspace() {
         </span>
       </section>
 
-      <Panel kicker="NEW LISTENER" title="新增端口" description="沿用当前节点的 REALITY 参数，只新增一个监听入口。">
+      <Panel title="新增端口" description="沿用当前节点的 REALITY 参数，只新增一个监听入口。">
         <form
           className="form-grid"
           onSubmit={(event) => {
@@ -104,7 +103,6 @@ export default function DeliveryWorkspace() {
 
       <div className="resource-layout">
         <Panel
-          kicker="PORT INVENTORY"
           title="端口管理"
           description="按端口号、备注或状态筛选。"
         >
@@ -166,7 +164,6 @@ export default function DeliveryWorkspace() {
         {selected ? (
           <Panel
             id="port-detail-panel"
-            kicker="SELECTED PORT"
             title={`端口 ${selected.listen_port}`}
             description={`${selected.note ? `${selected.note} · ` : ""}租户直接接入当前 Xray Reality 入站。`}
             actions={<StatusPill tone={portTone(selected)} label={selected.status_label || selected.status} />}
@@ -237,7 +234,6 @@ export default function DeliveryWorkspace() {
               <div className="access-block">
                 <div className="section-heading">
                   <div>
-                    <p className="section-kicker">TENANT DELIVERY</p>
                     <h3>租户面板与订阅输出</h3>
                     <p className="section-description">当前端口的登录地址、账号密码和订阅地址独立生成。</p>
                   </div>

@@ -22,6 +22,8 @@ AI 路由状态至少应同时查看 `ai_candidates`、`manual_mode`、`route_st
 
 ## 流量与连接统计
 
+后台流量拓扑的使用与数据边界见[开发流程](development.md)。
+
 当前统计链路拆成两部分：
 
 - 连接数来自 `app/xray/logs/access.log`

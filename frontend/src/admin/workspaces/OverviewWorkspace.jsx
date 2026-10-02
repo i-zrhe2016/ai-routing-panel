@@ -1,8 +1,9 @@
-import { FlowPath, SeriesChart } from "../components/charts/index.jsx";
+import { SeriesChart } from "../components/charts/index.jsx";
+import TrafficTopology from "../components/TrafficTopology.jsx";
 import { MetricCard, Panel, StatusPill, Tone } from "../components/ui.jsx";
 import { humanBytes } from "../../shared/formatters.js";
 import { buildChecklist } from "../lib/diagnose.js";
-import { aiRoutingLabel, dnsFailoverSummary, dnsFailoverTone, toneFromStatus } from "../lib/dashboard.js";
+import { aiRoutingLabel, toneFromStatus } from "../lib/dashboard.js";
 import { usePanel } from "../state/PanelProvider.jsx";
 
 const RECEIVED_COLOR = "var(--c-primary)";
@@ -12,20 +13,17 @@ export default function OverviewWorkspace({ onOpenWorkspace }) {
   const panel = usePanel();
   const checklist = buildChecklist(panel.panel, panel.insights, panel.diagnosis).slice(0, 3);
   const routeTone = toneFromStatus(panel.aiRoutingStatus?.status_tone);
-  const flowNodes = [
-    { role: "入口", name: panel.trafficRouting?.entry_node || "普通数据面", active: true },
-    { role: "中转", name: (panel.trafficRouting?.transit_nodes || []).join(" · ") || "直出", active: Boolean(panel.trafficRouting?.transit_nodes?.length) },
-    { role: "出口", name: panel.trafficRouting?.exit_node || "待确认", active: true },
-  ];
   const traffic = panel.insights?.traffic;
+  const historyMessage = panel.insightsLoading
+    ? "正在加载流量历史…"
+    : panel.insightsError || "暂无流量历史记录。";
 
   return (
     <div className="workspace-section">
-      <section className="command-hero">
+      <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">OPERATIONS SNAPSHOT</p>
-          <h2>今天的路径，是否值得信任？</h2>
-          <p>先确认主机与出口状态，再看流量是否正常，最后才处理配置细节。</p>
+          <h1>系统总览</h1>
+          <p>掌握流量与运行状态，及时处理连接异常。</p>
         </div>
         <div className="command-hero__status">
           <StatusPill tone={routeTone} label={aiRoutingLabel(panel.aiRoutingStatus)} />
@@ -34,19 +32,46 @@ export default function OverviewWorkspace({ onOpenWorkspace }) {
       </section>
 
       <section className="cc-metric-grid">
-        <MetricCard label="ACTIVE PORTS" value={panel.summary.active_ports || 0} note="当前可被客户端访问" tone="success" accent />
-        <MetricCard label="需处理端口" value={panel.attentionPortCount} note="过期、停用或达到上限" tone="warning" />
-        <MetricCard label="租户数量" value={panel.subscription.tenant_count || 0} note="每个端口一个租户入口" tone="info" />
+        <MetricCard label="运行端口" value={panel.summary.active_ports || 0} note="当前可被客户端访问" tone="success" accent />
         <MetricCard label="累计总流量" value={humanBytes(panel.totalTrafficBytes)} note="入站 + 出站" />
-        <MetricCard label="待审订单" value={panel.commerce.summary.pending_review_count || 0} note="付款截图待审核" tone="warning" />
+        <MetricCard label="租户数量" value={panel.subscription.tenant_count || 0} note="每个端口一个租户入口" tone="info" />
+        <MetricCard label="需处理端口" value={panel.attentionPortCount} note="过期、停用或达到上限" tone="warning" />
       </section>
 
-      <section className="cc-split">
+      <section className="overview-layout">
         <Panel
-          kicker="CHECK FIRST"
-          title="现在先处理这些"
-          description="按当前快照推导，只列出控制面已经报出的异常。"
-          actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("diagnostics")}>进入故障排查</button>}
+          className="overview-traffic"
+          title="近期流量"
+          description={traffic ? `最近 ${traffic.days} 天的全站日流量。` : "全站入站与出站的每日趋势。"}
+          actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("traffic")}>查看流量明细</button>}
+        >
+          {traffic ? (
+            <>
+              <div className="overview-traffic-summary">
+                <span>区间累计 <strong>{humanBytes(traffic.totals.total_bytes)}</strong></span>
+                <span>{traffic.range_start} — {traffic.range_end}</span>
+              </div>
+              <SeriesChart
+                labels={traffic.dates}
+                ariaLabel="全站每日流量"
+                height={230}
+                emptyLabel="所选区间内暂无流量记录。"
+                series={[
+                  { key: "received", label: "入站", values: traffic.series.bytes_received, color: RECEIVED_COLOR },
+                  { key: "sent", label: "出站", values: traffic.series.bytes_sent, color: SENT_COLOR },
+                ]}
+              />
+            </>
+          ) : (
+            <div className="cc-chart-empty" role={panel.insightsError ? "alert" : "status"}>{historyMessage}</div>
+          )}
+        </Panel>
+
+        <Panel
+          className="overview-attention"
+          title="待办与异常"
+          description="依据当前快照，优先处理影响连接的事项。"
+          actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("diagnostics")}>故障排查</button>}
         >
           <ul className="cc-checklist">
             {checklist.map((item) => (
@@ -60,43 +85,22 @@ export default function OverviewWorkspace({ onOpenWorkspace }) {
             ))}
           </ul>
         </Panel>
-
-        <Panel kicker="TRAFFIC PULSE" title="近期流量" description={traffic ? `最近 ${traffic.days} 天，来自面板自身的历史表。` : "历史数据尚未加载。"}>
-          {traffic ? (
-            <SeriesChart
-              labels={traffic.dates}
-              ariaLabel="全站每日流量"
-              series={[
-                { key: "received", label: "入站", values: traffic.series.bytes_received, color: RECEIVED_COLOR },
-                { key: "sent", label: "出站", values: traffic.series.bytes_sent, color: SENT_COLOR },
-              ]}
-            />
-          ) : (
-            <div className="cc-chart-empty">{panel.insightsError || "历史数据尚未加载。"}</div>
-          )}
-        </Panel>
       </section>
 
-      <Panel kicker="ROUTING PATH" title="当前流量路径" description={panel.trafficRouting?.label || "等待路由状态同步"}>
-        <FlowPath nodes={flowNodes} />
-        <div className="cc-inline-status">
-          <span>
-            数据面：<StatusPill tone={panel.dataPlaneStatus?.xray_running ? "success" : "danger"} label={panel.dataPlaneRunningLabel()} />
-          </span>
-          <span>
-            AI 节点：<StatusPill tone={panel.aiNodeStatus?.reachable ? "success" : "warning"} label={panel.aiNodeStatus?.reachable ? "可达" : "待确认"} />
-          </span>
-          <span>
-            DNS：<StatusPill tone={dnsFailoverTone(panel.dnsFailoverStatus)} label={dnsFailoverSummary(panel.dnsFailoverStatus)} />
-          </span>
-        </div>
+      <Panel
+        className="overview-route"
+        title="流量拓扑"
+        description={panel.trafficRouting?.label || "等待路由状态同步"}
+        actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("topology")}>查看完整拓扑</button>}
+      >
+        <TrafficTopology panel={panel} compact />
       </Panel>
 
       <Panel
-        kicker="HOSTS"
+        className="overview-hosts"
         title="主机一览"
         description="数据面、AI 节点和控制面备用入口的当前状态。"
-        actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("hosts")}>打开主机工作区</button>}
+        actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("hosts")}>查看主机</button>}
       >
         <div className="cc-node-list">
           {panel.nodes.map((node) => (

@@ -16,14 +16,14 @@ function renderConsole(api) {
 
 async function openWorkspace(user, name) {
   const nav = await screen.findByRole("navigation", { name: "控制台工作区" });
-  await user.click(within(nav).getByRole("button", { name: new RegExp(name) }));
+  await user.click(within(nav).getByRole("button", { name: new RegExp(`^${name}(?:\\s|$)`) }));
 }
 
 describe("hosts workspace", () => {
   it("lists every reported host with its management target", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "主机");
 
     expect(await screen.findByRole("heading", { name: "主机与数据面" })).toBeTruthy();
@@ -36,7 +36,7 @@ describe("hosts workspace", () => {
   it("offers restart only where the host reports restart support", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "主机");
 
     const cards = await screen.findAllByRole("article");
@@ -50,7 +50,7 @@ describe("hosts workspace", () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "主机");
 
     await user.click(await screen.findByRole("button", { name: "数据面体检" }));
@@ -62,7 +62,7 @@ describe("hosts workspace", () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "主机");
 
     await user.click((await screen.findAllByRole("button", { name: "重启" }))[0]);
@@ -79,7 +79,7 @@ describe("traffic workspace", () => {
   it("renders the fleet totals and per-port history from the insights payload", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "流量");
 
     expect(await screen.findByRole("heading", { name: "流量与端口负载" })).toBeTruthy();
@@ -91,7 +91,7 @@ describe("traffic workspace", () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "流量");
 
     await user.click(await screen.findByRole("button", { name: "7 天" }));
@@ -102,7 +102,7 @@ describe("traffic workspace", () => {
     const user = userEvent.setup();
     const api = createFakeApi({ failure: { url: "/api/insights?days=14", message: "历史数据加载失败。" } });
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "流量");
 
     expect(await screen.findByRole("heading", { name: "流量与端口负载" })).toBeTruthy();
@@ -114,7 +114,7 @@ describe("diagnostics workspace", () => {
   it("lists probe failures, failover events and the diagnosis result", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "故障排查");
 
     expect(await screen.findByRole("heading", { name: "故障后排查" })).toBeTruthy();
@@ -134,7 +134,7 @@ describe("diagnostics workspace", () => {
       failover_events: { events: [], total_events: 0 },
     });
     renderConsole(createFakeApi({ insights }));
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "故障排查");
 
     expect(await screen.findByText(/暂无探测记录/)).toBeTruthy();
@@ -147,7 +147,7 @@ describe("delivery workspace", () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "交付");
 
     const form = await screen.findByRole("heading", { name: "新增端口" });
@@ -165,7 +165,7 @@ describe("delivery workspace", () => {
   it("filters the inventory and shows tenant delivery for the selected port", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "交付");
 
     expect(await screen.findByDisplayValue("vless://uuid@192.0.2.10:443")).toBeTruthy();
@@ -178,7 +178,7 @@ describe("delivery workspace", () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "交付");
 
     await user.click(await screen.findByRole("button", { name: "重置账号密码" }));
@@ -189,49 +189,12 @@ describe("delivery workspace", () => {
   });
 });
 
-describe("commerce workspace", () => {
-  it("blocks a rejection without a reason and posts a fulfilment note", async () => {
-    const user = userEvent.setup();
-    const api = createFakeApi();
-    renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
-    await openWorkspace(user, "订单与套餐");
-
-    await user.click(await screen.findByRole("tab", { name: "订单审核" }));
-    await user.click(screen.getByRole("button", { name: "驳回订单" }));
-    expect(await screen.findByText("驳回订单前请填写原因。")).toBeTruthy();
-    expect(api.calls.some((call) => call.url === "/api/orders/3/reject")).toBe(false);
-
-    await user.type(screen.getByLabelText("审核备注 / 驳回原因"), "金额不匹配");
-    await user.click(screen.getByRole("button", { name: "审核通过并开通" }));
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "通过并开通" }));
-
-    await waitFor(() => {
-      const call = api.calls.find((item) => item.url === "/api/orders/3/fulfill");
-      expect(call?.json.review_note).toBe("金额不匹配");
-    });
-  });
-
-  it("saves commerce settings", async () => {
-    const user = userEvent.setup();
-    const api = createFakeApi();
-    renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
-    await openWorkspace(user, "订单与套餐");
-
-    await user.click(await screen.findByRole("tab", { name: "商业设置" }));
-    await user.click(screen.getByRole("button", { name: "保存商业设置" }));
-    await waitFor(() => expect(api.calls.some((call) => call.url === "/api/commerce-settings" && call.method === "PUT")).toBe(true));
-  });
-});
-
 describe("routing workspace", () => {
   it("switches the AI route mode after confirmation", async () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "AI 路由");
 
     expect(await screen.findByRole("heading", { name: "路由决策与故障切换" })).toBeTruthy();
@@ -249,23 +212,9 @@ describe("routing workspace", () => {
   it("keeps the forced-direct action behind the advanced section", async () => {
     const user = userEvent.setup();
     renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     await openWorkspace(user, "AI 路由");
 
     expect(await screen.findByRole("button", { name: "强制直出" })).toBeTruthy();
-  });
-});
-
-describe("retired monitoring integration", () => {
-  it("keeps host management available without monitoring navigation or embeds", async () => {
-    const user = userEvent.setup();
-    renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
-    const nav = screen.getByRole("navigation", { name: "控制台工作区" });
-    expect(within(nav).queryByRole("button", { name: /可观测/ })).toBeNull();
-    await openWorkspace(user, "主机");
-    expect(await screen.findByRole("heading", { name: "主机与数据面" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "主机资源" })).toBeNull();
-    expect(document.querySelector("iframe")).toBeNull();
   });
 });

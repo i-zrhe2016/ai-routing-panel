@@ -1,17 +1,17 @@
 // Shared presentational primitives for the console. Kept deliberately small:
 // every visual decision lives in admin.css so the token layer stays the single
 // source of truth for colour and spacing.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { copyText } from "../../shared/clipboard.js";
 import { TONES, statusTone } from "../../shared/tokens.js";
 
 export function StatusPill({ label, tone, status }) {
-  const effective = tone || statusTone(status);
-  const palette = TONES[effective] || TONES.neutral;
+  const requested = tone || statusTone(status);
+  const effective = Object.hasOwn(TONES, requested) ? requested : "neutral";
   return (
-    <span className="status-pill" style={{ color: palette.color, backgroundColor: palette.soft }}>
-      <span className="status-pill__dot" style={{ backgroundColor: palette.color }} />
+    <span className={`status-pill is-${effective}`}>
+      <span className="status-pill__dot" aria-hidden="true" />
       {label || status}
     </span>
   );
@@ -34,7 +34,7 @@ export function Panel({ id, kicker, title, description, actions, children, class
         <div className="cc-card__head">
           <div>
             {kicker ? <p className="section-kicker">{kicker}</p> : null}
-            {title ? <h3>{title}</h3> : null}
+            {title ? <h2>{title}</h2> : null}
             {description ? <p>{description}</p> : null}
           </div>
           {actions ? <div className="cc-card__actions">{actions}</div> : null}
@@ -73,6 +73,7 @@ export function EmptyState({ children }) {
 }
 
 export function CopyField({ value, label, onCopied, onError }) {
+  const inputId = useId();
   const [copied, setCopied] = useState(false);
   const timer = useRef(null);
   useEffect(() => () => {
@@ -93,9 +94,9 @@ export function CopyField({ value, label, onCopied, onError }) {
 
   return (
     <div className="copy-field">
-      {label ? <span className="copy-field__label">{label}</span> : null}
+      {label ? <label className="copy-field__label" htmlFor={inputId}>{label}</label> : null}
       <div className="copy-field__row">
-        <input className="copy-field__value" value={value} data-copy-value={value} readOnly />
+        <input id={inputId} className="copy-field__value" aria-label={label ? undefined : "可复制内容"} value={value} data-copy-value={value} readOnly />
         <button type="button" className="copy-field__btn" onClick={onCopy}>
           {copied ? "已复制" : "复制"}
         </button>
@@ -109,7 +110,7 @@ export function DataTable({ columns, rows, rowKey, empty, caption }) {
     return <EmptyState>{empty || "暂无数据。"}</EmptyState>;
   }
   return (
-    <div className="cc-table-wrap">
+    <div className="cc-table-wrap" role="region" aria-label={caption || "数据表格"} tabIndex={0}>
       <table className="cc-table">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
