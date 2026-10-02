@@ -1,15 +1,14 @@
 # Repository Current State
 
-Last verified: 2026-10-02 @ working tree (observability retirement scope)
+Last verified: 2026-10-02 @ 65f33d6
 
 ## Current Focus
 
-- [移除可观测性服务和数据](https://github.com/i-zrhe2016/ai-routing-panel/issues/125)。
+- [管理后台改版](https://github.com/i-zrhe2016/ai-routing-panel/issues/118)。
 
 ## Implemented
 
 - 本机及可达 AI 节点的监控、集中日志采集、运维日报服务与专用数据已删除；旧 Loki 接收节点离线，其数据未核验。备份恢复跳过旧运维数据库及部署配置。
-
 - 台湾 AI 节点是当前唯一配置的 AI 主候选；原不可用主节点已从节点清单、路由候选和运行中的控制面容器环境中移除。
 - `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 可将带独立凭据的 fallback 分享链接提升为候选 0；单候选可作为主节点，过期的 `backup` 状态会归一化，人工固定备用仍要求至少两个候选。
 - AI 管理器已拆分到 `app/xray/ai_routing/`，节点控制统一使用 `app/xray/node/` 的 canonical backend；控制面由 `app/bootstrap.py` 组装 Application。
@@ -23,7 +22,8 @@ Last verified: 2026-10-02 @ working tree (observability retirement scope)
 
 ## In Progress
 
-- 可观测性退役代码与部署已完成；Plan 分支尚未发布或合并。
+- 管理后台改版及流量拓扑的工作区尚未合并，见 [Plan](https://github.com/i-zrhe2016/ai-routing-panel/issues/118)。
+- OpenRouter 分类器工作区尚未合并；原日报需求已被可观测性退役替代，见 [Plan](https://github.com/i-zrhe2016/ai-routing-panel/issues/122)。
 
 ## Known Issues / Failing Checks
 
@@ -50,4 +50,4 @@ Last verified: 2026-10-02 @ working tree (observability retirement scope)
 
 ## Next
 
-- 新增需求先记录 GitHub Issue Plan，再创建 Plan 分支。
+- 继续核对 [管理后台改版](https://github.com/i-zrhe2016/ai-routing-panel/issues/118) 与 [OpenRouter 分类](https://github.com/i-zrhe2016/ai-routing-panel/issues/122) 的剩余交付范围。
