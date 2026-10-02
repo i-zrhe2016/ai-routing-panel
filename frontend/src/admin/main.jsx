@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 
 import "../shared/tokens.css";
 import "./admin.css";
-import "../shared/control-center.css";
 import App from "./App.jsx";
 import { PanelProvider } from "./state/PanelProvider.jsx";
 

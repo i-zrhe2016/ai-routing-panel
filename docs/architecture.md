@@ -55,6 +55,7 @@
 - 调用 `python -m app.xray.render_config` 生成 `app/xray/runtime/config.json`（普通数据面）、`config-ai-node.json`（AI 节点）和 `config-backup.json`（控制面备用）
 - 对普通数据面做配置校验、同步、重启、统计采集、探针采样和 Cloudflare DNS 切换
 - 对 AI 节点做 SSH 状态检查和重启；未配置远端目标时可使用本机 Docker，配置上传能力由 `AI_NODE_CONFIG_PATH` 单独控制，生产当前保持关闭
+- 后台路由与流量拓扑快照来自面板接口，配置、事务与流量数据由面板自身提供；拓扑使用与数据边界见[开发流程](development.md)
 
 ### 普通数据面
 

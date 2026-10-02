@@ -1,19 +1,26 @@
 // In-page confirmation for destructive actions. Replaces window.confirm so the
 // console can keep its visual language and so tests can drive the dialog.
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
+
+import { useDialogFocus } from "./useDialogFocus.js";
 
 export function ConfirmDialog({ request, onCancel, onConfirm, busy }) {
   const dialogRef = useRef(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  useDialogFocus(dialogRef, Boolean(request), () => { if (!busy) onCancel(); });
   if (!request) return null;
   const tone = request.tone || "primary";
   return (
-    <div className="cc-modal-backdrop" onClick={(event) => event.target === dialogRef.current && onCancel()}>
-      <div className="cc-modal" role="dialog" aria-modal="true" aria-labelledby="cc-confirm-title" ref={dialogRef}>
-        <p className="section-kicker">CONFIRM ACTION</p>
-        <h3 id="cc-confirm-title">{request.title}</h3>
-        <p>{request.body}</p>
+    <div className="cc-modal-backdrop" onClick={(event) => {
+      if (event.target === event.currentTarget && !busy) onCancel();
+    }}>
+      <div className="cc-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} aria-busy={busy} tabIndex={-1} ref={dialogRef}>
+        <p className="section-kicker">操作确认</p>
+        <h2 id={titleId}>{request.title}</h2>
+        <p id={descriptionId}>{request.body}</p>
         <div className="cc-modal__actions">
-          <button className="a-btn ghost" type="button" onClick={onCancel} disabled={busy}>
+          <button className="a-btn ghost" type="button" onClick={onCancel} disabled={busy} data-dialog-autofocus>
             取消
           </button>
           <button

@@ -1,27 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ErrorBoundary } from "./components/ErrorBoundary.jsx";
 import WorkspaceNav from "./components/WorkspaceNav.jsx";
 import { Loader, Notice, StatusPill } from "./components/ui.jsx";
+import { useDialogFocus } from "./components/useDialogFocus.js";
 import { usePanel } from "./state/PanelProvider.jsx";
-import CommerceWorkspace from "./workspaces/CommerceWorkspace.jsx";
 import DeliveryWorkspace from "./workspaces/DeliveryWorkspace.jsx";
 import DiagnosticsWorkspace from "./workspaces/DiagnosticsWorkspace.jsx";
 import HostsWorkspace from "./workspaces/HostsWorkspace.jsx";
 import OverviewWorkspace from "./workspaces/OverviewWorkspace.jsx";
 import RoutingWorkspace from "./workspaces/RoutingWorkspace.jsx";
 import TrafficWorkspace from "./workspaces/TrafficWorkspace.jsx";
+import TopologyWorkspace from "./workspaces/TopologyWorkspace.jsx";
 
-// The console is organized around the incident questions: what the hosts are
-// doing, what the traffic looks like, and what to check after a failure.
 const WORKSPACES = [
-  { key: "overview", label: "总览", description: "健康、路径与待处理", blurb: "先确认系统健康、当前路径和待处理，再进入具体操作。" },
-  { key: "hosts", label: "主机", description: "数据面与纳管节点", blurb: "每台纳管主机的角色、管理通道、运行时状态与可用操作。" },
-  { key: "traffic", label: "流量", description: "日流量与端口负载", blurb: "累计流量、日粒度历史、端口负载排行与单端口明细。" },
-  { key: "diagnostics", label: "故障排查", description: "探测、切换与体检", blurb: "按顺序核对探测记录、DNS 切换事件和数据面体检结果。" },
-  { key: "routing", label: "AI 路由", description: "出口、探测与切换", blurb: "解释当前 AI 出口、候选健康、人工策略和故障切换。" },
-  { key: "delivery", label: "交付", description: "端口与租户凭据", blurb: "管理监听入口、租户配额与每个端口的独立订阅凭据。" },
-  { key: "commerce", label: "订单与套餐", description: "售卖、审核与开通", blurb: "管理套餐、订单审核与自动开通。" },
+  { key: "overview", label: "总览", description: "系统健康与待处理", group: "运行监控" },
+  { key: "hosts", label: "主机", description: "数据面与纳管节点", group: "运行监控" },
+  { key: "traffic", label: "流量", description: "使用趋势与端口负载", group: "运行监控" },
+  { key: "diagnostics", label: "故障排查", description: "探测、切换与体检", group: "运行监控" },
+  { key: "topology", label: "流量拓扑", description: "当前路径与候选出口", group: "运行监控" },
+  { key: "routing", label: "AI 路由", description: "出口策略与候选节点", group: "配置与业务" },
+  { key: "delivery", label: "交付", description: "端口与租户凭据", group: "配置与业务" },
 ];
 
 const WORKSPACE_COMPONENTS = {
@@ -31,84 +30,117 @@ const WORKSPACE_COMPONENTS = {
   diagnostics: DiagnosticsWorkspace,
   routing: RoutingWorkspace,
   delivery: DeliveryWorkspace,
-  commerce: CommerceWorkspace,
+  topology: TopologyWorkspace,
 };
+
+function mobileViewport() {
+  return typeof window !== "undefined" && window.innerWidth <= 840;
+}
 
 export default function App() {
   const panel = usePanel();
   const [activeWorkspace, setActiveWorkspace] = useState("overview");
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(mobileViewport);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const navigationRef = useRef(null);
+  const drawerOpen = isMobile && mobileNavOpen;
+  useDialogFocus(navigationRef, drawerOpen, () => setMobileNavOpen(false));
 
   useEffect(() => {
-    function updateIsMobile() {
-      const mobile = typeof window !== "undefined" && window.innerWidth <= 840;
+    function updateViewport() {
+      const mobile = mobileViewport();
       setIsMobile(mobile);
       if (!mobile) setMobileNavOpen(false);
     }
-    updateIsMobile();
-    window.addEventListener("resize", updateIsMobile);
-    return () => window.removeEventListener("resize", updateIsMobile);
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
   }, []);
 
   const meta = WORKSPACES.find((item) => item.key === activeWorkspace) || WORKSPACES[0];
   const ActiveWorkspace = WORKSPACE_COMPONENTS[activeWorkspace];
   const badges = {
     diagnostics: panel.insights?.probes?.recent_failures?.length || 0,
-    commerce: panel.commerce.summary.pending_review_count || 0,
   };
-  const lastRefreshLabel =
-    panel.meta?.dashboard_updated_at_display || panel.meta?.updated_at_display || "自动刷新 15 秒";
+  const lastRefreshLabel = panel.meta?.dashboard_updated_at_display || panel.meta?.updated_at_display || "自动刷新 15 秒";
+  const syncing = panel.loading || refreshing;
+  const dataPlaneTone = panel.dataPlaneStatus?.xray_running === true ? "success" :
+    panel.dataPlaneStatus?.xray_running === false ? "danger" : "neutral";
+  const aiTone = panel.aiNodeStatus?.reachable === true ? "success" :
+    panel.aiNodeStatus?.reachable === false ? "warning" : "neutral";
 
   function selectWorkspace(key) {
     setActiveWorkspace(key);
     setMobileNavOpen(false);
   }
 
+  async function refresh() {
+    if (syncing) return;
+    setRefreshing(true);
+    try {
+      await panel.refreshDashboard();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <div className="admin-shell">
-      <aside className={`admin-sidebar${mobileNavOpen ? " is-open" : ""}`} aria-label="控制台导航">
+      <a className="admin-skip-link" href="#admin-content">跳至主要内容</a>
+      <aside
+        id="admin-navigation"
+        className={`admin-sidebar${drawerOpen ? " is-open" : ""}`}
+        aria-label="控制台导航"
+        role={drawerOpen ? "dialog" : undefined}
+        aria-modal={drawerOpen ? true : undefined}
+        tabIndex={drawerOpen ? -1 : undefined}
+        hidden={isMobile && !drawerOpen}
+        ref={navigationRef}
+      >
         <div className="sidebar-scroll">
+          {isMobile ? (
+            <button className="icon-button sidebar-close" type="button" aria-label="关闭导航" data-dialog-autofocus onClick={() => setMobileNavOpen(false)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+            </button>
+          ) : null}
           <div className="brand-lockup">
             <div className="brand-mark" aria-hidden="true">XR</div>
             <div>
-              <p className="brand-kicker">ROUTING PANEL</p>
-              <strong>Control Center</strong>
+              <strong>Routing Panel</strong>
+              <p className="brand-kicker">控制中心</p>
             </div>
           </div>
-          <p className="brand-description">主机、流量与故障排查的一体化控制面。</p>
           <WorkspaceNav items={WORKSPACES} activeKey={activeWorkspace} onSelect={selectWorkspace} badges={badges} />
           <div className="sidebar-status-stack">
+            <p className="sidebar-section-label">节点状态</p>
             <div className="sidebar-status-card">
               <div className="sidebar-status-card__head">
-                <span>DATA PLANE</span>
-                <i className={panel.dataPlaneStatus?.xray_running ? "is-ok" : "is-bad"} />
+                <span>数据面</span>
+                <StatusPill tone={dataPlaneTone} label={panel.dataPlaneRunningLabel()} />
               </div>
-              <strong>{panel.dataPlaneRunningLabel()}</strong>
-              <small>{panel.dataPlaneStatus?.management_target || "当前未配置数据面"}</small>
+              <small>{panel.dataPlaneStatus?.management_target || "未配置管理目标"}</small>
             </div>
             <div className="sidebar-status-card">
               <div className="sidebar-status-card__head">
-                <span>AI NODE</span>
-                <i className={panel.aiNodeStatus?.reachable ? "is-ok" : "is-warn"} />
+                <span>AI 节点</span>
+                <StatusPill tone={aiTone} label={panel.aiNodeStatus?.reachable === true ? "可达" : panel.aiNodeStatus?.reachable === false ? "不可达" : "待确认"} />
               </div>
-              <strong>{panel.aiNodeStatus?.reachable ? "可达" : "待确认"}</strong>
-              <small>{panel.aiNodeStatus?.management_target || "AI 节点未纳管"}</small>
+              <small>{panel.aiNodeStatus?.management_target || "未配置管理目标"}</small>
             </div>
           </div>
         </div>
         <div className="sidebar-footer">
-          <span>CONTROL PLANE</span>
+          <span>控制面</span>
           <strong>{panel.meta?.panel_address || "—"}</strong>
           <small>{panel.meta?.timezone_label || "服务器本地时区"}</small>
         </div>
       </aside>
 
-      {isMobile && mobileNavOpen ? (
-        <button className="mobile-scrim" type="button" aria-label="关闭导航" onClick={() => setMobileNavOpen(false)} />
+      {drawerOpen ? (
+        <button className="mobile-scrim" type="button" aria-label="关闭导航遮罩" tabIndex={-1} onClick={() => setMobileNavOpen(false)} />
       ) : null}
 
-      <div className="admin-main">
+      <div className="admin-main" inert={drawerOpen ? true : undefined} aria-hidden={drawerOpen ? true : undefined}>
         <header className="admin-topbar">
           <div className="topbar-title">
             {isMobile ? (
@@ -116,47 +148,30 @@ export default function App() {
                 className="icon-button mobile-menu-button"
                 type="button"
                 aria-label="打开控制台导航"
-                onClick={() => setMobileNavOpen((open) => !open)}
+                aria-expanded={drawerOpen}
+                aria-controls="admin-navigation"
+                onClick={() => setMobileNavOpen(true)}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
               </button>
             ) : null}
-            <div>
-              <p className="breadcrumb">
-                CONTROL CENTER <span>/</span> {meta.label}
-              </p>
-              <h1>{meta.label}</h1>
-              <p>{meta.blurb}</p>
-            </div>
+            <p className="breadcrumb">控制中心 <span>/</span> <strong>{meta.label}</strong></p>
           </div>
           <div className="topbar-actions">
-            <div className="live-indicator">
-              <span className={`live-dot${panel.loading ? " is-busy" : ""}`} />
-              <span>{panel.loading ? "同步中" : lastRefreshLabel}</span>
+            <div className="live-indicator" role="status">
+              <span className={`live-dot${syncing ? " is-busy" : ""}`} aria-hidden="true" />
+              <span>{syncing ? "同步中" : lastRefreshLabel}</span>
             </div>
-            <StatusPill
-              tone={panel.dataPlaneStatus?.xray_running ? "success" : "danger"}
-              label={panel.dataPlaneRunningLabel()}
-            />
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={panel.loading ? "正在刷新" : "刷新数据"}
-              disabled={panel.loading}
-              onClick={() => panel.refreshDashboard()}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M20 11a8.1 8.1 0 0 0-14.9-3M4 5v4h4M4 13a8.1 8.1 0 0 0 14.9 3M20 19v-4h-4" />
-              </svg>
+            <button className="icon-button" type="button" aria-label={syncing ? "正在刷新" : "刷新数据"} disabled={syncing} onClick={refresh}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-14.9-3M4 5v4h4M4 13a8.1 8.1 0 0 0 14.9 3M20 19v-4h-4" /></svg>
             </button>
           </div>
         </header>
-
-        <main className="admin-content">
+        <main id="admin-content" className="admin-content" tabIndex={-1}>
           <Notice message={panel.flash.message} level={panel.flash.level} onClose={panel.clearFlash} />
           <Loader show={panel.loading} />
           <ErrorBoundary>
-            <ActiveWorkspace onOpenWorkspace={selectWorkspace} />
+            <ActiveWorkspace key={activeWorkspace} onOpenWorkspace={selectWorkspace} />
           </ErrorBoundary>
         </main>
       </div>

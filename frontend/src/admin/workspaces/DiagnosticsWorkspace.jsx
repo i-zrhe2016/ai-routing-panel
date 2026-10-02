@@ -29,9 +29,8 @@ export default function DiagnosticsWorkspace() {
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">DIAGNOSTICS</p>
-          <h2>故障后排查</h2>
-          <p>先看当前结论，再按顺序核对探测记录、DNS 切换事件和数据面体检结果；所有结论都来自控制面已存储的数据。</p>
+          <h1>故障后排查</h1>
+          <p>从异常结论出发，核对探测记录、DNS 切换事件与数据面体检结果。</p>
         </div>
         <div className="cc-toolbar__group">
           <button
@@ -76,7 +75,7 @@ export default function DiagnosticsWorkspace() {
         />
       </section>
 
-      <Panel kicker="CHECK FIRST" title="排查顺序" description="按严重程度排序，先处理会中断流量的项。">
+      <Panel title="排查顺序" description="按严重程度排序，先处理会中断流量的项。">
         <ul className="cc-checklist">
           {checklist.map((item) => (
             <li key={item.title} className={`cc-checklist__item is-${item.tone}`}>
@@ -91,7 +90,6 @@ export default function DiagnosticsWorkspace() {
       </Panel>
 
       <Panel
-        kicker="PROBE HISTORY"
         title="端口探测记录"
         description="每格是一次上游可达性探测，最近的在右侧。"
       >
@@ -117,7 +115,7 @@ export default function DiagnosticsWorkspace() {
       </Panel>
 
       <section className="cc-split">
-        <Panel kicker="FAILURES" title="最近失败" description="最新一次不可达的端口与原因。">
+        <Panel title="最近失败" description="最新一次不可达的端口与原因。">
           {probes?.recent_failures?.length ? (
             <ul className="cc-failure-list">
               {probes.recent_failures.map((failure) => (
@@ -136,13 +134,12 @@ export default function DiagnosticsWorkspace() {
           )}
         </Panel>
 
-        <Panel kicker="FAILOVER EVENTS" title="DNS 切换事件" description="探测、切换和回切的完整时间线（最近 40 条）。">
+        <Panel title="DNS 切换事件" description="探测、切换和回切的完整时间线（最近 40 条）。">
           <EventTimeline events={timelineEvents} emptyLabel={panel.insightsError || "暂无切换事件。"} />
         </Panel>
       </section>
 
       <Panel
-        kicker="DATA PLANE CHECK"
         title="数据面体检"
         description={
           diagnosis

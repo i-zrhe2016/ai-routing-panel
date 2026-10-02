@@ -37,9 +37,8 @@ export default function HostsWorkspace() {
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">HOSTS</p>
-          <h2>主机与数据面</h2>
-          <p>每台纳管主机的角色、管理通道、运行时状态和可用操作都在这里；重启和体检是主机级的唯一写操作。</p>
+          <h1>主机与数据面</h1>
+          <p>查看纳管主机的角色、管理通道与运行状态，按需重启或运行数据面体检。</p>
         </div>
         <span className="cc-status-line">{hosts.length} 台纳管主机</span>
       </section>
@@ -56,7 +55,7 @@ export default function HostsWorkspace() {
         />
       </section>
 
-      <Panel kicker="PATH" title="当前流量路径" description={panel.trafficRouting?.scenario || "等待路由状态同步。"}>
+      <Panel title="当前流量路径" description={panel.trafficRouting?.scenario || "等待路由状态同步。"}>
         <FlowPath nodes={flowNodes} />
       </Panel>
 
@@ -131,7 +130,6 @@ export default function HostsWorkspace() {
         ))}
         {!hosts.length ? <div className="cc-empty">控制面未返回任何纳管主机。</div> : null}
       </div>
-
 
       {confirm.dialog}
     </div>

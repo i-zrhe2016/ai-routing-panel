@@ -204,9 +204,24 @@ JavaScript 构建工具。
 Admin 控制台源码和构建配置位于 `frontend/`。Admin 控制台是 React 应用
 （`frontend/src/admin/`，Vite + `@vitejs/plugin-react`），订阅者门户和 Landing 页仍是
 Vue 应用（`frontend/src/{portal,landing}/`，共用 `frontend/src/shared/` 的令牌、
-API 客户端和 `.vue` 组件）。控制台的八个工作区为：总览、主机、流量、故障排查、
-AI 路由、交付、订单与套餐、可观测；其中主机、流量和故障排查只读取 `/api/dashboard`
-与只读的 `/api/insights`。修改 Admin 前端后执行：
+API 客户端和 `.vue` 组件）。控制台的七个工作区为：总览、主机、流量、流量拓扑、故障排查、
+AI 路由、交付；其中主机、流量、流量拓扑和故障排查只读取 `/api/dashboard`
+与只读的 `/api/insights`。
+
+后台的导航分为“运行监控”和“配置与业务”，总览将流量趋势、异常和当前拓扑集中展示。
+后台样式由 `frontend/src/admin/admin.css` 维护，覆盖后台自己的颜色与布局令牌；
+不要通过修改共享令牌或 `shared/control-center.css` 改变客户门户的外观。
+流量拓扑根据 `meta.traffic_routing` 的当前路径与 AI 候选探测状态绘制入口、出口和待命分支；
+点击节点或使用 Tab 与 Enter/空格可查看节点详情。AI 流量探测与 SSH 管理通道状态分开呈现。
+若服务端状态为 `waiting_report`，拓扑保留已配置候选并显示“等待 AI 路由报告”，
+不使用管理通道派生的 AI 路径标记生效链路。
+图中不展示边级吞吐量；累计流量和连接统计仍在总览与流量工作区查看。
+订单与套餐、商业设置及 Prometheus/Grafana 内嵌内容已从管理后台移除；
+历史商业数据与商业后端/客户门户保留；独立监控服务已退役，见[运维](operations.md)。
+每个工作区保留一个主标题，页面内的区块使用次级标题。
+移动端导航在 840px 及以下使用抽屉；导航和确认弹窗支持 Escape、Tab 焦点约束及关闭后焦点恢复。
+
+修改 Admin 前端后执行：
 
 ```bash
 cd frontend
@@ -217,7 +232,8 @@ npm run build
 
 `npm run build` 会将 Admin 入口输出为 `app/static/admin/admin.js` 和
 `app/static/admin/admin.css`；构建产物必须随变更一起提交，Docker 不在镜像构建阶段安装
-Node 或 npm。
+Node 或 npm。后台资源 URL 的版本标识位于 `app/templates/index.html`；
+发布资源变化时应同步更新该标识及对应的缓存测试，确保浏览器请求新资源。
 
 后端测试用 pytest 直接跑现有 unittest：
 

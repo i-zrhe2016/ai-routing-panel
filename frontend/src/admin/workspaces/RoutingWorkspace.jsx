@@ -76,22 +76,20 @@ export default function RoutingWorkspace() {
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">AI ROUTING</p>
-          <h2>路由决策与故障切换</h2>
-          <p>把当前出口、候选节点、人工策略和探测结果放在同一个操作面，优先解释“现在为什么走这条路”。</p>
+          <h1>路由决策与故障切换</h1>
+          <p>查看当前出口与候选节点，管理自动探测、人工策略和应急切换。</p>
         </div>
         <StatusPill tone={routeTone} label={aiRoutingLabel(routing)} />
       </section>
 
       <section className="cc-metric-grid">
-        <MetricCard label="ACTIVE ROUTE" value={routeTarget.label} note={routeTarget.detail} accent />
-        <MetricCard label="CANDIDATES" value={`${healthyCount} / ${candidates.length}`} note="当前探测可达" tone={healthyCount === candidates.length && candidates.length ? "success" : "warning"} />
-        <MetricCard label="MANUAL MODE" value={MODE_LABELS[manualMode] || manualMode} note={`最近人工操作：${routing.manual_updated_at_display || "暂无"}`} tone={manualMode === "auto" ? "success" : "warning"} />
-        <MetricCard label="LAST REPORT" value={routing.report_generated_at_display || "—"} note={routing.sync_error || "控制面最近一次路由报告"} />
+        <MetricCard label="当前出口" value={routeTarget.label} note={routeTarget.detail} accent />
+        <MetricCard label="可达候选" value={`${healthyCount} / ${candidates.length}`} note="当前探测可达" tone={healthyCount === candidates.length && candidates.length ? "success" : "warning"} />
+        <MetricCard label="路由策略" value={MODE_LABELS[manualMode] || manualMode} note={`最近人工操作：${routing.manual_updated_at_display || "暂无"}`} tone={manualMode === "auto" ? "success" : "warning"} />
+        <MetricCard label="最近报告" value={routing.report_generated_at_display || "—"} note={routing.sync_error || "控制面最近一次路由报告"} />
       </section>
 
       <Panel
-        kicker="ROUTE CONTROL"
         title="AI 出口控制"
         description="自动探测优先；人工固定目标不会静默改选另一个节点。"
         actions={
@@ -116,7 +114,7 @@ export default function RoutingWorkspace() {
               <article key={candidate.index} className={`cc-route-card is-${status.tone}`}>
                 <div className="cc-route-card__head">
                   <div>
-                    <p className="section-kicker">{candidate.index === 0 ? "PRIMARY" : "BACKUP"}</p>
+                    <p className="section-kicker">{candidate.index === 0 ? "主节点" : "备用节点"}</p>
                     <strong>{candidate.label || (candidate.index === 0 ? "主 AI 节点" : "备用 AI 节点")}</strong>
                   </div>
                   <StatusPill tone={status.tone} label={status.label} />
@@ -164,11 +162,11 @@ export default function RoutingWorkspace() {
         </details>
       </Panel>
 
-      <Panel kicker="PATH" title="当前流量路径" description={routing.route_status_reason || panel.trafficRouting?.scenario || "等待路由状态同步。"}>
+      <Panel title="当前流量路径" description={routing.route_status_reason || panel.trafficRouting?.scenario || "等待路由状态同步。"}>
         <FlowPath nodes={flowNodes} />
       </Panel>
 
-      <Panel kicker="UPSTREAM HEALTH" title="候选节点" description="只展示控制面实际返回的候选状态。">
+      <Panel title="候选节点" description="只展示控制面实际返回的候选状态。">
         <DataTable
           caption="AI 候选节点状态"
           columns={[
