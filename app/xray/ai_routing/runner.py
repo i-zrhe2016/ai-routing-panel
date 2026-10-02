@@ -11,6 +11,7 @@ from pathlib import Path
 
 from app.xray.config import BASE_DIR, DEFAULT_RENDER_MODULE
 from app.xray.operation_lock import LockBusyError
+from components.openrouter import OpenRouterConfig
 
 from .candidates import build_ai_upstream_candidates
 from .classifier import is_local_openai_base_url, normalize_openai_base_url
@@ -84,6 +85,22 @@ def build_args():
         os.environ.get("AI_PROXY_OUTBOUND_TEMPLATE_PATH", str(workspace / "ai-proxy-outbound.json"))
     )
     env_file_values = load_env_file_values(args.env_file)
+    args.ai_domain_classifier_provider = (
+        read_env_or_file("AI_DOMAIN_CLASSIFIER_PROVIDER", "openrouter", env_file_values).strip().lower()
+    )
+    if args.ai_domain_classifier_provider not in {"openrouter", "legacy"}:
+        parser.error("AI_DOMAIN_CLASSIFIER_PROVIDER must be openrouter or legacy")
+    args.openrouter_config = OpenRouterConfig(
+        api_key=read_env_or_file("OPENROUTER_API_KEY", "", env_file_values).strip(),
+        api_key_file=read_env_or_file("OPENROUTER_API_KEY_FILE", "", env_file_values).strip(),
+        model=read_env_or_file("OPENROUTER_MODEL", "openai/gpt-5-nano", env_file_values).strip() or "openai/gpt-5-nano",
+        timeout_seconds=parse_positive_float(
+            read_env_or_file("OPENROUTER_TIMEOUT_SECONDS", "90", env_file_values), "OPENROUTER_TIMEOUT_SECONDS"
+        ),
+        max_output_tokens=int(read_env_or_file("OPENROUTER_MAX_OUTPUT_TOKENS", "8192", env_file_values)),
+    )
+    if args.openrouter_config.max_output_tokens <= 0:
+        parser.error("OPENROUTER_MAX_OUTPUT_TOKENS must be > 0")
     args.restart_container_name = os.environ.get("DATAPLANE_RESTART_CONTAINER", "").strip()
     args.restart_command = os.environ.get("DATAPLANE_RESTART_COMMAND", "").strip()
     args.data_plane_ssh_target = os.environ.get("DATAPLANE_SSH_TARGET", "").strip()
