@@ -1,6 +1,6 @@
 # Repository Current State
 
-Last verified: 2026-10-02 @ 5cedd7f
+Last verified: 2026-10-03 @ e55cfe0
 
 ## Current Focus
 
@@ -18,7 +18,7 @@ Last verified: 2026-10-02 @ 5cedd7f
 - `scripts/restore_backup.py` 可校验明文/AES-256-GCM 灾备包，并把面板数据库、用户附件、控制面文件和普通/AI 节点文件准备到隔离恢复树；默认不写 SSH、Docker 或线上服务。
 - `scripts/configure_backup_secrets.py` 提供中文交互配置和 `--check`，只管理灾备加密密码及可选 R2 字段；输入不回显，生成值不打印，目标 dotenv 文件原子更新并保持 `0600`。使用边界见 [灾备上传](db-backup-uploader.md)。
 - 仓库具备首个 CI 门禁：`.github/workflows/ci.yml` 在**指向 `main` 的 PR**和**推送到 `main`**时运行 `backend`（Python 3.12 跑 `python -m pytest`）和 `frontend`（Node 22 跑 `npm test`、`npm run build`，再阻塞比对产物与 `app/static/admin`）两个 job，均只申请 `contents: read`。检查清单见 [开发流程](development.md)。
-- 管理后台采用浅色 React 控制中心，保留总览、主机、流量、诊断、拓扑、AI 路由和交付七个工作区；订单与套餐入口、可观测性工作区及 Grafana 嵌入已移除，客户业务接口及历史数据保留。流量拓扑消费真实路由、候选探测与报告状态，区分等待报告，不虚构边流量。Admin 源码与产物一起维护，见 [开发流程](development.md)。
+- 管理后台采用浅色 React 控制中心，保留总览、主机、流量、拓扑、AI 路由和交付六个工作区；故障排查工作区及其入口已移除，主机体检和后端探测能力保留；订单与套餐入口、可观测性工作区及 Grafana 嵌入已移除，客户业务接口及历史数据保留。流量拓扑并列展示普通/未分类域名直出与 AI 分流；备用路径使用实际渲染出口及独立中继目标。报告时间、应用证据、候选探测和 DNS 记录目标分别说明，未知或失败不虚构生效路径及边流量。Admin 源码与产物一起维护，见 [开发流程](development.md)。
 - 未知域名默认直接经 OpenRouter GPT-5 Nano 分类；只接受完整批次，失败保留待分类及内建/历史决策，小时报告保留实际来源和模型。密钥从外部只读文件加载；旧 Codex/OpenAI 路径需显式启用，见 [配置](configuration.md#域名分类器) 和 [AI 路由](ai-routing.md)。
 - 面板控制台只允许内网和 Tailscale 来源访问：`PANEL_ALLOWED_NETWORKS`（CIDR 列表，默认回环、RFC1918、链路本地、Tailscale IPv4 range、`fc00::/7`、`fe80::/10`）在路由前按来源地址放行，其他来源一律 `403`（`/api/**` 返回 `{"ok":false,"code":"forbidden_source"}`）并记录 `panel.access.denied`；宿主机 `ai_routing_panel_firewall` 表使用同一组网段做 L3/L4 兜底。管理员登录已整体移除（`PANEL_USERNAME`、`PANEL_PASSWORD`、`PANEL_INTERNAL_HOSTS`、`AUTH_ENABLED`、Basic Auth、Cloudflare Access 邮箱旁路、`/logout` 和后台登出按钮），CSRF 仍对每个调用方强制校验；租户与客户登录不变，访问说明见 [面板访问](panel-access.md)。
 
