@@ -13,12 +13,12 @@ try:
     from build_backup_bundle import create_backup_bundle, parse_extra_paths, prune_bundles
     from collect_remote_backup import collect_remote_configs
     from node_recovery import validate_backup_bundle
-    from upload_backup_r2 import encrypt_bundle, upload_bundle
+    from upload_backup_r2 import upload_bundle
 except ModuleNotFoundError:
     from scripts.build_backup_bundle import create_backup_bundle, parse_extra_paths, prune_bundles
     from scripts.collect_remote_backup import collect_remote_configs
     from scripts.node_recovery import validate_backup_bundle
-    from scripts.upload_backup_r2 import encrypt_bundle, upload_bundle
+    from scripts.upload_backup_r2 import upload_bundle
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -271,11 +271,7 @@ def main():
         record_path = os.environ.get(
             "DB_BACKUP_R2_RECORD_PATH", "/backups/r2-upload-record.json"
         )
-        encrypted_path = encrypt_bundle(upload_path)
-        try:
-            upload_bundle(encrypted_path, record_path=record_path)
-        finally:
-            encrypted_path.unlink(missing_ok=True)
+        upload_bundle(upload_path, record_path=record_path)
         return 0
 
 

@@ -2,20 +2,20 @@
 
 > Type: Runbook
 > Status: Active
-> Scope: 定时灾备归档生成、完整性校验、加密与 R2 上传
+> Scope: 定时灾备归档生成、完整性校验与 R2 上传
 
-本模块只说明如何生成加密灾备归档并上传到 Cloudflare R2。它不负责故障切换或在线热备；节点快速恢复的准备命令见[节点备份完整性与快速恢复](node-recovery.md)。
+本模块只说明如何生成灾备归档并上传到 Cloudflare R2。它不负责故障切换或在线热备；节点快速恢复的准备命令见[节点备份完整性与快速恢复](node-recovery.md)。
 
 ## 目标与边界
 
 - 每日生成一个本地 SQLite 快照。
 - 将数据库快照和配置文件、运行时配置等额外文件打成一个 `tar.gz`。
-- 通过 Cloudflare R2 S3 兼容 API 保存加密灾备归档。
+- 通过 Cloudflare R2 S3 兼容 API 通过 HTTPS 保存原始灾备归档。
 - R2 只作为低频、异地、离线恢复通道，不参与快速恢复或故障切换。
 
 ## 归档流程
 
-![灾备归档与加密上传流程](diagrams/disaster-backup-flow.svg)
+![灾备归档与上传流程](diagrams/disaster-backup-flow.svg)
 
 [PlantUML 源文件](diagrams/disaster-backup-flow.puml)
 
@@ -25,7 +25,7 @@
 2. `DB_BACKUP_SSH_COLLECTION_ENABLED=1` 时，调用 `scripts/collect_remote_backup.py`，通过隔离 broker 执行严格只读 Tailscale SSH，采集普通数据面和已配置远端 AI 节点的主配置与可选环境文件；没有远端 AI 目标时，本机 AI 备用由 `DB_BACKUP_EXTRA_PATHS` 归档。普通数据面目标优先使用 `DB_BACKUP_DATAPLANE_SSH_TARGET`，再回退到 `DATAPLANE_SSH_TARGET`；两者都为空时该角色记为 `skipped_no_target`。AI 目标按 `DB_BACKUP_AI_NODE_SSH_TARGETS`、`AI_NODE_SSH_TARGETS` 和单目标兼容变量的顺序解析。远端路径留空时使用该角色的内置默认路径。
 3. 调用 `scripts/build_backup_bundle.py`，把数据库快照放在 `database/`、控制面额外路径放在 `config/`、远端 staging 放在 `nodes/`，并写入 `backup-manifest.json` 和 `node-recovery-manifest.json`。
 4. 重新校验归档内所有文件的大小和 SHA-256，并把节点恢复状态写入 `node-recovery-status.json`。
-5. `DB_BACKUP_R2_ENABLED=1` 时，使用 R2 S3 兼容 API 上传加密归档。
+5. `DB_BACKUP_R2_ENABLED=1` 时，使用 HTTPS R2 S3 兼容 API 上传原始 `tar.gz`，不生成 `.enc`，不需要加密密码。
 6. 上传记录写入 `DB_BACKUP_R2_RECORD_PATH`，本地文件保留用于核验和节点恢复准备。
 
 单次任务的组件边界如下：
@@ -35,7 +35,7 @@
 | `backup_db.py` | SQLite 一致性快照 |
 | `collect_remote_backup.py` | 节点只读采集与 staging manifest |
 | `build_backup_bundle.py` | 文件收集、归档与校验元数据 |
-| `upload_backup_r2.py` | AES-256-GCM 加密、R2 上传与记录 |
+| `upload_backup_r2.py` | 原始文件 R2 上传与记录 |
 
 ## 默认收集内容
 
@@ -85,7 +85,7 @@ node-recovery-manifest.json
 | `DB_BACKUP_AI_NODE_DEPLOY_ROOT` | `/root/xray-routing-panel` | AI 节点部署根；按实际部署目录覆盖 |
 | `DB_BACKUP_RECOVERY_REQUIRED` | Compose 为 `0`；示例 `.env` 为 `1` | 恢复清单不完整时阻止上传；与远端采集门禁分别检查 |
 | `DB_BACKUP_RECOVERY_STATUS_PATH` | 归档目录下的 `node-recovery-status.json` | 最近一次节点恢复完整性报告 |
-| `DB_BACKUP_R2_ENABLED` | `1`（Compose） | 是否将加密灾备归档上传到 R2；直接执行脚本时需显式设置并注入凭据 |
+| `DB_BACKUP_R2_ENABLED` | `1`（Compose） | 是否将原始灾备归档上传到 R2；直接执行脚本时需显式设置并注入凭据 |
 | `DB_BACKUP_R2_ENDPOINT` | 空 | Cloudflare R2 S3 endpoint |
 | `DB_BACKUP_R2_BUCKET` | 空 | R2 bucket 名称 |
 | `DB_BACKUP_R2_ACCESS_KEY_ID` | 空 | R2 S3 access key ID |
@@ -105,7 +105,7 @@ DB_BACKUP_EXTRA_PATHS=/app/xray/.env,/app/xray/runtime,/app/xray/reports,/data/u
 
 启用完整节点的 Tailscale broker 采集前，必须在控制面 `.env` 中配置普通数据面目标、`DB_BACKUP_TAILSCALE_BIN_HOST` 和 `DB_BACKUP_TAILSCALE_SOCKET_HOST`；Compose 的 `scripts/tailscale-disabled` 回退只用于让本地-only 模式在未安装 Tailscale 的主机上能够启动，不能用于实际 Tailscale 采集。
 
-`DB_BACKUP_EXTRA_PATHS` 可以包含业务敏感配置，但不要把 R2 密钥、SSH 私钥或其他不需要迁移的凭据目录加入列表；数据库快照和灾备归档在本地生成时仍是明文，文件权限统一为 `0600`，备份目录也必须限制为备份服务可读。Tailscale SSH 的身份由宿主机 daemon 管理，备份容器只读映射 CLI 和 socket，不保存登录密码或私钥。R2 凭据只通过部署环境、Docker Secret 或外部 Secret 管理注入，灾备加密密码必须与 R2 Secret Access Key 分离保存。任何出现在聊天、日志或 shell 历史中的 token 都应立即撤销。
+`DB_BACKUP_EXTRA_PATHS` 可以包含业务敏感配置，但不要把 R2 密钥、SSH 私钥或其他不需要迁移的凭据目录加入列表；数据库快照和灾备归档在本地生成时仍是明文，文件权限统一为 `0600`，备份目录也必须限制为备份服务可读。Tailscale SSH 的身份由宿主机 daemon 管理，备份容器只读映射 CLI 和 socket，不保存登录密码或私钥。R2 凭据只通过部署环境、Docker Secret 或外部 Secret 管理注入，R2 对象包含原始归档内容，bucket 权限必须限制为授权恢复人员。任何出现在聊天、日志或 shell 历史中的 token 都应立即撤销。
 
 ## R2 灾备保留策略
 
@@ -113,9 +113,9 @@ R2 上传成功后，本地会保留归档和 `r2-upload-record.json`。对象 k
 
 ## 灾难阶段恢复
 
-恢复仍是人工操作，不纳入健康检查或 DNS 故障切换。下载对象并用独立保存的 `DB_BACKUP_ENCRYPTION_PASSWORD` 解密后，按[节点备份完整性与快速恢复](node-recovery.md)执行 `validate` 和 `prepare`。准备目录自带单节点 `docker-compose.node.yml`，可直接启动 Xray；恢复后仍须人工完成新主机的 Tailscale、密钥、known_hosts、防火墙、控制面目标和业务验证。
+恢复仍是人工操作，不纳入健康检查或 DNS 故障切换。新对象下载后直接按[节点备份完整性与快速恢复](node-recovery.md)执行 `validate` 和 `prepare`。准备目录自带单节点 `docker-compose.node.yml`，可直接启动 Xray；恢复后仍须人工完成新主机的 Tailscale、密钥、known_hosts、防火墙、控制面目标和业务验证。
 
-解密结果只是归档文件，不会自动覆盖运行中的配置。R2 凭据仅用于下载对象，不等同于归档解密密码。
+历史 `.enc` 对象仍须用原先独立保存的 `DB_BACKUP_ENCRYPTION_PASSWORD` 解密；恢复脚本保留兼容支持。归档不会自动覆盖运行中的配置。R2 凭据仅用于对象访问。
 
 ## 排查
 

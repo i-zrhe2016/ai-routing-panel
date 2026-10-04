@@ -1,4 +1,4 @@
-"""Independent SSH executor for authenticated Xray availability probes."""
+"""Explicit SSH or isolated local executor for authenticated Xray availability probes."""
 from __future__ import annotations
 
 import copy
@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts import xray_protocol_probe
 from scripts.xray_protocol_probe import result, validate_outbound
 from .node.backend import DataPlaneConfig
 from .node.ssh import SSHBackend
@@ -22,6 +23,7 @@ class ProbeConfig:
     ssh_known_hosts_file: str = '/root/.ssh/known_hosts'
     script_path: str = '/opt/xray-probe/current/xray_protocol_probe.py'
     xray_bin: str = '/opt/xray-probe/current/xray'
+    execution_mode: str = 'ssh'
 
 
 class ProtocolProbeRunner:
@@ -40,7 +42,7 @@ class ProtocolProbeRunner:
     def probe_outbound(self, outbound, timeout_seconds=6, *, source="protocol", target=None):
         answer = self._probe_outbound(outbound, timeout_seconds)
         answer["checked_at"] = datetime.now(timezone.utc).isoformat()
-        answer["probe_origin"] = self.config.ssh_target
+        answer["probe_origin"] = "local" if self.config.execution_mode == "local" else self.config.ssh_target
         if target is None:
             try:
                 endpoint = validate_outbound(outbound)["settings"]["vnext"][0]
@@ -61,7 +63,7 @@ class ProtocolProbeRunner:
         return answer
 
     def _probe_outbound(self, outbound, timeout_seconds):
-        if not self.config.ssh_target:
+        if self.config.execution_mode not in ('ssh', 'local') or (self.config.execution_mode == 'ssh' and not self.config.ssh_target):
             return result(management_error=True, error_code='probe_executor_unconfigured', stage='executor')
         try:
             clean = validate_outbound(outbound)
@@ -71,7 +73,8 @@ class ProtocolProbeRunner:
         except (ValueError, TypeError):
             return result(management_error=True, error_code='invalid_probe_config', stage='config')
         try:
-            completed = self.transport.execute_remote(
+            execute = self.transport.execute_subprocess if self.config.execution_mode == 'local' else self.transport.execute_remote
+            completed = execute(
                 ['python3', self.config.script_path, '--xray-bin', self.config.xray_bin],
                 'Dedicated probe transport failed', timeout=timeout + min(timeout, 3) + 4,
                 input_text=json.dumps({'outbound': clean, 'timeout_seconds': timeout}))
@@ -128,12 +131,15 @@ class ProtocolProbeRunner:
 
 
 def build_probe_runner(failure_hook=None, observation_hook=None):
+    mode = os.environ.get('PROBE_EXECUTION_MODE', 'ssh').strip()
+    default_script = str(Path(xray_protocol_probe.__file__).resolve()) if mode == 'local' else '/opt/xray-probe/current/xray_protocol_probe.py'
     return ProtocolProbeRunner(ProbeConfig(
+        execution_mode=mode,
         ssh_target=os.environ.get('PROBE_SSH_TARGET', '').strip(),
         ssh_bin=os.environ.get('PROBE_SSH_BIN', 'ssh'),
         ssh_options=tuple(shlex.split(os.environ.get('PROBE_SSH_OPTIONS', ''))),
         ssh_known_hosts_file=os.environ.get('PROBE_SSH_KNOWN_HOSTS', '/root/.ssh/known_hosts'),
-        script_path=os.environ.get('PROBE_REMOTE_SCRIPT', '/opt/xray-probe/current/xray_protocol_probe.py'),
+        script_path=os.environ.get('PROBE_REMOTE_SCRIPT', default_script),
         xray_bin=os.environ.get('PROBE_XRAY_BIN', '/opt/xray-probe/current/xray')), failure_hook=failure_hook, observation_hook=observation_hook)
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""用中文安全配置和检查灾备加密密码、R2 凭据。"""
+"""用中文安全配置和检查灾备上传的 R2 凭据。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-MIN_ENCRYPTION_PASSWORD_LENGTH = 32
 R2_KEYS = (
     "DB_BACKUP_R2_ENDPOINT",
     "DB_BACKUP_R2_BUCKET",
@@ -24,7 +23,6 @@ R2_KEYS = (
 MANAGED_KEYS = (
     "DB_BACKUP_R2_ENABLED",
     "DB_BACKUP_BUNDLE_ENABLED",
-    "DB_BACKUP_ENCRYPTION_PASSWORD",
     *R2_KEYS,
 )
 STATUS_KEYS = MANAGED_KEYS
@@ -434,12 +432,6 @@ def write_env_file(path: str | Path, updates: dict[str, str]) -> None:
         os.close(directory_fd)
 
 
-def generate_encryption_password() -> str:
-    """生成不会在终端回显的高熵归档密码。"""
-
-    return secrets.token_urlsafe(48)
-
-
 def _enabled(value: str | None, default: bool = True) -> bool:
     if value is None or not value.strip():
         return default
@@ -481,17 +473,7 @@ def validate_values(values: dict[str, str]) -> list[str]:
         if raw and raw not in {"0", "1", "true", "false", "yes", "no", "on", "off"}:
             issues.append(f"{key} 必须是 0/1 或布尔值")
 
-    bundle_enabled = _enabled(values.get("DB_BACKUP_BUNDLE_ENABLED"))
     r2_enabled = _enabled(values.get("DB_BACKUP_R2_ENABLED"), default=False)
-    encryption_password = values.get("DB_BACKUP_ENCRYPTION_PASSWORD", "")
-    if (bundle_enabled or r2_enabled) and not encryption_password:
-        issues.append("缺少 DB_BACKUP_ENCRYPTION_PASSWORD")
-    elif encryption_password and len(encryption_password) < MIN_ENCRYPTION_PASSWORD_LENGTH:
-        issues.append(
-            f"DB_BACKUP_ENCRYPTION_PASSWORD 至少需要 {MIN_ENCRYPTION_PASSWORD_LENGTH} 个字符"
-        )
-    if any(ord(character) < 32 or ord(character) == 127 for character in encryption_password):
-        issues.append("DB_BACKUP_ENCRYPTION_PASSWORD 不能包含换行")
 
     if not r2_enabled:
         return issues
@@ -555,23 +537,6 @@ def _prompt_secret(key: str, current: str) -> str:
         print(f"{key} 不能为空。")
 
 
-def _prompt_encryption_password(current: str) -> str:
-    if current and _ask_yes_no("DB_BACKUP_ENCRYPTION_PASSWORD 已设置，是否保留现有值？", True):
-        return current
-    if _ask_yes_no("是否自动生成新的灾备归档密码？", True):
-        print("已生成新密码；密码值不会显示，请从受保护的 .env/密码管理器保存。")
-        return generate_encryption_password()
-    while True:
-        first = getpass.getpass("请输入灾备归档密码（至少 32 个字符，输入不回显）：").strip()
-        second = getpass.getpass("请再次输入灾备归档密码：").strip()
-        if first != second:
-            print("两次输入不一致。")
-        elif first:
-            return first
-        else:
-            print("密码不能为空。")
-
-
 def interactive_updates(values: dict[str, str]) -> dict[str, str]:
     updates: dict[str, str] = {}
     bundle_enabled = _ask_yes_no(
@@ -598,15 +563,11 @@ def interactive_updates(values: dict[str, str]) -> dict[str, str]:
             "DB_BACKUP_R2_SECRET_ACCESS_KEY",
             values.get("DB_BACKUP_R2_SECRET_ACCESS_KEY", ""),
         )
-    if bundle_enabled or r2_enabled:
-        updates["DB_BACKUP_ENCRYPTION_PASSWORD"] = _prompt_encryption_password(
-            values.get("DB_BACKUP_ENCRYPTION_PASSWORD", "")
-        )
     return updates
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="中文配置和检查灾备加密密码、R2 凭据。")
+    parser = argparse.ArgumentParser(description="中文配置和检查灾备上传的 R2 凭据。")
     parser.add_argument(
         "--env-file",
         default=None,
@@ -638,7 +599,7 @@ def main() -> int:
                 for issue in issues:
                     print(f"- {issue}")
                 return 2
-            print("检查通过：备份加密和 R2 配置字段完整。")
+            print("检查通过：R2 备份配置字段完整。")
             return 0
 
         print("开始配置灾备密钥。密钥只写入本地受保护文件，不会打印到终端。")

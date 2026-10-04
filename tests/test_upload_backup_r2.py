@@ -10,7 +10,7 @@ class R2UploadTest(unittest.TestCase):
     def test_object_key_contains_digest_and_bundle_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "bundle.tar.gz"
-            path.write_bytes(b"encrypted")
+            path.write_bytes(b"raw bundle")
             key = object_key(path, "backups")
             self.assertTrue(key.startswith("backups/"))
             self.assertIn("bundle.tar.gz", key)
@@ -18,7 +18,7 @@ class R2UploadTest(unittest.TestCase):
     def test_upload_requires_explicit_configuration(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "bundle.tar.gz"
-            path.write_bytes(b"encrypted")
+            path.write_bytes(b"raw bundle")
             old = os.environ.pop("DB_BACKUP_R2_BUCKET", None)
             try:
                 with self.assertRaisesRegex(RuntimeError, "DB_BACKUP_R2_BUCKET"):
@@ -34,7 +34,7 @@ class R2UploadTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "bundle.tar.gz"
-            path.write_bytes(b"encrypted")
+            path.write_bytes(b"raw bundle")
             os.environ.update({
                 "DB_BACKUP_R2_BUCKET": "bucket",
                 "DB_BACKUP_R2_ENDPOINT": "https://account.r2.cloudflarestorage.com",
@@ -45,7 +45,19 @@ class R2UploadTest(unittest.TestCase):
             record = upload_bundle(path, Path(tmpdir) / "record.json", client=client)
             self.assertEqual(record["bucket"], "bucket")
             self.assertNotIn("secret", record)
-            self.assertEqual(client.args[3], b"encrypted")
+            self.assertEqual(client.args[3], b"raw bundle")
+
+    def test_upload_rejects_non_https_endpoint(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bundle.tar.gz"
+            path.write_bytes(b"raw bundle")
+            with mock.patch.dict(os.environ, {
+                "DB_BACKUP_R2_BUCKET": "bucket", "DB_BACKUP_R2_ENDPOINT": "http://r2.example.invalid",
+                "DB_BACKUP_R2_ACCESS_KEY_ID": "access", "DB_BACKUP_R2_SECRET_ACCESS_KEY": "secret",
+            }, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "HTTPS"):
+                    upload_bundle(path, client=object())
 
     def test_upload_normalizes_legacy_bucket_suffixed_endpoint(self):
         class Client:
@@ -54,7 +66,7 @@ class R2UploadTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "bundle.tar.gz"
-            path.write_bytes(b"encrypted")
+            path.write_bytes(b"raw bundle")
             os.environ.update({
                 "DB_BACKUP_R2_BUCKET": "bucket",
                 "DB_BACKUP_R2_ENDPOINT": "https://account.r2.cloudflarestorage.com/bucket",

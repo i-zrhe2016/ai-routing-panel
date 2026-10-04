@@ -1,3 +1,4 @@
+import base64
 import importlib
 import json
 import os
@@ -523,6 +524,46 @@ class TenantPanelTest(unittest.TestCase):
                 f"/tenant-subscriptions/{port['subscription_token']}/clash"
             )
             self.assertEqual(response.status_code, 404)
+
+    def test_legacy_and_tenant_subscriptions_share_rules_and_unified_credentials(self):
+        port = self.create_port(32007, 'Common services: "test"')
+        from app.web import core
+
+        profile, error = core.parse_xray_client_profile()
+        self.assertEqual(error, "")
+        user_uuid = "22222222-2222-2222-2222-222222222222"
+        profile.update(unified_port=443, user_uuids={"32007": user_uuid})
+        legacy_path = f"/{self.panel.state.get_subscription_token()}/32007"
+        tenant_path = f"/tenant-subscriptions/{port['subscription_token']}"
+
+        with patch.object(core, "parse_xray_client_profile", return_value=(profile, "")):
+            responses = [self.client.get(path) for path in (
+                legacy_path, legacy_path + "/clash", tenant_path, tenant_path + "/clash",
+            )]
+            self.assertTrue(all(response.status_code == 200 for response in responses))
+            bodies = [response.get_data(as_text=True) for response in responses]
+            self.assertTrue(all(body == bodies[0] for body in bodies))
+            for rule in (
+                "DOMAIN-SUFFIX,chatgpt.com,PROXY", "DOMAIN-SUFFIX,claude.ai,PROXY",
+                "DOMAIN-SUFFIX,gemini.google.com,PROXY", "DOMAIN-SUFFIX,github.com,PROXY",
+                "DOMAIN-SUFFIX,discord.com,PROXY", "DOMAIN-SUFFIX,whatsapp.com,PROXY",
+            ):
+                self.assertIn(rule, bodies[0])
+            self.assertIn("    port: 443\n", bodies[0])
+            self.assertIn(f'    uuid: "{user_uuid}"\n', bodies[0])
+            self.assertNotIn(profile["uuid"], bodies[0])
+
+            for path in (legacy_path, tenant_path):
+                response = self.client.get(path + "/v2ray")
+                self.assertEqual(response.status_code, 200)
+                share_link = base64.b64decode(response.get_data()).decode()
+                self.assertIn(f"vless://{user_uuid}@example.com:443?", share_link)
+                self.assertNotIn(profile["uuid"], share_link)
+                self.assertNotIn("DOMAIN-SUFFIX", share_link)
+                query = parse_qs(urlparse(share_link.strip()).query)
+                self.assertEqual(query["pbk"], [profile["public_key"]])
+                self.assertEqual(query["sid"], [profile["short_id"]])
+                self.assertEqual(query["sni"], [profile["server_name"]])
 
     def test_expired_ports_are_deleted_during_maintenance(self):
         port = self.create_port(33001, "Tenant Expired")

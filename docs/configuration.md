@@ -49,11 +49,12 @@
 
 | 变量 | 默认值 / 用途 |
 | --- | --- |
-| `PROBE_SSH_TARGET` | 留空；专用探测执行主机，缺失时 fail closed |
+| `PROBE_EXECUTION_MODE` | `ssh`；显式选择 `local` 时在专用探测执行主机的控制面容器中运行独立进程，无 SSH 回退；未知值 fail closed |
+| `PROBE_SSH_TARGET` | 留空；SSH 模式下的专用探测执行主机，缺失时 fail closed |
 | `PROBE_SSH_BIN` | `ssh`；独立 SSH transport |
 | `PROBE_SSH_OPTIONS` | 留空；独立连接选项，沿用内网 SSH 认证与严格主机验证策略 |
 | `PROBE_SSH_KNOWN_HOSTS` | `/root/.ssh/known_hosts`；专用目标的已验证主机密钥文件 |
-| `PROBE_REMOTE_SCRIPT` | `/opt/xray-probe/current/xray_protocol_probe.py`；可固定到不可变 release 路径 |
+| `PROBE_REMOTE_SCRIPT` | SSH 默认 `/opt/xray-probe/current/xray_protocol_probe.py`；local 默认仓库 `scripts/xray_protocol_probe.py`；Compose 需显式设置对应容器内路径，可固定到不可变 release |
 | `PROBE_XRAY_BIN` | `/opt/xray-probe/current/xray`；与服务端版本匹配的客户端二进制 |
 
 `AI_ROUTING_HEALTH_INTERVAL_SECONDS` 默认 `30`，控制独立路由健康周期；`AI_DOMAIN_INTERVAL_SECONDS` 默认 `3600`，控制日志分析与新域名分类周期。两者均须大于零，Compose 支持在根 `.env` 覆盖；`--once` 运行完整分析与应用，`--routing-only --once` 只探测并根据历史分类应用路由。行为与持久化说明见 [AI 路由](ai-routing.md)。
@@ -163,7 +164,7 @@
 | `DB_BACKUP_R2_REGION` | R2 S3 region，默认 `auto` |
 | `DB_BACKUP_R2_PREFIX` | 对象 key 前缀，默认 `xray-routing-panel` |
 | `DB_BACKUP_R2_RECORD_PATH` | 本地上传记录，默认 `/backups/r2-upload-record.json` |
-| `DB_BACKUP_ENCRYPTION_PASSWORD` | AES-256-GCM 归档密码，必须与 R2 secret 分离保存 |
+| `DB_BACKUP_ENCRYPTION_PASSWORD` | 仅用于历史 `.enc` 归档恢复；新上传无需此字段，配置工具保留现有值 |
 | `DB_BACKUP_BUNDLE_ENABLED` | 是否生成包含数据库和配置文件的灾备归档；默认 `1` |
 | `DB_BACKUP_EXTRA_PATHS` | 逗号/换行分隔的额外文件、目录或 glob |
 | `DB_BACKUP_BUNDLE_DIR` / `DB_BACKUP_BUNDLE_KEEP_DAYS` | 本地归档目录和保留天数 |
@@ -178,7 +179,7 @@
 | `DB_BACKUP_TAILSCALE_BROKER_SOCKET` | 备份容器访问隔离 Tailscale broker 的 Unix socket；默认 `/var/run/xray-backup/tailscale-ssh.sock` |
 | `DB_BACKUP_TAILSCALE_BIN_HOST` / `DB_BACKUP_TAILSCALE_SOCKET_HOST` | 隔离 broker 使用的宿主机 Tailscale CLI 和 daemon socket 源路径；默认挂载禁用占位文件 |
 
-R2 对象不会由备份任务删除；生命周期规则在 Cloudflare 侧配置。恢复时人工下载、解密、校验 manifest，再恢复数据库和配置。
+R2 对象不会由备份任务删除；生命周期规则在 Cloudflare 侧配置。新上传直接保存原始 `tar.gz`（关闭归档时为数据库快照），通过 HTTPS 传输。恢复时人工下载、校验 manifest，再恢复数据库和配置；历史 `.enc` 对象仍需原密码解密。
 
 SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读验证命令见[远端节点配置采集](remote-node-backup.md)。
 

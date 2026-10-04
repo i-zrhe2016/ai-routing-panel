@@ -4,7 +4,7 @@
 > Status: Active
 > Scope: Cloudflare R2 灾备上传
 
-本项目生成包含 SQLite 数据库和部署配置的灾备归档，使用应用侧 AES-256-GCM 加密后，通过 Cloudflare R2 的 S3 兼容 API 保存。R2 只用于低频、异地、离线灾难恢复，不参与故障切换或快速恢复。
+本项目生成包含 SQLite 数据库和部署配置的灾备归档，直接通过 HTTPS 上传原始 `tar.gz` 到 Cloudflare R2 的 S3 兼容 API。R2 只用于低频、异地、离线灾难恢复，不参与故障切换或快速恢复。
 
 ## 流程
 
@@ -15,7 +15,7 @@
 | `backup_db.py` | SQLite 一致性快照 |
 | `collect_remote_backup.py` | 节点只读采集与 staging manifest |
 | `build_backup_bundle.py` | 文件收集、归档与校验元数据 |
-| `upload_backup_r2.py` | AES-256-GCM 加密、R2 上传与记录 |
+| `upload_backup_r2.py` | 原始文件 R2 上传与记录 |
 
 当 `DB_BACKUP_R2_ENABLED=0` 时，只生成本地归档；当设置为 `1` 时，必须同时提供完整 R2 配置，上传失败会返回非零，但不会删除本地归档。
 
@@ -36,7 +36,7 @@ R2 凭据只能通过部署环境、Docker Secret 或外部 Secret 管理注入�
 
 ## 中文密钥配置脚本
 
-项目提供交互式脚本配置备份归档密码和 R2 凭据。脚本只更新指定的 dotenv 文件，默认是项目根目录 `.env`；不会连接 SSH、访问真实 R2、重启容器或修改 DNS。
+项目提供交互式脚本配置 R2 凭据。脚本只更新指定的 dotenv 文件，默认是项目根目录 `.env`；不会连接 SSH、访问真实 R2、重启容器或修改 DNS。
 
 先检查现有配置（只显示变量名的“已设置/缺失”状态，不显示值）：
 
@@ -50,9 +50,9 @@ python3 scripts/configure_backup_secrets.py --check
 python3 scripts/configure_backup_secrets.py
 ```
 
-脚本会用中文提示输入 R2 endpoint、bucket、access key 和 secret key；敏感输入不回显，归档密码也可以自动生成。写入采用临时文件原子替换，并将 `.env` 权限设为 `0600`。完成后请人工检查变更，再在维护窗口重建或重启备份容器，最后重新执行 `--check`。不要把密钥粘贴到聊天、命令行参数或日志中。
+脚本会用中文提示输入 R2 endpoint、bucket、access key 和 secret key；敏感输入不回显，新备份无需归档密码。写入采用临时文件原子替换，并将 `.env` 权限设为 `0600`。完成后请人工检查变更，再在维护窗口重建或重启备份容器，最后重新执行 `--check`。不要把密钥粘贴到聊天、命令行参数或日志中。
 
-该脚本只负责本项目灾备备份所需的密钥材料，不生成或修改 SSH、Xray/REALITY、节点业务凭据。Cloudflare R2 的 access key 和 secret key 仍需先在 Cloudflare 控制台创建，并按最小权限授予目标 bucket。
+该脚本保留现有历史解密密码字段，不提示、生成或修改它。它只负责本项目灾备上传所需的 R2 凭据，不生成或修改 SSH、Xray/REALITY、节点业务凭据。Cloudflare R2 的 access key 和 secret key 仍需先在 Cloudflare 控制台创建，并按最小权限授予目标 bucket。
 
 ## 对象命名与校验
 
@@ -61,6 +61,8 @@ python3 scripts/configure_backup_secrets.py
 ```text
 <prefix>/<YYYY>/<MM>/<DD>/<UTC时间>-<sha256前16位>-<归档文件名>
 ```
+
+R2 对象与本地原始归档的字节、大小及 SHA-256 相同；不会生成 `.enc` 文件。禁用 `DB_BACKUP_BUNDLE_ENABLED` 时上传原始数据库快照。
 
 归档内部的 `backup-manifest.json` 记录每个文件的来源、大小和 SHA-256。R2 上传记录由 `DB_BACKUP_R2_RECORD_PATH` 指定，默认是 `/backups/r2-upload-record.json`。
 
@@ -77,5 +79,7 @@ python3 -m unittest tests.test_upload_backup_r2
 ## 灾难阶段
 
 从 R2 下载对应对象到隔离目录，校验 SHA-256 和归档内 manifest，再解包到隔离目录，最后人工恢复数据库和配置。恢复不会自动覆盖正在运行的服务。
+
+历史 `.enc` 对象仍需原密码，恢复脚本保留解密支持，见[历史加密归档恢复](node-recovery.md#完整灾备包恢复脚本)。
 
 R2 对象生命周期和保留策略在 Cloudflare 控制台配置；应用不删除远端历史对象。

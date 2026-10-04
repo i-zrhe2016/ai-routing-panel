@@ -37,6 +37,12 @@
 - `/<token>/<listen_port>/clash`
 - `/<token>/<listen_port>/v2ray`
 
+### Clash 客户端分流
+
+默认与 `/clash` 路径使用同一套规则，历史路径与租户路径均生效。客户端按从上到下的首个匹配规则处理：局域网与解禁直连 → 广告拒绝 → 下载直连 → ChatGPT/OpenAI、Claude/Anthropic、Gemini/AI Studio、GitHub（含资源与 Copilot）、Discord、WhatsApp 的显式域名走 `PROXY` → 原有 Google、Telegram、媒体等服务规则 → 广义代理/中国域名与 IP 规则 → `GEOIP,CN,DIRECT` → `MATCH,PROXY`。常用服务规则包含 API、静态资源、认证与语音相关域名，保留原有 25 个 ACL4SSR 规则提供者，不新增远程列表。
+
+部署更新后，在 Clash 客户端刷新原订阅即可获取规则；只刷新规则提供者不会更新这些内嵌域名规则。`PROXY` 是客户端可选策略组，用户手动选 `DIRECT` 时这些服务也会直连。V2Ray 订阅仍是 VLESS 分享链接，不包含上述 Clash 分流规则；订阅地址、端口、每用户 UUID、REALITY 参数和 DNS 默认值不受规则更新影响。
+
 ## JSON API
 
 | 方法 | 路径 | 说明 |

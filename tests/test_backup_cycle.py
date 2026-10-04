@@ -30,6 +30,69 @@ class BackupCycleTest(unittest.TestCase):
         source = RUN_CYCLE_SCRIPT.read_text(encoding="utf-8")
         self.assertNotRegex(source, r"DB_BACKUP_UPLOADER|publish|unpublish|shard")
 
+    def test_r2_cycle_uploads_raw_bundle_or_database_without_encryption(self):
+        from scripts.upload_backup_r2 import upload_bundle
+
+        class Client:
+            def upload_fileobj(self, source, bucket, key, ExtraArgs):
+                self.payload = source.read()
+                self.key = key
+
+        for password in (None, "historic-password"):
+            for bundle_enabled in ("1", "0"):
+                with self.subTest(password=password, bundle_enabled=bundle_enabled):
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        root = Path(tmpdir)
+                        db = self.create_source_db(root)
+                        backup_dir = root / "backups"
+                        record_path = root / "record.json"
+                        env = {
+                            "DB_PATH": str(db), "DB_BACKUP_DIR": str(backup_dir),
+                            "DB_BACKUP_BUNDLE_DIR": str(backup_dir),
+                            "DB_BACKUP_BUNDLE_ENABLED": bundle_enabled,
+                            "DB_BACKUP_SSH_COLLECTION_ENABLED": "0",
+                            "DB_BACKUP_RECOVERY_REQUIRED": "0", "DB_BACKUP_EXTRA_PATHS": "",
+                            "DB_BACKUP_R2_ENABLED": "1", "DB_BACKUP_R2_BUCKET": "test-bucket",
+                            "DB_BACKUP_R2_ENDPOINT": "https://r2.example.invalid",
+                            "DB_BACKUP_R2_ACCESS_KEY_ID": "access", "DB_BACKUP_R2_SECRET_ACCESS_KEY": "secret",
+                            "DB_BACKUP_R2_RECORD_PATH": str(record_path),
+                        }
+                        if password is not None:
+                            env["DB_BACKUP_ENCRYPTION_PASSWORD"] = password
+                        client = Client()
+                        module = load_module("run_db_backup_cycle_raw", RUN_CYCLE_SCRIPT)
+                        def upload(path, record_path):
+                            return upload_bundle(path, record_path=record_path, client=client)
+                        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(module, "upload_bundle", side_effect=upload):
+                            self.assertEqual(module.main(), 0)
+                        suffix = ".tar.gz" if bundle_enabled == "1" else ".db"
+                        raw = next(backup_dir.glob(f"*{suffix}"))
+                        record = json.loads(record_path.read_text())
+                        self.assertTrue(client.key.endswith(suffix))
+                        self.assertEqual(client.payload, raw.read_bytes())
+                        self.assertEqual(record["sha256"], hashlib.sha256(raw.read_bytes()).hexdigest())
+                        self.assertEqual(record["size"], raw.stat().st_size)
+                        self.assertFalse(list(backup_dir.glob("*.enc")))
+
+    def test_failed_raw_upload_retains_local_backup_and_previous_record(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db = self.create_source_db(root)
+            record = root / "record.json"
+            record.write_text("previous record")
+            env = {
+                "DB_PATH": str(db), "DB_BACKUP_DIR": str(root / "backups"),
+                "DB_BACKUP_BUNDLE_ENABLED": "0", "DB_BACKUP_R2_ENABLED": "1",
+                "DB_BACKUP_R2_RECORD_PATH": str(record),
+            }
+            module = load_module("run_db_backup_cycle_upload_failure", RUN_CYCLE_SCRIPT)
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(module, "upload_bundle", side_effect=RuntimeError("upload failed")):
+                with self.assertRaisesRegex(RuntimeError, "upload failed"):
+                    module.main()
+            self.assertEqual(record.read_text(), "previous record")
+            self.assertTrue(list((root / "backups").glob("*.db")))
+            self.assertFalse(list((root / "backups").glob("*.enc")))
+
     def test_remote_collection_uses_nested_staging_directory(self):
         module = load_module("run_db_backup_cycle_collection", RUN_CYCLE_SCRIPT)
         with tempfile.TemporaryDirectory() as tmpdir:

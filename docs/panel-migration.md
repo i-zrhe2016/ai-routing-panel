@@ -1,219 +1,51 @@
-# 面板迁移文档
+# 控制面迁移
 
 > Type: Runbook
 > Status: Active
-> Scope: 面板迁移文档
+> Scope: 保留普通与 AI 数据面身份的控制面迁移、验证和回滚
 
-本文档用于把当前这套 `xray-routing-panel` 从旧机器迁移到新机器。
+本流程迁移面板、AI 域名管理器、数据库备份和 Tailscale 备份 broker。普通与 AI 节点继续提供原有代理入口；订阅域名、URL、token、TLS 与 REALITY 参数保持一致。不要用整个栈的 `docker compose down` 停止数据面，也不要在新控制面启动普通或 AI Xray 容器。
 
-> 本页说明控制面数据与服务迁移。普通多端口模式由 Xray 监听代理入口；启用[统一 443 入口](unified-entry.md)时由 HAProxy 分流。已有 Nginx 与 HTTPS 订阅须按部署实际独立迁移。
+## 准备
 
-## 迁移目标
+先记录旧容器的完整启动配置、镜像摘要、只读源代码挂载、实际环境变量与绑定路径。将记录、真实环境文件、模型认证、数据库和快照放入权限为 `0700` 的仓库外目录；敏感文件为 `0600`，只输出脱敏状态和摘要。镜像按摘要传输，代码按文件哈希固定，避免发布时重建依赖。新主机既有容器、监听端口和挂载保持不变。
 
-- 保留端口规则、租户凭据和订阅 token
-- 保留管理员配置
-- 可选保留历史统计和 AI 域名聚合结果
-- 在新机器恢复完整的 Xray + 面板运行链路
+保留全部 `data/`（数据库、上传、事件及工作目录）、运行期 JSON/分类缓存、报告、历史备份、Xray 环境与自定义出站模板，以及实际分类器 API key、Codex 专用认证和 SSH 主机信任文件。准备阶段使用 SQLite backup API 获得可校验的数据库副本；最终切换仍需暂停旧写入者并重新复制全部可变状态。不要只复制数据库或用重新生成代替已有凭据快照。
 
-## 需要迁移的内容
+新发布的源代码只读挂载，可变目录单独映射。按容器实际路径检查以下配置，见[配置说明](configuration.md)：
 
-最关键的是这些文件或目录：
+- `DATAPLANE_SSH_TARGET` 指向原普通节点。`DATAPLANE_*_PATH` 是远端实际文件；`XRAY_*_PATH` 是新控制面本地生成和缓存路径，两者可以同名但归属不同。
+- `AI_NODE_SSH_TARGETS`、配置路径、容器名和 API 端口指向原 AI 节点，不能误用新主机的 loopback 服务。
+- 面板只绑定可信内网地址，允许列表限制可信网段。旧公开订阅前端只转发 `/tenant-subscriptions/`，不转发管理页面；保留原 TLS 与兼容订阅生成器。
+- 面板和管理器使用同一数据库、生成运行期目录及锁；分类器保留实际 API key 文件只读挂载。
+- Codex 事件诊断保持阈值 5、隔离镜像和只读认证。`INCIDENT_CODEX_HOST_WORK_ROOT` 必须指向新主机上对应容器 `/data/probe-incidents/work` 的真实目录。
+- 控制面迁入专用探测主机时，显式选择本地探测模式，见[运维与排障](operations.md)。挂载专用 Xray 二进制，脚本通过 stdin 接收凭据并在隔离临时目录运行；禁止隐式回退或在被测节点执行探测。
+- 备份容器与 broker 共用独立 Unix socket，只有 broker 挂载 Tailscale LocalAPI socket。恢复采集目标改为原普通和 AI 节点，保留 R2、定时与历史状态；新上传保存原始归档，历史加密归档仍可解密恢复。归档规则见[灾备归档](disaster-backup.md)。
 
-- `data/panel.db`
-- `app/xray/.env`
-- `.env`，如果你启用了 `PANEL_PUBLIC_URL`、管理员认证或自定义 `PANEL_SECRET_KEY`
-- 如果已经拆成控制面 / 数据面分离，也要保留 `.env` 里新增的远程节点配置：
-  - `DEFAULT_NODE_*`
-  - `AI_NODE_*`
+## 独立预检
 
-按需迁移：
+生产启动前，由独立验证者检查发布清单与 `docker compose config --quiet`。用相同镜像、环境和挂载运行一次性命令，入口不能启动后台管理器或修改远端配置：
 
-- `app/xray/ai-proxy-outbound.json`
-  - 如果你自定义过 AI 出站模板
-- `app/xray/runtime/ai-domain-decisions.json`
-  - 如果你想保留已分类域名缓存
-- `app/xray/runtime/dynamic-routing.json`
-  - 一般可重新生成；只在你想保留当前路由快照时一并带走
-- `app/xray/logs/access.log`
-  - 只在你想让 AI 管理器在新机器继续参考最近访问窗口时保留
-- `backups/`
-  - 只在你想顺带迁移历史数据库备份时保留
+1. 在实际控制面容器中，通过严格主机验证的 SSH 读取普通和 AI 节点配置并访问各节点本地 API。仅宿主机 `tailscale ssh` 成功不足以证明应用 transport 可用；新增主机密钥先与受信任来源核对。
+2. 对已有有效凭据执行认证 REALITY 正向探测，要求 HTTP 204；用无效 UUID 检查业务失败。依赖、执行器及 transport 故障必须保持 management error。
+3. 在隔离目录采集普通和 AI 恢复文件并校验灾备归档。校验失败不能报备份成功，避免为测试覆盖生产备份、恢复目标或远端配置。
+4. 核对代码/镜像摘要、敏感挂载存在性、数据库完整性、账户/端口/token 等稳定记录的计数与摘要，以及旧公开订阅和新内网管理入口的访问边界。
 
-通常**不需要**迁移这些生成文件：
+准备时不得同时启动新旧写入者。预检成功后才进入切换；失败则保留准备产物并修正具体问题。
 
-- `app/xray/runtime/config.json`
-- `app/xray/runtime/client-test.json`
-- `app/xray/runtime/client-share.txt`
-- `app/xray/runtime/panel-ports.json`
+## 切换与运行验证
 
-这些文件都可以在新机器上重新渲染生成。
+1. 只暂停旧面板、管理器、备份和 broker；记录原容器状态。保持数据面、公开订阅 TLS 前端及其他应用运行。
+2. 最终复制数据库、上传、事件、缓存、报告和备份。校验 SQLite integrity 与稳定记录摘要；将快照与固定源代码、镜像和完整启动配置关联。
+3. 在新主机先启动 broker，再启动面板；健康检查必须使用面板实际绑定的可信内网地址。等待面板健康且初始配置应用完成后，再启动管理器，最后启动备份，避免面板初始化与管理器争用配置锁。确认只有一组控制面写入者。新面板初始化前必须已有最终数据库和完整 Xray 环境，避免空数据库覆盖远端节点配置。
+4. 将旧订阅前端的私有后端改为新控制面；保留路由、TLS、token 与节点参数。兼容 Clash 生成器同时使用已验证的公共订阅规则。
+5. 检查内网 `/healthz`、管理入口来源允许列表、静态文件、已有租户订阅和兼容订阅；检查普通/AI SSH 状态、统计、读取远端日志与认证协议正负向结果。
+6. 核对后台 AI 分类/健康循环、阈值 5 与中文事件诊断。诊断烟测使用隔离合成事件，避免制造真实告警。检查隔离灾备采集及恢复校验，并确认既有普通 443 与新主机其他应用正常。
 
-## 推荐迁移方式
-
-如果旧机器不可用但 R2 灾备归档仍可访问，先按[灾备归档与 R2 上传通道](disaster-backup.md)在隔离目录下载并校验 `*-disaster-*.tar.gz`，再把其中的 `database/panel.db`、`config/` 下控制面文件和 `nodes/` 下普通数据面主配置带入下述迁移步骤。控制面归档中的本机 AI 配置可作为恢复参考；节点文件恢复前仍需重新渲染、校验并人工确认目标路径。该路径是人工离线灾难恢复，不承诺快速恢复时间。
-
-### 方案 A：完整迁移
-
-适合想保留：
-
-- 端口规则
-- 租户凭据和订阅地址
-- 累计统计
-- AI 域名聚合结果
-- 最近分类缓存
-
-建议打包：
-
-- `data`
-- `app/xray/.env`
-- `.env`
-- `app/xray/ai-proxy-outbound.json`
-- `app/xray/runtime/ai-domain-decisions.json`
-- `app/xray/logs`
-
-### 方案 B：只迁核心配置
-
-适合只想恢复服务，不关心最近缓存和报告。
-
-至少复制：
-
-- `data/panel.db`
-- `app/xray/.env`
-- `.env`，如果你改过
-
-## 迁移步骤
-
-### 1. 在旧机器停服务
-
-```bash
-docker compose down
-```
-
-建议先停服务，再打包数据，避免数据库和运行期文件不一致。
-
-### 2. 备份旧机器数据
-
-最小示例：
-
-```bash
-tar -czf xray-routing-panel-backup.tar.gz \
-  data \
-  app/xray/.env \
-  .env
-```
-
-如果要一并保留分类缓存、日志和自定义出站模板：
-
-```bash
-tar -czf xray-routing-panel-full-backup.tar.gz \
-  data \
-  .env \
-  app/xray/.env \
-  app/xray/ai-proxy-outbound.json \
-  app/xray/runtime/ai-domain-decisions.json \
-  app/xray/logs
-```
-
-### 3. 在新机器准备环境
-
-- 拉取同一份项目代码
-- 安装 Docker 和 Docker Compose
-- 确认 `18080`、`443` 和你实际使用的入口端口没有冲突
-- 如果你依赖 `codex` 自动分类，确认新机器上的挂载路径也可用：
-  - `/root/.codex`
-  - `/root/.nvm/versions/node`
-  - 或者同步修改 `docker-compose.yml`
-
-### 4. 恢复备份
-
-```bash
-tar -xzf xray-routing-panel-backup.tar.gz
-```
-
-如果你只迁移最关键数据，也可以手工复制：
-
-- `./data/panel.db`
-- `./app/xray/.env`
-- `./.env`
-
-### 5. 在新机器重新渲染配置
-
-```bash
-python -m app.xray.render_config
-```
-
-### 6. 启动新环境
-
-完整栈：
-
-```bash
-docker compose --profile xray up -d --build
-```
-
-如果你当前只想先恢复面板：
-
-```bash
-docker compose up -d --build
-```
-
-## 迁移后验证
-
-```bash
-docker compose ps
-docker compose logs -f xray-routing-panel
-curl http://redacted-ip-007:18080/healthz
-```
-
-完整栈建议再检查：
-
-```bash
-docker compose --profile xray logs -f xray-reality
-docker compose --profile xray logs -f xray-ai-domain-manager
-```
-
-同时确认这些文件已经生成：
-
-- `app/xray/runtime/config.json`
-- `app/xray/runtime/client-test.json`
-- `app/xray/runtime/panel-ports.json`
-
-如果你保留了 AI 分类状态，可以再检查：
-
-```bash
-cat app/xray/reports/hourly-domains/latest.txt
-python3 - <<'PY'
-import sqlite3
-conn = sqlite3.connect('./data/panel.db')
-for row in conn.execute('select domain, classification, total_hits from ai_domains order by domain'):
-    print(row)
-PY
-```
-
-## 常见问题
-
-- 只复制 `panel.db` 可以吗
-  - 可以，端口规则、租户凭据、订阅 token 和历史累计统计都在里面
-  - 但 `app/xray/.env` 不同步的话，新机器上的 REALITY 参数可能不一致
-- `app/xray/runtime/*` 要不要带走
-  - 一般不需要，重新执行 `python -m app.xray.render_config` 即可
-- `access.log` 不复制会怎样
-  - 不影响已有数据库累计统计
-  - 但会丢失“最近一小时访问窗口”这部分原始输入，AI 管理器需要重新积累新日志
-- 新机器上 `/healthz` 返回 `500`
-  - 先确认 `xray-reality` 是否已启动
-  - 再确认 `XRAY_API_SERVER` 默认的 `redacted-ip-007:10085` 是否可访问
-  - 如果你只恢复了面板而没有恢复 Xray，可临时设置 `PANEL_HEALTH_REQUIRES_XRAY=0`
+后台统计和健康数据会自然变化；完整性比较使用最终冻结快照及稳定身份字段，不能要求持续增长的计数长期逐字节一致。
 
 ## 回滚
 
-如果新机器验证失败：
+预先保存旧不可变源代码、原容器启动配置、最终冻结快照和旧订阅前端文件。回滚先停止新主机的四个控制面服务，确认没有残余写入者，再恢复旧订阅转发并按原配置启动旧服务；不重建镜像、不重新生成身份、不停止数据面。
 
-```bash
-docker compose down
-```
-
-然后保留旧机器原目录，重新在旧机器执行：
-
-```bash
-docker compose --profile xray up -d --build
-```
+切换后如产生业务写入，先从新主机保存最新可变状态，判断是否要回迁；不得直接用旧快照覆盖新账户或上传。恢复后重新验证数据库、订阅、节点 API、认证协议和备份，保留失败证据。旧部署目录与配置在迁移验收前保持可用。
