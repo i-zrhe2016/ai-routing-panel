@@ -79,7 +79,7 @@ SSH 采集的认证、known_hosts、实测路径和只读排障命令见[远端�
 
 ## 协议探测
 
-AI 候选选择、启用租户端口的周期探测、DNS 故障切换和按需诊断均通过 `PROBE_SSH_TARGET` 的独立执行主机运行 Xray VLESS + REALITY 客户端。健康要求经认证隧道请求 `https://www.gstatic.com/generate_204` 返回 HTTP 204；TCP 开放或 TLS/SNI 握手不能建立业务健康。该固定目标无需 HTTPS 外的其他健康请求。
+AI 候选选择、启用租户端口的周期探测、DNS 故障切换和按需诊断默认通过 `PROBE_SSH_TARGET` 的独立执行主机运行 Xray VLESS + REALITY 客户端。健康要求经认证隧道请求 `https://www.gstatic.com/generate_204` 返回 HTTP 204；TCP 开放或 TLS/SNI 握手不能建立业务健康。该固定目标无需 HTTPS 外的其他健康请求。控制面迁入专用探测主机时可显式设置 `PROBE_EXECUTION_MODE=local`，在控制面容器中使用同一脚本、stdin 凭据、临时目录和有界子进程；需只读挂载 Xray 二进制并设置 `PROBE_XRAY_BIN`，容器内须有 curl。仓库 Dockerfile 包含 curl；复用尚未包含 curl 的旧镜像时，发布必须附带经哈希校验的只读 curl、loader 与完整依赖库，并通过明确 PATH 使用固定 wrapper。本地执行错误保持 management error，不回退至 SSH 或普通/AI 节点。
 
 配置键的默认值见[配置参考](configuration.md)。在独立主机安装 Python 3.10+、curl 和与节点一致的 Xray 客户端版本；将仓库 `scripts/xray_protocol_probe.py` 与 Xray 二进制放在 `/opt/xray-probe/releases/<version>/` 的 root 只读文件中。先校验二进制 SHA-256 和版本，再将 `PROBE_REMOTE_SCRIPT`、`PROBE_XRAY_BIN` 固定到 release 路径；使用 `current` 符号链接时应原子切换。先从控制面容器验证严格 SSH 主机密钥与认证，随后测试正确凭据成功、错误 UUID 拒绝、执行主机故障保留状态。回滚只需恢复此前脚本/二进制路径并重启 panel 和 manager；不得回退到普通/AI 节点执行。
 

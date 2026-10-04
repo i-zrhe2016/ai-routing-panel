@@ -18,7 +18,7 @@
 - 远端不写文件、不改权限、不运行 `systemctl` 或 `docker restart`，也不会上传或替换配置。
 - 文件内容以 Base64 返回；控制面重新计算 SHA-256 后才写入临时 staging 目录。
 - 节点主配置和 `.env` 是恢复必需文件，运行时辅助产物是可选文件。
-- staging 文件和 `remote-node-collection.json` 权限为 `0600`。配置在本地加密前是明文，备份目录必须限制为备份服务可读。
+- staging 文件和 `remote-node-collection.json` 权限为 `0600`。配置在本地及新 R2 归档中保持原始内容，备份目录必须限制为备份服务可读。
 
 ## 节点来源
 
@@ -69,4 +69,4 @@ python3 scripts/collect_remote_backup.py \
 - `missing` 或 `partial`：根据文件级状态核实宿主机路径，并覆盖对应的 `*_REMOTE_PATHS`。
 - `too_large`：确认文件确属灾备范围后，再评估是否提高 `DB_BACKUP_SSH_MAX_FILE_BYTES`。
 
-采集失败不会触发节点重启、配置回滚或 DNS 切换；这些属于独立运维流程。R2 仅保存加密灾备归档，不负责快速恢复。
+采集失败不会触发节点重启、配置回滚或 DNS 切换；这些属于独立运维流程。R2 通过 HTTPS 保存原始灾备归档，不负责快速恢复。

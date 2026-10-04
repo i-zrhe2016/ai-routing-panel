@@ -11,7 +11,7 @@
 - 读取 Xray API 与访问日志，提供流量、连接速率、探针和节点健康状态。
 - 识别 AI 域名并将相关流量转发到独立 AI 数据面，故障时自动回退。
 - 通过 Cloudflare DNS API 实现普通数据面故障切换和自动回切。
-- 定时备份 `panel.db`、业务附件和节点实际配置，生成带完整性清单的灾备归档；可选通过 Cloudflare R2 做异地保存，并能快速准备可直接启动的替换节点目录。
+- 定时备份 `panel.db`、业务附件和节点实际配置，生成带完整性清单的灾备归档；可选通过 HTTPS 将原始归档保存到 Cloudflare R2，并能快速准备可直接启动的替换节点目录。
 
 ## 架构概览
 
@@ -26,7 +26,7 @@
 | AI 数据面 | 接收 AI 流量并独立出站，不执行域名分类或控制面逻辑 |
 | `xray-ai-domain-manager` | 从访问日志生成 AI 域名路由产物和统计 |
 | `xray-reality-backup` | 普通数据面故障时提供备用入口 |
-| `upload_backup_r2.py` | 使用 AES-256-GCM 加密灾备归档并通过 R2 S3 API 上传 |
+| `upload_backup_r2.py` | 通过 HTTPS R2 S3 API 上传原始备份文件并记录完整性信息 |
 
 ## 流量与故障切换
 
@@ -46,13 +46,13 @@ AI 候选全部不可用时，流量按所在入口回退直出。AI 候选切�
 
 ## 灾备链路
 
-数据库快照、配置、业务附件与节点材料组成可校验归档，启用 R2 时再加密上传：
+数据库快照、配置、业务附件与节点材料组成可校验归档，启用 R2 时通过 HTTPS 上传原始归档：
 
-![灾备归档与加密上传流程](docs/diagrams/disaster-backup-flow.svg)
+![灾备归档与 R2 上传流程](docs/diagrams/disaster-backup-flow.svg)
 
 [PlantUML 源文件](docs/diagrams/disaster-backup-flow.puml) · [灾备归档](docs/disaster-backup.md) · [完整恢复准备](docs/node-recovery.md#完整灾备包恢复脚本)
 
-R2 保存离线归档，恢复脚本先准备隔离目录；服务替换与流量切换仍需人工验收。
+R2 保存离线归档，恢复脚本先准备隔离目录；历史 AES-256-GCM 归档仍可使用受保护的原密码解密恢复。服务替换与流量切换仍需人工验收。
 
 ## 快速开始
 
@@ -159,7 +159,7 @@ docker compose --profile backup-xray up -d xray-reality-backup
 - [灾备归档与 R2 上传通道](docs/disaster-backup.md) — 配置文件等额外内容的归档、R2 异地保留和离线恢复边界。
 - [节点配置采集](docs/remote-node-backup.md) — 同机普通数据面使用 broker 只读挂载，远端节点使用严格只读 SSH；本机 AI 配置随控制面归档。
 - [节点备份完整性与快速恢复](docs/node-recovery.md) — 节点必需材料校验和可直接启动的替换目录。
-- [Cloudflare R2 灾备上传](docs/db-backup-uploader.md) — 加密上传、对象命名、安全边界和人工恢复。
+- [Cloudflare R2 灾备上传](docs/db-backup-uploader.md) — 原始文件上传、R2 凭据配置、对象校验和人工恢复。
 
 ### 历史与停用文档
 
@@ -174,3 +174,4 @@ docker compose --profile backup-xray up -d xray-reality-backup
 - Xray 配置必须先渲染和校验，再同步并确认健康检查与探针恢复。
 - 管理接口应限制到受信任网络。
 - 数据库备份不能只验证任务成功，还应定期验证实际恢复流程。
+- 原始灾备归档包含敏感业务配置，本地目录与 R2 bucket 必须限制为授权备份和恢复人员可访问，见[灾备归档配置与权限](docs/disaster-backup.md#配置)。

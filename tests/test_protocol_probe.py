@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -363,3 +364,81 @@ def test_completed_request_metadata_boundaries_and_derived_outcome(http_status, 
     answer = ProtocolProbeRunner(ProbeConfig(ssh_target='root@probe'), execute=execute).probe_outbound(outbound(), 2)
     assert answer['ok'] is ok and answer['management_error'] is False
     assert (answer['http_status'], answer['curl_exit_code'], answer['duration_ms']) == (http_status, curl_exit, duration)
+
+
+def test_local_executor_is_explicit_bounded_and_uses_stdin():
+    from app.xray.protocol_probe import ProtocolProbeRunner, ProbeConfig
+    calls = []
+    def execute(command, prefix, timeout=None, input_text=None):
+        calls.append((command, timeout, input_text))
+        return subprocess.CompletedProcess(command, 0, json.dumps({
+            'ok': True, 'management_error': False, 'method': 'vless_reality',
+            'http_status': 204, 'curl_exit_code': 0, 'duration_ms': 1,
+            'stage': 'request', 'error': '', 'error_code': ''}), '')
+    runner = ProtocolProbeRunner(ProbeConfig(execution_mode='local',
+        script_path='/scripts/xray_protocol_probe.py', xray_bin='/probe/xray'), execute=execute)
+    answer = runner.probe_outbound(outbound(), 2)
+    assert answer['ok'] and answer['probe_origin'] == 'local'
+    command, timeout, stdin = calls.pop()
+    assert command == ['python3', '/scripts/xray_protocol_probe.py', '--xray-bin', '/probe/xray']
+    assert timeout == 8
+    assert json.loads(stdin)['outbound'] == validate_outbound(outbound())
+    assert outbound()['settings']['vnext'][0]['users'][0]['id'] not in ' '.join(command)
+
+
+@pytest.mark.parametrize('mode', ['', 'automatic', 'LOCAL'])
+def test_unknown_execution_mode_fails_closed_without_transport(mode):
+    from app.xray.protocol_probe import ProtocolProbeRunner, ProbeConfig
+    execute = mock.Mock()
+    answer = ProtocolProbeRunner(ProbeConfig(execution_mode=mode, ssh_target='root@probe'),
+                                 execute=execute).probe_outbound(outbound(), 2)
+    assert answer['management_error'] and answer['error_code'] == 'probe_executor_unconfigured'
+    execute.assert_not_called()
+
+
+def test_local_failure_never_falls_back_to_ssh():
+    from app.xray.protocol_probe import ProtocolProbeRunner, ProbeConfig
+    execute = mock.Mock(side_effect=RuntimeError('private-credential'))
+    runner = ProtocolProbeRunner(ProbeConfig(execution_mode='local', ssh_target='root@probe'), execute=execute)
+    answer = runner.probe_outbound(outbound(), 2)
+    assert answer['management_error'] and answer['error_code'] == 'probe_transport_failed'
+    assert len(execute.call_args_list) == 1
+    assert execute.call_args.args[0][0] == 'python3'
+    assert 'private-credential' not in json.dumps(answer)
+
+
+def test_environment_selects_local_script_and_preserves_ssh_default(monkeypatch):
+    from app.xray.protocol_probe import build_probe_runner
+    monkeypatch.delenv('PROBE_EXECUTION_MODE', raising=False)
+    monkeypatch.delenv('PROBE_REMOTE_SCRIPT', raising=False)
+    assert build_probe_runner().config.execution_mode == 'ssh'
+    monkeypatch.setenv('PROBE_EXECUTION_MODE', 'local')
+    config = build_probe_runner().config
+    assert config.execution_mode == 'local'
+    assert config.script_path.endswith('/scripts/xray_protocol_probe.py')
+    assert Path(config.script_path).is_file()
+
+
+@pytest.mark.parametrize('packaged', [False, True], ids=['repository', 'flattened-image'])
+def test_local_default_executes_imported_script_in_each_layout(tmp_path, monkeypatch, packaged):
+    from app.xray import protocol_probe
+    from scripts import xray_protocol_probe
+    layout = tmp_path / ('image' if packaged else 'repository')
+    app_dir = layout / 'app'
+    script_dir = app_dir / 'scripts' if packaged else layout / 'scripts'
+    script_dir.mkdir(parents=True)
+    script = script_dir / 'xray_protocol_probe.py'
+    script.write_bytes(Path(xray_protocol_probe.__file__).read_bytes())
+    module_path = app_dir / 'xray' / 'protocol_probe.py'
+    monkeypatch.setattr(protocol_probe, '__file__', str(module_path))
+    monkeypatch.setattr(xray_protocol_probe, '__file__', str(script))
+    monkeypatch.setenv('PROBE_EXECUTION_MODE', 'local')
+    monkeypatch.setenv('PROBE_XRAY_BIN', str(layout / 'missing-xray'))
+    monkeypatch.delenv('PROBE_REMOTE_SCRIPT', raising=False)
+    runner = protocol_probe.build_probe_runner()
+    assert runner.config.script_path == str(script)
+    answer = runner.probe_outbound(outbound(), 1)
+    # The actual Python process reached the standalone runner, with its precise
+    # fail-closed dependency result, rather than failing to locate its script.
+    assert answer['management_error']
+    assert answer['error_code'] == 'probe_dependency_missing'

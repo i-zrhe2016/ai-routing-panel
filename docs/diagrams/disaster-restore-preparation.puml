@@ -4,8 +4,8 @@ title 完整灾备包的隔离恢复准备
 
 start
 partition "脚本：restore_backup.py" {
-:选择本地 tar.gz 或 R2 下载的 .enc;
-if (加密归档？) then (是)
+:选择本地 / R2 tar.gz 或历史 .enc;
+if (历史加密归档？) then (是)
   :从受保护文件或环境变量读取密码\n验证并解密到临时文件;
 endif
 :校验归档路径、文件大小与 SHA-256\n检查两层 manifest;

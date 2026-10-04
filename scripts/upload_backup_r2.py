@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Encrypt and upload disaster bundles to Cloudflare R2 via its S3 API."""
+"""Upload raw backup files to Cloudflare R2 via its S3 API."""
 import hashlib
 import json
 import os
@@ -44,7 +44,10 @@ def normalize_endpoint(endpoint, bucket):
 
 
 def encrypt_bundle(bundle_path, output_path=None, password=None):
-    """Encrypt a bundle with AES-256-GCM using a password-derived key."""
+    """Legacy-format helper for historical encrypted restore fixtures.
+
+    New backup cycles upload the raw file and never call this helper.
+    """
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         from cryptography.hazmat.primitives.kdf.scrypt import Scrypt

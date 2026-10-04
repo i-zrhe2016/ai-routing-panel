@@ -74,7 +74,7 @@ python3 scripts/node_recovery.py validate \
 [PlantUML 源文件](diagrams/disaster-restore-preparation.puml)
 
 如果需要同时准备控制面、数据库、用户附件和两个节点的配置，使用
-`scripts/restore_backup.py`。它支持本地明文 `tar.gz` 和从 R2 下载的加密
+`scripts/restore_backup.py`。它支持本地或从 R2 下载的原始 `tar.gz`，以及历史加密
 `.enc` 文件；加密密码只能通过受保护的密码文件或环境变量提供，不要写进命令
 行参数。脚本先完成归档和两层 manifest 校验，再开始写入输出目录。
 
@@ -94,7 +94,7 @@ python3 scripts/restore_backup.py prepare \
   --output-dir /tmp/xray-panel-restore
 ```
 
-加密归档示例：
+历史加密归档示例：
 
 ```bash
 python3 scripts/restore_backup.py prepare \

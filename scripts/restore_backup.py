@@ -3,7 +3,7 @@
 
 The backup pipeline deliberately produces an offline recovery artifact.  This
 script is the corresponding safe restore entry point: it accepts the plain
-bundle kept locally or the AES-256-GCM encrypted object uploaded to R2,
+bundle kept locally or downloaded from R2, including historical AES-256-GCM objects,
 validates both manifests, and materializes a portable recovery tree.  It never
 opens SSH, starts Docker, changes DNS, or replaces a live file automatically.
 """

@@ -49,7 +49,6 @@ set -eu
 : "${DB_BACKUP_R2_REGION:=auto}"
 : "${DB_BACKUP_R2_PREFIX:=xray-routing-panel}"
 : "${DB_BACKUP_R2_RECORD_PATH:=/backups/r2-upload-record.json}"
-: "${DB_BACKUP_ENCRYPTION_PASSWORD:=}"
 
 ENV_FILE=/etc/xray-routing-panel-db-backup.env
 CRON_FILE=/etc/cron.d/xray-routing-panel-db-backup
@@ -111,7 +110,6 @@ write_env DB_BACKUP_R2_SECRET_ACCESS_KEY "$DB_BACKUP_R2_SECRET_ACCESS_KEY"
 write_env DB_BACKUP_R2_REGION "$DB_BACKUP_R2_REGION"
 write_env DB_BACKUP_R2_PREFIX "$DB_BACKUP_R2_PREFIX"
 write_env DB_BACKUP_R2_RECORD_PATH "$DB_BACKUP_R2_RECORD_PATH"
-write_env DB_BACKUP_ENCRYPTION_PASSWORD "$DB_BACKUP_ENCRYPTION_PASSWORD"
 
 cat >"$CRON_FILE" <<EOF
 SHELL=/bin/sh
