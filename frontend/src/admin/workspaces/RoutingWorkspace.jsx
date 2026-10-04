@@ -44,9 +44,11 @@ function modeForCandidate(candidate) {
 
 function effectiveOutlet(panel) {
   const graph = buildTrafficTopology(panel);
-  const outlet = graph.nodes.find((node) => node.state === "active" && (node.kind === "ai" || node.kind === "direct"));
+  const outlet = graph.nodes.find((node) => node.state === "active" && (node.kind === "ai" || node.kind === "relay"))
+    || (["normal_fallback", "normal_direct", "dns_backup_direct"].includes(graph.path)
+      ? graph.nodes.find((node) => node.state === "active" && node.kind === "direct") : null);
   if (!outlet) return { label: "出口待确认", detail: graph.warning || graph.scenario };
-  if (outlet.kind === "ai") return { label: outlet.label, detail: outlet.address };
+  if (outlet.kind === "ai" || outlet.kind === "relay") return { label: outlet.label, detail: outlet.address };
   return {
     label: outlet.id === "normal-direct" ? "普通数据面" : "控制面备用",
     detail: outlet.id === "normal-direct" ? "freedom 直出 · 按当前流量路径回退或直出" : "备用入口 freedom 直出",

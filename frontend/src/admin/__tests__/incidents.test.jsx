@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import App from "../App.jsx";
 import IncidentRecords from "../components/IncidentRecords.jsx";
 import { PanelProvider } from "../state/PanelProvider.jsx";
 import { createFakeApi } from "./fixtures.jsx";
@@ -14,6 +15,18 @@ function mount(get) {
 }
 
 describe("automatic fault records", () => {
+  it("opens fault records from retained Hosts navigation without restoring diagnostics", async () => {
+    const user = userEvent.setup();
+    const api = createFakeApi();
+    const original = api.get;
+    api.get = (url) => url === "/api/probe-incidents" ? Promise.resolve({ incidents: [incident] }) : original(url);
+    render(<PanelProvider api={api} pollInterval={0} insightsInterval={0}><App /></PanelProvider>);
+    await user.click(await screen.findByRole("button", { name: /^主机/ }));
+    expect(await screen.findByRole("heading", { name: "Codex 故障记录" })).toBeTruthy();
+    expect(await screen.findByText("分析完成")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "故障排查" })).toBeNull();
+  });
+
   it("shows origin, source, lifecycle and escaped report with keyboard focus", async () => {
     const user = userEvent.setup();
     mount(async (url) => url.endsWith("/report") ? { report: '<script>alert("x")</script>\n## Facts' } : { incidents: [incident] });

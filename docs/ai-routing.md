@@ -18,8 +18,8 @@ AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过内网
 
 1. 每小时读取最近一小时普通数据面 `access.log`；远端 SSH 模式直接在数据面读取，避免把整份日志复制到控制面
 2. 先应用内建 AI 域名规则
-3. 对未知域名优先调用本机 `codex`
-4. 如 `codex` 不可用，再回退到 OpenAI 兼容接口
+3. 对未知域名调用 OpenRouter 分类器
+4. 分类失败的域名保留待分类状态，已有分类记录继续使用
 5. 所有已知 `ai` / `not_ai` 分类先持久化到 `panel.db` 的 `ai_domain_classifications`；仅将已观测 AI 域名的命中统计写入 `ai_domains` 和 `ai_domain_observations`
 6. 生成只包含 AI 域名的动态路由、小时报表
 7. 探测主、备 AI 候选并按当前模式选择目标
@@ -140,22 +140,13 @@ AI 节点恢复后，下一轮探测到可达，重新生成 `dynamic-routing.js
 
 如果模板不存在，管理器会回退到内建 `freedom redirect`。
 
-## Codex / OpenAI 兼容分类器
+## 域名分类器
 
-默认 compose 会挂载宿主机这些路径，以便容器调用本机 `codex`：
+默认分类器和密钥文件部署方式见 [域名分类器配置](configuration.md#域名分类器)。内建已知 AI 域名先匹配，已缓存的历史分类保持其原始来源和模型；只对未知域名请求分类器。每个成功批次原子接受完整结果并持久化，后续批次失败时保留已完成的批次和剩余待分类域名。小时报告保留每个域名的分类来源与实际模型。
 
-- `/root/.codex`
-- `/root/.nvm/versions/node`
+未知域名分类失败时不加入 AI 动态路由，继续普通数据面的默认直出。已有 AI 域名历史不因 provider 不可用而清除。
 
-如果你的环境不是这些路径：
-
-- 调整 `docker-compose.yml` 中的挂载
-- 或在 `app/xray/.env` 中设置 `CODEX_CLI_JS` / `CODEX_BIN`
-
-如果没有可用的 `codex` 或 OpenAI 兼容接口：
-
-- 内建已知 AI 域名仍会命中
-- 未知域名不会自动得到 AI / 非 AI 分类
+旧 Codex/OpenAI 兼容路径仍可显式启用；Compose 保留 `/root/.codex` 只读挂载供该路径使用。非默认宿主机路径需调整挂载或配置 `CODEX_CLI_JS` / `CODEX_BIN`。
 
 ## MCP 工具
 

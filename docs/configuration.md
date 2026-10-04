@@ -233,17 +233,22 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 
 ### 域名分类器
 
-- `CODEX_CLASSIFIER_ENABLED`
-- `CODEX_TIMEOUT_SECONDS`
-- `CODEX_MODEL`
-- `CODEX_CLI_JS`
-- `CODEX_BIN`
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- `OPENAI_BASE_URL`
-- `OPENAI_ALLOW_NO_KEY`
+`AI_DOMAIN_CLASSIFIER_PROVIDER` 默认 `openrouter`，直接调用固定 HTTPS OpenRouter Chat Completions 接口；模型默认 `openai/gpt-5-nano`，使用严格 JSON Schema，不发送工具或 `temperature`。
 
-如果本机 `codex` 不可用，AI 管理器会回退到 OpenAI 兼容接口。
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `OPENROUTER_MODEL` | `openai/gpt-5-nano` | 分类模型。 |
+| `OPENROUTER_API_KEY_FILE` | 空 | 密钥文件，设置后优先于环境密钥；每次请求重新读取。 |
+| `OPENROUTER_API_KEY` | 空 | 直接运行时的环境密钥。 |
+| `OPENROUTER_API_KEY_HOST_PATH` | 空 | Compose 在宿主机读取的文件路径，只读挂载到容器 `/run/secrets/openrouter_api_key`；留空时挂载 `/dev/null`。 |
+| `OPENROUTER_TIMEOUT_SECONDS` | `90` | 请求超时秒数。 |
+| `OPENROUTER_MAX_OUTPUT_TOKENS` | `8192` | 输出上限，取值 1–128000。 |
+
+部署前在仓库外创建权限为 `0600` 的密钥文件，将根环境文件中的 `OPENROUTER_API_KEY_HOST_PATH` 指向该文件。不要提交文件内容或把密钥写进 Compose；显式配置的文件不存在时 Compose 不自动创建目录，设置后无法读取时也不回退到环境密钥。容器读取 `app/xray/.env`，容器环境覆盖该文件中的同名配置；Compose 的 provider、model 和请求限制使用根环境配置。
+
+模型结果必须完整覆盖本批域名，不能重复、遗漏或返回未知域名；成功记录 `source=openrouter`、实际返回模型和分类理由。凭证缺失、认证失败或输出无效时保留待分类状态，不回退到其他模型。分类状态和路由行为见 [AI 路由](ai-routing.md)。
+
+显式设置 `AI_DOMAIN_CLASSIFIER_PROVIDER=legacy` 才启用旧 Codex 优先、OpenAI 兼容接口回退路径；其 `CODEX_CLASSIFIER_ENABLED`、`CODEX_TIMEOUT_SECONDS`、`CODEX_MODEL`、`CODEX_CLI_JS`、`CODEX_BIN` 和 `OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_BASE_URL`、`OPENAI_ALLOW_NO_KEY` 配置继续有效。
 
 ## 模式相关注意事项
 

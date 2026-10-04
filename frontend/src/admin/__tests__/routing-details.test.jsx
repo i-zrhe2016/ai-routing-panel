@@ -144,7 +144,7 @@ describe("detailed AI routing", () => {
     const panel = snapshot();
     const view = show(panel);
     expect(within(metric("当前出口")).getByText("普通数据面")).toBeTruthy();
-    const recovered = { ...panel, trafficRouting: { path: "normal_ai" }, aiRoutingStatus: { ...panel.aiRoutingStatus, ai_candidates: [{ ...panel.aiRoutingStatus.ai_candidates[0], is_reachable: true }] } };
+    const recovered = { ...panel, trafficRouting: { path: "normal_ai", ai_branch_state: "active", ordinary_direct_state: "active" }, aiRoutingStatus: { ...panel.aiRoutingStatus, status: "applied", report_generated_at: "2026-10-02T12:30:00+00:00", ai_candidates: [{ ...panel.aiRoutingStatus.ai_candidates[0], is_reachable: true }] } };
     usePanel.mockReturnValue(recovered);
     view.rerender(<RoutingWorkspace />);
     expect(within(metric("当前出口")).getByText("主 AI")).toBeTruthy();

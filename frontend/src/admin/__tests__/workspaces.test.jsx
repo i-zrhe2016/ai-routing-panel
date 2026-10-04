@@ -110,38 +110,6 @@ describe("traffic workspace", () => {
   });
 });
 
-describe("diagnostics workspace", () => {
-  it("lists probe failures, failover events and the diagnosis result", async () => {
-    const user = userEvent.setup();
-    renderConsole(createFakeApi());
-    await screen.findByRole("heading", { name: "系统总览" });
-    await openWorkspace(user, "故障排查");
-
-    expect(await screen.findByRole("heading", { name: "故障后排查" })).toBeTruthy();
-    expect(screen.getAllByText("connection refused").length).toBeGreaterThan(0);
-    expect(screen.getByText("切换 · 成功 · 控制面备用 Xray")).toBeTruthy();
-    expect(screen.getByText("1 个端口最近探测失败")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "运行数据面体检" }));
-    expect(await screen.findByText("Reality shortId")).toBeTruthy();
-    expect(screen.getByText("不一致")).toBeTruthy();
-  });
-
-  it("renders the empty state when no probe history exists", async () => {
-    const user = userEvent.setup();
-    const insights = makeInsights({
-      probes: { ports: [], recent_failures: [], total_checks: 0, unhealthy_checks: 0, uptime_ratio: "0.0" },
-      failover_events: { events: [], total_events: 0 },
-    });
-    renderConsole(createFakeApi({ insights }));
-    await screen.findByRole("heading", { name: "系统总览" });
-    await openWorkspace(user, "故障排查");
-
-    expect(await screen.findByText(/暂无探测记录/)).toBeTruthy();
-    expect(screen.getByText("暂无切换事件。")).toBeTruthy();
-  });
-});
-
 describe("delivery workspace", () => {
   it("creates a port with the form payload", async () => {
     const user = userEvent.setup();

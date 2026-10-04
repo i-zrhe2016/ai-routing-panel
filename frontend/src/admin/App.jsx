@@ -6,7 +6,6 @@ import { Loader, Notice, StatusPill } from "./components/ui.jsx";
 import { useDialogFocus } from "./components/useDialogFocus.js";
 import { usePanel } from "./state/PanelProvider.jsx";
 import DeliveryWorkspace from "./workspaces/DeliveryWorkspace.jsx";
-import DiagnosticsWorkspace from "./workspaces/DiagnosticsWorkspace.jsx";
 import HostsWorkspace from "./workspaces/HostsWorkspace.jsx";
 import OverviewWorkspace from "./workspaces/OverviewWorkspace.jsx";
 import RoutingWorkspace from "./workspaces/RoutingWorkspace.jsx";
@@ -17,7 +16,6 @@ const WORKSPACES = [
   { key: "overview", label: "总览", description: "系统健康与待处理", group: "运行监控" },
   { key: "hosts", label: "主机", description: "数据面与纳管节点", group: "运行监控" },
   { key: "traffic", label: "流量", description: "使用趋势与端口负载", group: "运行监控" },
-  { key: "diagnostics", label: "故障排查", description: "探测、切换与体检", group: "运行监控" },
   { key: "topology", label: "流量拓扑", description: "当前路径与候选出口", group: "运行监控" },
   { key: "routing", label: "AI 路由", description: "出口策略与候选节点", group: "配置与业务" },
   { key: "delivery", label: "交付", description: "端口与订阅链接", group: "配置与业务" },
@@ -27,7 +25,6 @@ const WORKSPACE_COMPONENTS = {
   overview: OverviewWorkspace,
   hosts: HostsWorkspace,
   traffic: TrafficWorkspace,
-  diagnostics: DiagnosticsWorkspace,
   routing: RoutingWorkspace,
   delivery: DeliveryWorkspace,
   topology: TopologyWorkspace,
@@ -59,9 +56,6 @@ export default function App() {
 
   const meta = WORKSPACES.find((item) => item.key === activeWorkspace) || WORKSPACES[0];
   const ActiveWorkspace = WORKSPACE_COMPONENTS[activeWorkspace];
-  const badges = {
-    diagnostics: panel.insights?.probes?.recent_failures?.length || 0,
-  };
   const lastRefreshLabel = panel.meta?.dashboard_updated_at_display || panel.meta?.updated_at_display || "自动刷新 15 秒";
   const syncing = panel.loading || refreshing;
   const dataPlaneTone = panel.dataPlaneStatus?.xray_running === true ? "success" :
@@ -110,7 +104,7 @@ export default function App() {
               <p className="brand-kicker">控制中心</p>
             </div>
           </div>
-          <WorkspaceNav items={WORKSPACES} activeKey={activeWorkspace} onSelect={selectWorkspace} badges={badges} />
+          <WorkspaceNav items={WORKSPACES} activeKey={activeWorkspace} onSelect={selectWorkspace} />
           <div className="sidebar-status-stack">
             <p className="sidebar-section-label">节点状态</p>
             <div className="sidebar-status-card">

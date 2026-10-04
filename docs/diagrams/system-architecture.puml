@@ -42,8 +42,8 @@ panel --> manager : 调度与人工模式
 manager ..> normalXray : 日志观测 / 路由产物
 panel ..> normalXray : 配置与节点管理
 client ..> backup : DNS 切换后的入口
-backup ..> aiXray : AI 可用时 relay
-backup ..> internet : AI 不可用时直出
+backup ..> aiXray : 配置为 relay 时中继全部域名
+backup ..> internet : 配置为 freedom 时直出全部域名
 
 
 note right of control

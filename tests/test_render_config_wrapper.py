@@ -209,7 +209,7 @@ class BackupRelayConfigTest(unittest.TestCase):
         from app.xray.render_config import build_backup_relay_outbound
 
         with self.assertRaises(ValueError):
-            build_backup_relay_outbound("https://nat.qq.pw:443")
+            build_backup_relay_outbound("https://example.com:443")
 
     def test_backup_relay_requires_reality_params(self):
         from app.xray.render_config import build_backup_relay_outbound

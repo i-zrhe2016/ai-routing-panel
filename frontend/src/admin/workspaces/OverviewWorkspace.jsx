@@ -71,7 +71,7 @@ export default function OverviewWorkspace({ onOpenWorkspace }) {
           className="overview-attention"
           title="待办与异常"
           description="依据当前快照，优先处理影响连接的事项。"
-          actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("diagnostics")}>故障排查</button>}
+          actions={<button className="a-btn ghost" type="button" onClick={() => onOpenWorkspace("topology")}>查看流量路径</button>}
         >
           <ul className="cc-checklist">
             {checklist.map((item) => (

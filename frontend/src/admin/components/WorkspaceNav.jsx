@@ -2,7 +2,6 @@ const ICONS = {
   overview: "M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z",
   hosts: "M5 4h14v6H5V4Zm0 10h14v6H5v-6Zm3-7h.01M8 17h.01",
   traffic: "M4 17V9m5 8V5m5 12v-6m5 6V3",
-  diagnostics: "M12 8v5m0 3h.01M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z",
   routing: "M4 6h6l2 3h8M4 18h6l2-3h8M12 9v6",
   delivery: "M4 6h16M4 12h16M4 18h10",
   topology: "M3 10h5v5H3zM16 3h5v5h-5zM16 16h5v5h-5zM8 12h4M12 5v14M12 5h4M12 19h4",

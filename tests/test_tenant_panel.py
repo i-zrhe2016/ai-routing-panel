@@ -156,8 +156,8 @@ class TenantPanelTest(unittest.TestCase):
         self.assertIn("no-store", response.headers["Cache-Control"])
         self.assertEqual(response.headers["Pragma"], "no-cache")
         body = response.get_data(as_text=True)
-        self.assertIn("admin.js?v=20261003-beijing-time", body)
-        self.assertIn("admin.css?v=20261003-beijing-time", body)
+        self.assertIn("admin.js?v=20261003-main-integration", body)
+        self.assertIn("admin.css?v=20261003-main-integration", body)
 
     def seed_ai_domain_dashboard(self):
         report_path = self.panel.state.data_plane.config.source_ai_report_path
