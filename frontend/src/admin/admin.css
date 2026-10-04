@@ -963,3 +963,10 @@ textarea.a-input { height: auto; min-height: 100px; padding-top: 10px; resize: v
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+
+.cc-incident-list { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 16px; padding: 0; list-style: none; }
+.cc-incident-list > li { min-width: 0; padding: 16px; border: 1px solid var(--border-color, #d5dce6); border-radius: 10px; overflow-wrap: anywhere; }
+.cc-incident-list .cc-toolbar__group, .cc-incident-list strong { min-width: 0; max-width: 100%; }
+.cc-incident-list p.cc-tone { display: block; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.cc-incident-report { width: min(900px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
+.cc-incident-report pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }

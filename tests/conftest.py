@@ -16,6 +16,7 @@ handlers on the next import. It only affects test setup.
 """
 
 import sys
+from types import ModuleType
 
 import pytest
 
@@ -24,9 +25,18 @@ def _app_module_names():
     return [name for name in sys.modules if name == "app" or name.startswith("app.")]
 
 
+def _is_app_module(value):
+    return isinstance(value, ModuleType) and (value.__name__ == "app" or value.__name__.startswith("app."))
+
+
 @pytest.fixture(autouse=True)
 def _isolate_app_modules():
     saved = {name: sys.modules[name] for name in _app_module_names()}
+    saved_package_attrs = {
+        name: dict(vars(module))
+        for name, module in saved.items()
+        if hasattr(module, "__path__")
+    }
     web_core = saved.get("app.web.core")
     saved_registrations = {
         name: list(getattr(web_core, name))
@@ -43,11 +53,16 @@ def _isolate_app_modules():
         for name in _app_module_names():
             sys.modules.pop(name, None)
         sys.modules.update(saved)
-        # Restoring the sys.modules dict is not enough: a reload rebinds the
-        # parent package's submodule attribute (e.g. app.xray.google_search_mcp),
-        # which mock.patch's dotted-name lookup walks. Re-attach each saved
-        # submodule to its parent so string-target patches resolve correctly.
-        for name, module in saved.items():
-            parent_name, _, child = name.rpartition(".")
-            if parent_name and parent_name in sys.modules:
-                setattr(sys.modules[parent_name], child, module)
+        # Imports also bind children on retained packages. Restore those
+        # bindings, including removing children first imported by this test;
+        # otherwise `from app import config` can bypass the restored module table.
+        for name, original_attrs in saved_package_attrs.items():
+            package = saved[name]
+            current_attrs = vars(package)
+            for child in original_attrs.keys() | current_attrs.keys():
+                if not (_is_app_module(original_attrs.get(child)) or _is_app_module(current_attrs.get(child))):
+                    continue
+                if child in original_attrs:
+                    setattr(package, child, original_attrs[child])
+                else:
+                    delattr(package, child)

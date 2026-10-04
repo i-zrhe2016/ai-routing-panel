@@ -24,6 +24,8 @@ GET,HEAD,OPTIONS|/api/dns-failover|api_dns_failover_status|app.web.admin_api|sou
 GET,HEAD,OPTIONS|/api/insights|api_insights|app.web.admin_api|source-allowlist
 GET,HEAD,OPTIONS|/api/orders|api_orders|app.web.admin_api|source-allowlist
 GET,HEAD,OPTIONS|/api/plans|api_plans|app.web.admin_api|source-allowlist
+GET,HEAD,OPTIONS|/api/probe-incidents/<incident_id>/report|api_probe_incident_report|app.web.admin_api|source-allowlist
+GET,HEAD,OPTIONS|/api/probe-incidents|api_probe_incidents|app.web.admin_api|source-allowlist
 GET,HEAD,OPTIONS|/api/tenant/<tenant_token>/subscription|api_tenant_subscription|app.web.customer_api|source-allowlist+tenant-session
 GET,HEAD,OPTIONS|/customer/dashboard|customer_dashboard|app.web.customer_views|source-allowlist+customer-session
 GET,HEAD,OPTIONS|/customer/orders/<order_no>|customer_order_detail|app.web.customer_views|source-allowlist+customer-session

@@ -106,7 +106,7 @@
 `app/xray/node/controller.py` 中的 `NodeController` 按以下优先级选择 backend，对普通数据面和 AI 节点均适用：
 
 - `backend.py` 定义 `DataPlaneConfig` 与 `NodeBackend` 契约；`ssh.py`、`docker.py`、`local.py` 分别封装 SSH、Docker、本地进程操作
-- `probes.py` 负责 TCP、REALITY、API socket 和公网 IP 探测；`files.py` 负责远端文件同步、日志增量和数据库快照
+- `node/probes.py` 保留管理兼容性探测、API socket 和公网 IP 查询；`protocol_probe.py` 通过独立 SSH 主机执行业务 VLESS + REALITY 请求；`files.py` 负责远端文件同步、日志增量和数据库快照
 - 节点类型的 canonical import 是 `app.xray.node`；旧的 `app.xray.node_control` 路径已删除，不再作为受支持的导入入口
 
 1. `ssh`
@@ -145,7 +145,7 @@ AI 节点当前目标使用 `ssh` 模式；未设置远端目标时才使用 `do
 7. `xray-ai-domain-manager` 每小时从普通数据面 `access.log` 读取域名，探测已配置的 AI 候选，将 AI 观测写入 `panel.db`，并输出只含 AI 域名的路由产物；人工切换会立即触发一次 `--once` 重算。
 8. AI 域名流量通过 `dynamic-routing.json` 转发到台湾 AI 主节点；原主节点已从生产候选池和纳管清单移除。
 9. 非 AI 域名不进入 `dynamic-routing.json`，由普通数据面的默认 `freedom` 在 DMIT 直出；自动模式下所有候选不可达，或人工固定目标不可达时，管理器删除 `dynamic-routing.json`，AI 流量也回退数据面 freedom 直出。
-10. 独立 DNS 故障切换 worker 对数据面公网入口做 TCP 探测，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
+10. 独立 DNS 故障切换 worker 通过独立执行主机对主数据面入口做认证 VLESS + REALITY 请求，并在达到阈值时调用 Cloudflare API 更新单条记录；它与数据面日志、流量和配置同步任务隔离。
 11. 数据面故障时 DNS 切到控制面备用。控制面探测 AI 节点可达性：AI 节点正常 → relay 模式转发到 AI 节点；AI 节点也故障 → 自动切换为直出模式。
 12. `xray-routing-panel-db-backup` 按 cron 生成 `backups/*.db`，先通过 `collect_remote_backup.py` 只读采集普通数据面，再生成带 `backup-manifest.json` 和 `node-recovery-manifest.json` 的 `backups/*-disaster-*.tar.gz`；控制面 AI 运行时产物来自 `config/`，远端 AI 节点保持独立配置，校验结果写入 `node-recovery-status.json`，启用时调用 Cloudflare R2 上传加密灾备归档。
 13. 首页读取三节点状态、已配置 AI 候选、流量导向路径、`ai_routing_status`、`dns_failover_status` 和 AI 域名聚合结果。

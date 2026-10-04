@@ -42,7 +42,7 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/dashboard` | 获取首页完整状态 |
-| `GET` | `/api/insights` | 只读历史快照：主机清单、按天流量序列、探针可用性、DNS 切换事件；可选 `days`（1–30，默认 14）。不触发同步、配置下发或节点操作 |
+| `GET` | `/api/insights` | 只读历史快照：主机清单、按天流量序列、探针可用性、DNS 切换事件；可选 `days`（1–30，默认 1）。不触发同步、配置下发或节点操作 |
 | `POST` | `/api/ports` | 新建监听端口 |
 | `PUT` | `/api/ports/<port_id>` | 更新端口配置 |
 | `POST` | `/api/ports/<port_id>/toggle` | 启用或停用端口 |
@@ -88,13 +88,18 @@
 ## 创建 / 更新端口字段
 
 - `listen_port`
-  - 必填，范围 `1-65535`
+  - 创建时可省略、设为 `null` 或留空，服务端在创建事务内自动分配端口；区间配置见[配置说明](configuration.md#租户端口自动分配)。显式指定时范围为 `1-65535`。
+  - 更新时必填，不会自动重新分配。
 - `expires_at`
   - 可选，格式示例：`2026-06-30T20:00`
 - `traffic_limit`
   - 可选，支持 `10G`、`500MB`、`1048576`
 - `note`
   - 可选，最多 `200` 字符
+
+创建成功返回 `201`，包含 `created_port_id` 和最新 `dashboard`，后台据此选中新租户。自动分配区间未配置或已耗尽时返回 `400`，不创建租户记录。
+
+流量工作区提供今日、近 7 天、近 30 天三种范围。今日从北京时间的 00:00 起算；近 7/30 天包含今日及之前 6/29 个自然日。区间卡片、端口表和曲线均使用该窗口的统计，累计配额使用量单独标注。旧版本已按其他时区日期汇总的历史日数据无法无损重新划分，新写入统一按北京时间日期归档。时区约定见[配置说明](configuration.md)。
 
 示例：
 
@@ -157,3 +162,10 @@ curl -u admin:secret \
 - `ok` 受 `PANEL_HEALTH_REQUIRES_XRAY` 影响
 - `data_plane_running` 反映当前普通数据面是否可用
 - `ai_node_running` 反映 AI 节点是否可达（目标态）
+
+## 自动探测故障文档
+
+- `GET /api/probe-incidents`：返回 `{ok, incidents}`，最近最多 100 条。每条保留来源、目标、探测来源、`node_failure/executor_error` 分类、首次/最近失败时间、次数、恢复时间和 `queued/running/completed/failed` 分析状态。
+- `GET /api/probe-incidents/<incident_id>/report`：返回 `{ok, report}`，`report` 是私有 Markdown 的纯文本。ID 必须为固定 32 位十六进制值；不存在、无效路径、符号链接或超限报告返回 `404`。响应禁止缓存。
+
+两个接口沿用面板内网/Tailscale 来源访问限制，不发布生产认证资料。生命周期与报告边界见[运维与排障](operations.md#codex-自动故障记录)。

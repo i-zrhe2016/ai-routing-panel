@@ -20,10 +20,14 @@ AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过内网
 2. 先应用内建 AI 域名规则
 3. 对未知域名调用 OpenRouter 分类器
 4. 分类失败的域名保留待分类状态，已有分类记录继续使用
-5. 仅将已观测且分类为 `ai` 的域名写入 `panel.db` 的 `ai_domains` 和 `ai_domain_observations`，历史 AI 域名保留累计结果
+5. 所有已知 `ai` / `not_ai` 分类先持久化到 `panel.db` 的 `ai_domain_classifications`；仅将已观测 AI 域名的命中统计写入 `ai_domains` 和 `ai_domain_observations`
 6. 生成只包含 AI 域名的动态路由、小时报表
 7. 探测主、备 AI 候选并按当前模式选择目标
 8. 路由变化时重新渲染并重启数据面
+
+健康周期默认每 30 秒独立执行，小时分类在单独的分析线程和锁下运行，不持有配置应用锁等待分类器。健康周期从 SQLite 与原子分类缓存复用已知域名，探测、应用回退或恢复配置，只更新最新路由报告；不读取日志、不调用分类器、不新增小时观测或历史报告。分类阶段完成后，再在人工模式锁与配置应用锁内重新读取当前分类和模式应用配置。
+
+JSON 分类缓存缺失或损坏时从数据库恢复；已有 `ai_domains` 也可作为旧版本历史分类来源。缓存保存 AI 和普通域名分类、来源、原因与分类时间，避免故障后重新调用分类器。外部配置应用失败不会撤销已保存分类；AI 上游全部不可达时，已分类 AI 域名回到普通数据面 freedom 直出，自动模式在候选恢复可达后复用历史分类重新分流。
 
 内建强制 AI 域名族覆盖 ChatGPT/OpenAI（`chatgpt.com`、`openai.com`、`oaistatic.com`、`oaiusercontent.com`）、Claude/Anthropic（`claude.ai`、`anthropic.com`、`claude.com`、`claudeusercontent.com`）和 AWS。AWS 规则覆盖服务端点（`amazonaws.com`、`amazonaws.com.cn`、`amazonwebservices.com.cn`、`api.aws`、`on.aws`）、控制台与静态资源（`aws.amazon.com`、`awsstatic.com`、`awsplayer.com`、`awscloud.com`）、Identity Center（`awsapps.com`、`awsapps.cn`）以及 AWS 专用域名族（`aws.dev`、`aws`、`aws.a2z.com`、`aws.a2z.org.cn`）。这些域名的子域名也会匹配；`amazon.com`、`cloudfront.net` 和 `live-video.net` 属于共享范围较大的域名族，未纳入全量规则，以免把非 AWS 流量一并转发；实际观测到的域名才写入数据库聚合表。
 
@@ -49,7 +53,7 @@ AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALIT
 - `app/xray/runtime/dynamic-routing.json`
 - `app/xray/reports/hourly-domains/latest.json`
 - `app/xray/reports/hourly-domains/latest.txt`
-- `data/panel.db` 中仅保存已观测且分类为 `ai` 的域名及每小时窗口观测
+- `data/panel.db`：`ai_domains` / `ai_domain_observations` 保存已观测 AI 域名统计；`ai_domain_classifications` 保存所有已知 AI / 普通域名分类，供路由恢复复用。
 
 ## AI 上游选择
 
@@ -73,7 +77,7 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 
 配置 `AI_NODE_SSH_TARGET` 只代表控制面能够纳管节点，不证明隧道凭据匹配，也不会安全地产生 relay URL。启用控制面备用 relay 时，必须显式提供与 AI inbound 匹配的 `CONTROL_PLANE_BACKUP_UPSTREAM_URL`；否则保持 relay 能力关闭。
 
-管理器优先从普通数据面探测 AI 上游。模板或分享链接提供 REALITY SNI 时执行握手探测，否则使用 TCP 探测；首个不可达时切换到下一个可达上游。
+管理器经独立执行主机使用实际渲染的候选 outbound 凭据运行认证 VLESS + REALITY 请求；首个协议不可达时切换到下一个可达上游。执行细节与失败语义见[协议探测运维](operations.md#协议探测)。
 
 选择模式：
 
@@ -116,7 +120,7 @@ AI 上游即 AI 节点的公网入口地址。常见配置方式有两种：
 管理员也可以在控制台总览中主动执行“切到主 AI”“切到备用 AI”“恢复自动探测”或“AI 全部直出”。
 管理器应用成功后才把这些模式写入控制面数据库的 `app_state`；API 形式见 [API 与页面路径](api.md)。
 
-如果普通数据面管理通道本身探测失败，报告会标记 `probe_error`，并停止继续下发 AI 动态路由；修复 SSH 后下一轮会重新探测并恢复或回退。
+如果独立探测执行主机或凭据配置异常，报告标记 `probe_error` 并保留此前选择与动态路由片段；修复后下一轮重新探测。不会把执行故障解释为所有候选不可达。
 
 AI 节点恢复后，下一轮探测到可达，重新生成 `dynamic-routing.json`，AI 流量恢复转发到 AI 节点。
 

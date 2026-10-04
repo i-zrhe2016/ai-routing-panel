@@ -10,7 +10,7 @@ from pathlib import Path
 from app.xray.config import DEFAULT_RENDER_MODULE
 
 from .candidates import join_host_port
-from .common import PLACEHOLDER_RE, env_bool, env_int, format_timestamp, save_json
+from .common import PLACEHOLDER_RE, env_bool, env_int, format_timestamp, load_json, save_json
 from .selector import summarize_ai_target_for_report
 
 UNSET_PROXY_PROTOCOL = "replace_me"
@@ -174,58 +174,59 @@ def write_routing_fragment(path, ai_domains, proxy_payload):
     return True
 
 
-def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, route_status):
+def build_traffic_route(classification, ai_target, route_status):
     route_status_code = str(route_status.get("status", "unknown") or "unknown").strip()
-
-    def domain_route(classification):
-        if classification != "ai":
-            return {
-                "outbound_tag": "direct",
-                "path": "normal_data_plane",
-                "target": None,
-                "status": route_status_code,
-                "reason": "classification_not_ai",
-            }
-        if route_status_code == "applied":
-            target = None
-            if isinstance(ai_target, dict):
-                target_host = str(ai_target.get("upstream_host", "")).strip()
-                try:
-                    target_port = int(ai_target.get("upstream_port"))
-                except (TypeError, ValueError):
-                    target_port = None
-                if target_host and target_port:
-                    target = {"upstream_host": target_host, "upstream_port": target_port}
-            return {
-                "outbound_tag": "ai_proxy",
-                "path": "ai_node",
-                "target": target,
-                "status": route_status_code,
-                "reason": str(route_status.get("reason", "") or "").strip(),
-            }
-        if route_status_code in {
-            "disabled",
-            "idle",
-            "fallback_to_primary",
-            "manual_fallback",
-            "manual_target_unreachable",
-            "pending_proxy_template",
-        }:
-            return {
-                "outbound_tag": "direct",
-                "path": "normal_data_plane",
-                "target": None,
-                "status": route_status_code,
-                "reason": str(route_status.get("reason", "") or "").strip() or "ai_route_not_applied",
-            }
+    if classification != "ai":
         return {
-            "outbound_tag": "unknown",
-            "path": "unknown",
+            "outbound_tag": "direct",
+            "path": "normal_data_plane",
             "target": None,
             "status": route_status_code,
-            "reason": str(route_status.get("reason", "") or "").strip() or "route_status_unavailable",
+            "reason": "classification_not_ai",
         }
+    if route_status_code == "applied":
+        target = None
+        if isinstance(ai_target, dict):
+            target_host = str(ai_target.get("upstream_host", "")).strip()
+            try:
+                target_port = int(ai_target.get("upstream_port"))
+            except (TypeError, ValueError):
+                target_port = None
+            if target_host and target_port:
+                target = {"upstream_host": target_host, "upstream_port": target_port}
+        return {
+            "outbound_tag": "ai_proxy",
+            "path": "ai_node",
+            "target": target,
+            "status": route_status_code,
+            "reason": str(route_status.get("reason", "") or "").strip(),
+        }
+    if route_status_code in {
+        "disabled",
+        "idle",
+        "fallback_to_primary",
+        "manual_fallback",
+        "manual_target_unreachable",
+        "pending_proxy_template",
+        "probe_error",
+    }:
+        return {
+            "outbound_tag": "direct",
+            "path": "normal_data_plane",
+            "target": None,
+            "status": route_status_code,
+            "reason": str(route_status.get("reason", "") or "").strip() or "ai_route_not_applied",
+        }
+    return {
+        "outbound_tag": "unknown",
+        "path": "unknown",
+        "target": None,
+        "status": route_status_code,
+        "reason": str(route_status.get("reason", "") or "").strip() or "route_status_unavailable",
+    }
 
+
+def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, route_status):
     domains = {}
     protocols = {}
     for item in state["events"]:
@@ -262,7 +263,7 @@ def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, 
                 "reason": item["reason"],
                 "source": item["source"] or "unknown",
                 "model": item["model"],
-                "traffic_route": domain_route(item["classification"]),
+                "traffic_route": build_traffic_route(item["classification"], ai_target, route_status),
             }
             for item in domains.values()
         ),
@@ -283,10 +284,37 @@ def build_domain_report(state, cutoff, now, decisions, ai_target, panel_target, 
     }
 
 
-def write_domain_report(output_dir, report):
+def refresh_routing_report(output_dir, now, decisions, ai_target, panel_target, route_status):
+    """Refresh routing state while retaining the last analysis window and counts."""
+    report = load_json(output_dir / "latest.json", {})
+    required = {"generated_at", "window_start", "window_end", "unique_domains", "ai_domains", "protocols", "domains"}
+    if not isinstance(report, dict) or not required.issubset(report) or not isinstance(report["domains"], list):
+        report = build_domain_report({"events": []}, now, now, decisions, ai_target, panel_target, route_status)
+    previous_status = report.get("route_status", {})
+    if isinstance(previous_status, dict) and "pending_domains_without_classifier" in previous_status:
+        route_status["pending_domains_without_classifier"] = previous_status["pending_domains_without_classifier"]
+    report["routing_checked_at"] = format_timestamp(now)
+    report["ai_target"] = summarize_ai_target_for_report(ai_target)
+    report["panel_target"] = panel_target
+    report["route_status"] = route_status
+    report["domains"] = [
+        item
+        for item in report["domains"]
+        if isinstance(item, dict) and {"domain", "classification", "hits", "protocols", "last_seen"}.issubset(item)
+    ]
+    for item in report["domains"]:
+        classification = (
+            decisions["domains"].get(item["domain"], {}).get("classification", item.get("classification", "unknown"))
+        )
+        item["traffic_route"] = build_traffic_route(classification, ai_target, route_status)
+    return report
+
+
+def write_domain_report(output_dir, report, *, history=True):
     output_dir.mkdir(parents=True, exist_ok=True)
     history_dir = output_dir / "history"
-    history_dir.mkdir(parents=True, exist_ok=True)
+    if history:
+        history_dir.mkdir(parents=True, exist_ok=True)
     latest_json = output_dir / "latest.json"
     latest_txt = output_dir / "latest.txt"
     stamp = report["window_end"].replace(":", "").replace("-", "").replace("+00:00", "Z")
@@ -297,7 +325,8 @@ def write_domain_report(output_dir, report):
     from app.xray.file_io import write_text_atomic
 
     write_text_atomic(latest_json, payload)
-    write_text_atomic(history_json, payload)
+    if history:
+        write_text_atomic(history_json, payload)
 
     lines = [
         f"generated_at: {report['generated_at']}",
@@ -371,7 +400,8 @@ def write_domain_report(output_dir, report):
         lines.append("no domains observed in the last window")
     text = "\n".join(lines) + "\n"
     write_text_atomic(latest_txt, text)
-    write_text_atomic(history_txt, text)
+    if history:
+        write_text_atomic(history_txt, text)
 
 
 def rerender_config(render_script, env_file, config_out, client_out, share_out, dynamic_routing_file):
@@ -431,7 +461,9 @@ __all__ = [
     "build_default_proxy_payload",
     "build_domain_report",
     "build_proxy_sockopt_payload",
+    "build_traffic_route",
     "extract_probe_server_name",
+    "refresh_routing_report",
     "render_proxy_template",
     "rerender_config",
     "resolve_probe_server_name",

@@ -9,6 +9,7 @@ from app.xray.node import DockerBackend, LocalBackend, NodeController, SSHBacken
 
 def test_application_declares_explicit_domain_components():
     from app.bootstrap import build_application
+    from app.probe_incidents import IncidentStore
 
     expected_names = (
         "ports",
@@ -19,6 +20,7 @@ def test_application_declares_explicit_domain_components():
         "dns_failover",
         "commerce",
         "diagnostics",
+        "incidents",
         "lifecycle",
     )
 
@@ -32,6 +34,10 @@ def test_application_declares_explicit_domain_components():
     assert application.commerce.ports is application.ports
     assert application.commerce.traffic is application.traffic
     assert application.diagnostics.ports is application.ports
+    assert isinstance(application.incidents, IncidentStore)
+    assert application.incidents.database is application.database
+    assert application.incident_worker.store is application.incidents
+    assert application.probes.probe_runner.observation_hook.__self__ is application.incidents
 
 
 def test_panel_state_keeps_concrete_legacy_delegates_without_catch_all():

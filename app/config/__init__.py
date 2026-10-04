@@ -12,9 +12,9 @@ imports keep working.
 """
 
 import os
-from datetime import datetime, timezone
 from ipaddress import ip_address, ip_network
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from .parsers import (
     parse_bool_env,
@@ -218,6 +218,11 @@ PROBE_TEST_LISTEN_PORT = parse_optional_env_port(
     os.environ.get("PROBE_TEST_LISTEN_PORT", ""),
     "PROBE_TEST_LISTEN_PORT",
 )
+INCIDENT_FAILURE_THRESHOLD = parse_positive_env_int(os.environ.get("INCIDENT_FAILURE_THRESHOLD", "5"), "INCIDENT_FAILURE_THRESHOLD")
+INCIDENT_CODEX_IMAGE = os.environ.get("INCIDENT_CODEX_IMAGE", "").strip()
+INCIDENT_CODEX_AUTH_HOME = os.environ.get("INCIDENT_CODEX_AUTH_HOME", "").strip()
+INCIDENT_CODEX_HOST_WORK_ROOT = os.environ.get("INCIDENT_CODEX_HOST_WORK_ROOT", str(DATA_DIR / "probe-incidents" / "work")).strip()
+INCIDENT_CODEX_TIMEOUT = min(600, parse_positive_env_float(os.environ.get("INCIDENT_CODEX_TIMEOUT", "180"), "INCIDENT_CODEX_TIMEOUT"))
 DNS_FAILOVER_ENABLED = parse_bool_env(os.environ.get("DNS_FAILOVER_ENABLED"), default=False)
 DNS_FAILOVER_INTERVAL = parse_positive_env_int(
     os.environ.get("DNS_FAILOVER_INTERVAL", "15"),
@@ -307,7 +312,8 @@ PAYMENT_PROOF_MAX_BYTES = parse_positive_env_int(
     "PAYMENT_PROOF_MAX_BYTES",
 )
 
-LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
+LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+LOCAL_TZ_LABEL = "北京时间（UTC+08:00）"
 CUSTOMER_SESSION_ID_KEY = "customer_session_id"
 CUSTOMER_SESSION_MARKER_KEY = "customer_session_marker"
 CSRF_SESSION_KEY = "csrf_token"

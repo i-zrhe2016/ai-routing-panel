@@ -1,4 +1,3 @@
-from datetime import datetime
 import sqlite3
 
 from flask import make_response, redirect, render_template, request, url_for
@@ -11,6 +10,7 @@ from ..auth import (
     tenant_credentials_match,
 )
 from ..config import (
+    LOCAL_TZ_LABEL,
     PANEL_HOST,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
@@ -94,7 +94,7 @@ def probe_dashboard():
     return render_template(
         "probe_dashboard.html",
         dashboard=dashboard,
-        timezone_label=datetime.now().astimezone().strftime("%Z"),
+        timezone_label=LOCAL_TZ_LABEL,
         data_plane_running=state.data_plane_running(),
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
@@ -113,7 +113,7 @@ def ai_domain_dashboard():
     return render_template(
         "ai_domain_dashboard.html",
         dashboard=dashboard,
-        timezone_label=datetime.now().astimezone().strftime("%Z"),
+        timezone_label=LOCAL_TZ_LABEL,
         data_plane_running=state.data_plane_running(),
         panel_host=PANEL_HOST,
         panel_port=PANEL_PORT,
@@ -124,7 +124,7 @@ def ai_domain_dashboard():
 @route("/ports/create", methods=["POST"])
 def create_port():
     try:
-        payload = state.validate_port_payload(request.form)
+        payload = state.validate_port_payload(request.form, allow_auto=True)
         port_id = state.create_port(payload)
         log_business_event("port.created", resource_type="port", resource_id=port_id, metadata={"listen_port": payload.get("listen_port")})
         return message_redirect("端口已创建并写入 Xray。", "success")

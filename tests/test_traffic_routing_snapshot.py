@@ -212,6 +212,10 @@ def test_ai_status_preserves_report_timestamp_and_application_metadata(tmp_path,
     )
     monkeypatch.setattr(ai_routing, "AI_ROUTING_ENABLED", True)
     monkeypatch.setattr(service, "query_ai_domain_aggregate", lambda: {"total_ai_domains": 0})
+    # These tests isolate report/application metadata from the classification store.
+    monkeypatch.setattr(service, "query_classification_cache_summary", lambda: {
+        "status": "available", "total_domains": 0, "ai_domains": 0, "non_ai_domains": 0,
+    })
     monkeypatch.setattr(
         service,
         "ai_routing_manual_state",
@@ -277,6 +281,10 @@ def test_ai_status_does_not_reuse_applied_evidence_for_a_different_manual_or_dis
         node_controller=SimpleNamespace(mode="local", config=SimpleNamespace(source_ai_report_path=str(path)))
     )
     monkeypatch.setattr(service, "query_ai_domain_aggregate", lambda: {"total_ai_domains": 0})
+    # These tests isolate report/application metadata from the classification store.
+    monkeypatch.setattr(service, "query_classification_cache_summary", lambda: {
+        "status": "available", "total_domains": 0, "ai_domains": 0, "non_ai_domains": 0,
+    })
     monkeypatch.setattr(
         service,
         "ai_routing_manual_state",

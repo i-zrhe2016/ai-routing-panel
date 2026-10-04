@@ -6,7 +6,7 @@ export function makeDashboard(overrides = {}) {
     meta: {
       csrf_token: "csrf-x",
       panel_address: "panel.example.com",
-      timezone_label: "UTC",
+      timezone_label: "北京时间（UTC+08:00）",
       probe_enabled: true,
       probe_dashboard_url: "/probe-dashboard",
       ai_domain_dashboard_url: "/ai-domain-dashboard",
@@ -260,7 +260,11 @@ export function createFakeApi({ dashboard, insights, diagnosis, failure } = {}) 
     get: async (url) => {
       calls.push({ method: "GET", url });
       if (failure && failure.url === url) throw new Error(failure.message);
-      if (url.startsWith("/api/insights")) return { ok: true, insights: insights ?? makeInsights() };
+      if (url.startsWith("/api/insights")) {
+        const history = insights ?? makeInsights();
+        const days = Number(new URL(url, "https://panel.example.test").searchParams.get("days"));
+        return { ok: true, insights: { ...history, traffic: { ...history.traffic, days } } };
+      }
       return { ok: true, dashboard: dashboard ?? makeDashboard() };
     },
     post: async (url, json) => {

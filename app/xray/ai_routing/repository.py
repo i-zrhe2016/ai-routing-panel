@@ -4,9 +4,144 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
-from .common import connect_panel_db, format_timestamp, run_with_sqlite_lock_retry, utc_now
+from .common import DOMAIN_RE, connect_panel_db, format_timestamp, run_with_sqlite_lock_retry, utc_now
+
+
+def normalize_classifications(domains):
+    """Accept only routing classifications with valid, canonical domain names."""
+    result = {}
+    if not isinstance(domains, dict):
+        return result
+    for domain, item in domains.items():
+        domain = str(domain).strip().lower()
+        if not DOMAIN_RE.fullmatch(domain) or not isinstance(item, dict):
+            continue
+        classification = item.get("classification")
+        if classification not in ("ai", "not_ai"):
+            continue
+        timestamp = str(item.get("classified_at", item.get("updated_at", "")) or "")
+        try:
+            parsed = datetime.fromisoformat(timestamp)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            timestamp = format_timestamp(parsed)
+        except ValueError:
+            timestamp = ""
+        result[domain] = {
+            "classification": classification,
+            "reason": str(item.get("reason", "") or ""),
+            "source": str(item.get("source", "") or ""),
+            "model": str(item.get("model", "") or ""),
+            "classified_at": timestamp,
+        }
+    return result
+
+
+def ensure_classification_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_domain_classifications (
+            domain TEXT PRIMARY KEY,
+            classification TEXT NOT NULL CHECK (classification IN ('ai', 'not_ai')),
+            reason TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            classified_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def load_classifications(panel_db_path):
+    """Recover durable decisions, including pre-cache AI history, without writes."""
+    if not Path(panel_db_path).is_file():
+        return {}
+
+    def read():
+        conn = connect_panel_db(panel_db_path)
+        try:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            domains = {}
+            if "ai_domains" in tables:
+                domains.update(
+                    normalize_classifications(
+                        {
+                            row["domain"]: dict(row)
+                            for row in conn.execute(
+                                "SELECT domain, classification, reason, source, model, updated_at FROM ai_domains"
+                            )
+                        }
+                    )
+                )
+            if "ai_domain_classifications" in tables:
+                domains.update(
+                    normalize_classifications(
+                        {row["domain"]: dict(row) for row in conn.execute("SELECT * FROM ai_domain_classifications")}
+                    )
+                )
+            return domains
+        finally:
+            conn.close()
+
+    return run_with_sqlite_lock_retry(read)
+
+
+def save_classifications(panel_db_path, decisions):
+    """Persist AI and non-AI decisions independently of observation/report success."""
+    if not Path(panel_db_path).is_file():
+        return {"status": "skipped", "reason": "panel_db_missing"}
+    domains = normalize_classifications(decisions.get("domains", {}))
+    now = format_timestamp(utc_now())
+
+    def save():
+        conn = connect_panel_db(panel_db_path)
+        try:
+            ensure_classification_schema(conn)
+            conn.executemany(
+                """
+                INSERT INTO ai_domain_classifications
+                    (domain, classification, reason, source, model, classified_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(domain) DO UPDATE SET
+                    classification = excluded.classification,
+                    reason = excluded.reason,
+                    source = excluded.source,
+                    model = excluded.model,
+                    classified_at = excluded.classified_at,
+                    updated_at = excluded.updated_at
+                WHERE excluded.classified_at >= ai_domain_classifications.classified_at
+                  AND (excluded.classification != ai_domain_classifications.classification
+                    OR excluded.reason != ai_domain_classifications.reason
+                    OR excluded.source != ai_domain_classifications.source
+                    OR excluded.model != ai_domain_classifications.model
+                    OR excluded.classified_at != ai_domain_classifications.classified_at)
+                """,
+                [
+                    (
+                        domain,
+                        item["classification"],
+                        item["reason"],
+                        item["source"],
+                        item["model"],
+                        item["classified_at"] or now,
+                        now,
+                    )
+                    for domain, item in domains.items()
+                ],
+            )
+            conn.commit()
+            return {"status": "written", "classifications": len(domains)}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    return run_with_sqlite_lock_retry(save)
 
 
 def read_panel_target(panel_db_path, preferred_listen_port):
@@ -258,7 +393,7 @@ def save_ai_domains_to_panel_db(panel_db_path, report, decisions):
 
 def read_ai_routing_manual_mode(panel_db_path):
     path = str(panel_db_path or "").strip()
-    if not path:
+    if not path or not Path(path).is_file():
         return "auto"
 
     def read_mode():
@@ -332,9 +467,13 @@ def normalize_ai_routing_manual_mode(panel_db_path, candidate_count):
 __all__ = [
     "connect_panel_db",
     "ensure_ai_domain_schema",
+    "ensure_classification_schema",
+    "load_classifications",
     "normalize_ai_routing_manual_mode",
+    "normalize_classifications",
     "read_ai_routing_manual_mode",
     "read_panel_target",
     "run_with_sqlite_lock_retry",
     "save_ai_domains_to_panel_db",
+    "save_classifications",
 ]

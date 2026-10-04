@@ -123,6 +123,21 @@ class DnsFailoverTest(unittest.TestCase):
         }
         state.refresh_dns_failover_record_snapshot()
 
+    def test_executor_failure_preserves_dns_counters_and_target(self):
+        state, _module = self.build_state()
+        self.seed_record(state, "192.0.2.1")
+        with state.database.connect() as conn:
+            conn.execute("UPDATE dns_failover_state SET consecutive_failures = 1, consecutive_successes = 0")
+            conn.commit()
+        state.dns_failover_manager.probe_once = lambda: {"ok": False, "error": "probe_transport_failed",
+            "management_error": True, "method": "vless_reality"}
+        state.dns_failover_manager.sync_target = lambda *a, **k: self.fail("executor failure must not change DNS")
+        result = state.run_dns_failover_check(force=True)
+        self.assertEqual(result["consecutive_failures"], 1)
+        self.assertEqual(result["consecutive_successes"], 0)
+        self.assertEqual(result["current_target"], "primary")
+        self.assertEqual(result["last_probe_status"], "management_error")
+
     def test_dns_failover_threshold_defaults_are_three_failures_and_two_successes(self):
         os.environ.pop("DNS_FAILOVER_FAILURE_THRESHOLD", None)
         os.environ.pop("DNS_FAILOVER_RECOVERY_THRESHOLD", None)
@@ -427,6 +442,44 @@ class DnsFailoverTest(unittest.TestCase):
         self.assertEqual(active["preferred_target"], "backup")
         self.assertFalse(inactive["active"])
         self.assertEqual(inactive["preferred_target"], "primary")
+
+    def test_default_peak_window_uses_beijing_time_and_exact_boundaries(self):
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_PEAK_ENABLED": "1",
+                "DNS_FAILOVER_PEAK_START": "19:00",
+                "DNS_FAILOVER_PEAK_END": "23:00",
+                "DNS_FAILOVER_PEAK_TIMEZONE": "",
+            }
+        )
+        for hour, expected_active, local_hour, next_transition in (
+            (10, False, "18:00:00", "2026-06-22 19:00"),
+            (11, True, "19:00:00", "2026-06-22 23:00"),
+            (15, False, "23:00:00", "2026-06-23 19:00"),
+        ):
+            with self.subTest(utc_hour=hour):
+                status = state.dns_failover_peak_window_status(datetime(2026, 6, 22, hour, tzinfo=timezone.utc))
+                self.assertTrue(status["configured"])
+                self.assertEqual(status["active"], expected_active)
+                self.assertEqual(status["timezone_label"], "北京时间（UTC+08:00）")
+                self.assertEqual(status["current_time"], f"2026-06-22 {local_hour}")
+                self.assertEqual(status["next_transition_at"], next_transition)
+
+    def test_explicit_peak_timezone_keeps_its_schedule_and_label(self):
+        state, _state_module = self.build_state(
+            {
+                "DNS_FAILOVER_PEAK_ENABLED": "1",
+                "DNS_FAILOVER_PEAK_START": "19:00",
+                "DNS_FAILOVER_PEAK_END": "23:00",
+                "DNS_FAILOVER_PEAK_TIMEZONE": "America/Los_Angeles",
+            }
+        )
+        status = state.dns_failover_peak_window_status(datetime(2026, 6, 22, 12, tzinfo=timezone.utc))
+        self.assertTrue(status["configured"])
+        self.assertFalse(status["active"])
+        self.assertEqual(status["current_time"], "2026-06-22 05:00:00")
+        self.assertEqual(status["timezone_label"], "America/Los_Angeles")
+        self.assertEqual(status["next_transition_at"], "2026-06-22 19:00")
 
     def test_peak_window_reports_next_transition(self):
         state, _state_module = self.build_state(

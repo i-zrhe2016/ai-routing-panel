@@ -140,19 +140,20 @@ class CloudflareDnsClient:
 
 
 class DnsFailoverManager:
-    def __init__(self, config: DnsFailoverConfig, client=None):
+    def __init__(self, config: DnsFailoverConfig, client=None, probe_runner=None, client_path=None):
         self.config = config
         self.client = client or CloudflareDnsClient(config)
+        self.probe_runner = probe_runner
+        self.client_path = client_path
 
     def probe_once(self):
-        try:
-            with socket.create_connection(
-                (self.config.probe_host, int(self.config.probe_port)),
-                timeout=self.config.timeout,
-            ):
-                return {"ok": True, "error": ""}
-        except OSError as exc:
-            return {"ok": False, "error": str(exc)[:200]}
+        from .config import XRAY_CLIENT_CONFIG_PATH
+        from .xray.protocol_probe import build_probe_runner, client_outbound
+        runner = self.probe_runner or build_probe_runner()
+        outbound = client_outbound(self.client_path or XRAY_CLIENT_CONFIG_PATH,
+                                  host=self.config.probe_host, port=self.config.probe_port)
+        return runner.probe_outbound(outbound, self.config.timeout, source="dns_failover",
+                                     target=f"{self.config.probe_host}:{self.config.probe_port}")
 
     def current_target_from_content(self, content, primary_content=None, backup_content=None):
         primary = str(primary_content if primary_content is not None else self.config.primary_content or "").strip()

@@ -58,6 +58,7 @@ export function normalizeDashboard(dashboard) {
 export function routingSignature(panel) {
   return JSON.stringify({
     path: panel.trafficRouting?.path || "unknown",
+    target: panel.aiRoutingStatus?.ai_candidates?.filter((candidate) => candidate.selected).map((candidate) => [candidate.upstream_host, candidate.upstream_port, candidate.is_reachable]),
     dnsTarget: panel.dnsFailoverStatus?.current_target || "",
     aiMode: panel.aiRoutingStatus?.manual_mode || "auto",
     backupMode: panel.meta?.backup_xray_mode || "",

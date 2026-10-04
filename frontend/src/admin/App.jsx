@@ -18,7 +18,7 @@ const WORKSPACES = [
   { key: "traffic", label: "流量", description: "使用趋势与端口负载", group: "运行监控" },
   { key: "topology", label: "流量拓扑", description: "当前路径与候选出口", group: "运行监控" },
   { key: "routing", label: "AI 路由", description: "出口策略与候选节点", group: "配置与业务" },
-  { key: "delivery", label: "交付", description: "端口与租户凭据", group: "配置与业务" },
+  { key: "delivery", label: "交付", description: "端口与订阅链接", group: "配置与业务" },
 ];
 
 const WORKSPACE_COMPONENTS = {
@@ -126,7 +126,7 @@ export default function App() {
         <div className="sidebar-footer">
           <span>控制面</span>
           <strong>{panel.meta?.panel_address || "—"}</strong>
-          <small>{panel.meta?.timezone_label || "服务器本地时区"}</small>
+          <small>{panel.meta?.timezone_label || "北京时间（UTC+08:00）"}</small>
         </div>
       </aside>
 

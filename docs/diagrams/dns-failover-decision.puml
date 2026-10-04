@@ -2,6 +2,11 @@
 !include style.iuml
 title DNS 自动切换与回切判定
 start
+:独立执行主机认证 VLESS + REALITY\n请求 HTTPS 204;
+if (执行主机或凭据配置异常？) then (是)
+  :报告 management_error\n保留计数与 DNS 目标;
+  stop
+endif
 :记录探测结果\n更新连续失败与连续成功计数;
 if (当前高峰窗口配置有效？) then (是)
   :按时区窗口确定 preferred_target\n窗口内 backup，窗口外 primary;

@@ -10,6 +10,10 @@
 
 仓库根目录的 `.env.example` 只覆盖高频项；`docker-compose.yml` 里还会注入一批固定运行时默认值。
 
+面板时间展示、无时区的到期时间输入和流量自然日统计固定使用北京时间（`Asia/Shanghai`，UTC+08:00），不随服务器或浏览器时区变化。数据库与接口中的原始时间戳仍使用 UTC，展示字段统一转换为北京时间。
+
+无时区的 Xray 访问日志时间沿用日志读取器的 UTC 约定；解析后保留 UTC 事件时间，再按面板时区归档流量自然日。
+
 ## 根 `.env` 常用变量
 
 | 变量 | 说明 |
@@ -35,12 +39,24 @@
 | `DATAPLANE_EXTERNAL_RELOADER_ENABLED` | 数据面由外部 watcher 重载时设为 `1`；默认 `0` |
 | `AI_DOMAIN_MANAGER_LOCK_PATH` | AI 管理器跨进程锁路径；默认与 `XRAY_CONFIG_OUT` 同目录的 `.ai-domain-manager.lock` |
 | `AI_DOMAIN_MANAGER_MANUAL_LOCK_PATH` | 常驻任务与面板手动切换共享的互斥锁路径；默认与 `XRAY_CONFIG_OUT` 同目录的 `.ai-domain-manager-manual.lock` |
+| `AI_DOMAIN_MANAGER_ANALYSIS_LOCK_PATH` | 小时观测与分类的独立互斥锁；默认与 `XRAY_CONFIG_OUT` 同目录的 `.ai-domain-manager-analysis.lock`，分类器等待不占用配置应用锁 |
 | `AI_DOMAIN_MANAGER_EXECUTION_MODE` | 面板触发管理器的方式：`docker`（默认）或同一运行环境内 `local` |
-| `DATAPLANE_PROBE_HOST` | TCP 探针连接目标；远端模式下应指向远端入口 IP 或域名 |
+| `DATAPLANE_PROBE_HOST` | 普通入口协议探测目标；应指向远端入口 IP 或域名 |
 | `DB_BACKUP_RECOVERY_REQUIRED` | 节点恢复材料不完整时是否阻止灾备归档继续上传；Compose 默认 `0`（控制面归档），完整节点模式设为 `1` |
 | `DB_BACKUP_RECOVERY_STATUS_PATH` | 最近一次节点恢复完整性报告路径 |
 
-AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链接包含 REALITY SNI，管理器会执行 REALITY 握手；否则回退到 TCP 探测。可通过 `AI_UPSTREAM_PROBE_SERVER_NAME` 为模板显式指定 SNI。
+所有业务可用性探测由独立 SSH 主机执行真实 Xray VLESS + REALITY 客户端请求；部署与错误语义见[协议探测运维](operations.md#协议探测)。普通数据面和 AI 节点只接受探测与管理，不执行业务可用性探测。
+
+| 变量 | 默认值 / 用途 |
+| --- | --- |
+| `PROBE_SSH_TARGET` | 留空；专用探测执行主机，缺失时 fail closed |
+| `PROBE_SSH_BIN` | `ssh`；独立 SSH transport |
+| `PROBE_SSH_OPTIONS` | 留空；独立连接选项，沿用内网 SSH 认证与严格主机验证策略 |
+| `PROBE_SSH_KNOWN_HOSTS` | `/root/.ssh/known_hosts`；专用目标的已验证主机密钥文件 |
+| `PROBE_REMOTE_SCRIPT` | `/opt/xray-probe/current/xray_protocol_probe.py`；可固定到不可变 release 路径 |
+| `PROBE_XRAY_BIN` | `/opt/xray-probe/current/xray`；与服务端版本匹配的客户端二进制 |
+
+`AI_ROUTING_HEALTH_INTERVAL_SECONDS` 默认 `30`，控制独立路由健康周期；`AI_DOMAIN_INTERVAL_SECONDS` 默认 `3600`，控制日志分析与新域名分类周期。两者均须大于零，Compose 支持在根 `.env` 覆盖；`--once` 运行完整分析与应用，`--routing-only --once` 只探测并根据历史分类应用路由。行为与持久化说明见 [AI 路由](ai-routing.md)。
 
 常见但通常不需要手动覆盖的运行时变量：
 
@@ -54,6 +70,15 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 - `PANEL_HEALTH_REQUIRES_XRAY`
 - `PANEL_ALLOWED_NETWORKS`：控制面来源白名单（默认见上表）；控制台没有登录，非白名单来源在路由前返回 403
 
+
+## 租户端口自动分配
+
+| 变量 | 说明 |
+| --- | --- |
+| `COMMERCE_AUTO_PORT_START` | 自动分配区间起点，默认 `31000` |
+| `COMMERCE_AUTO_PORT_END` | 自动分配区间终点，默认 `39999`，包含该端口 |
+
+后台新增租户时，监听端口留空即可自动分配，也可手动指定。后台创建与订单开通共享同一分配逻辑，从区间内选择最小的未使用端口；停用租户仍占用端口，删除后的端口可以复用。分配和写入在同一数据库事务内完成，配置应用失败会回滚创建。区间未配置或耗尽时返回错误，不会覆盖已有租户。
 
 ## AI 节点纳管变量
 
@@ -93,10 +118,10 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 | --- | --- |
 | `DNS_FAILOVER_ENABLED` | 是否启用 Cloudflare DNS 故障切换 |
 | `DNS_FAILOVER_INTERVAL` | 后台检测周期，默认 `15` 秒 |
-| `DNS_FAILOVER_TIMEOUT` | 单次 TCP 探测超时 |
+| `DNS_FAILOVER_TIMEOUT` | 单次认证协议请求超时 |
 | `DNS_FAILOVER_FAILURE_THRESHOLD` | 连续失败多少次切到备用 |
 | `DNS_FAILOVER_RECOVERY_THRESHOLD` | 连续成功多少次回切主数据面 |
-| `DNS_FAILOVER_PROBE_HOST` / `DNS_FAILOVER_PROBE_PORT` | 只用于自动切换判定的数据面公网 TCP 探测目标 |
+| `DNS_FAILOVER_PROBE_HOST` / `DNS_FAILOVER_PROBE_PORT` | 只用于自动切换判定的主数据面 VLESS + REALITY 探测目标 |
 | `CF_API_TOKEN` | Cloudflare API Token，至少需要目标 Zone 的 DNS 编辑权限 |
 | `CF_ZONE_ID` | Cloudflare Zone ID |
 | `CF_DNS_RECORD_ID` | 要切换的单条 DNS Record ID |
@@ -111,7 +136,7 @@ AI 上游探测优先从普通数据面执行。若 AI 上游模板或分享链�
 | `DNS_FAILOVER_BACKUP_LABEL` | 首页展示用备用节点名称 |
 | `DNS_FAILOVER_PEAK_ENABLED` | 是否启用“高峰窗口优先专用节点” |
 | `DNS_FAILOVER_PEAK_START` / `DNS_FAILOVER_PEAK_END` | 高峰窗口起止时间，格式 `HH:MM` |
-| `DNS_FAILOVER_PEAK_TIMEZONE` | 高峰窗口时区；支持 `Asia/Shanghai` 或 `+08:00` |
+| `DNS_FAILOVER_PEAK_TIMEZONE` | 高峰窗口时区；留空使用北京时间，显式设置支持 `Asia/Shanghai` 或 `+08:00` 等时区 |
 
 说明：
 
@@ -201,7 +226,7 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 - `AI_UPSTREAM_FALLBACK_AS_PRIMARY=1` 会把 `AI_UPSTREAM_FALLBACK_URL` 提升为候选 0，适合移除原主节点后保留带独立凭据的唯一节点
 - 当前生产仅保留台湾 AI 节点作为主候选；原主候选已移除，台湾节点继续使用独立 REALITY 凭据
 - 主 AI 上游同样可能使用独立凭据；动态 VLESS outbound 必须与 AI inbound 完整匹配，不能从普通数据面 `XRAY_*` 盲目派生
-- 如果全部 AI 上游 TCP 探测都失败，AI 动态路由会撤销，流量回退到主链路
+- 如果全部 AI 上游认证协议请求都失败（不含执行主机/凭据配置异常），AI 动态路由会撤销，流量回退到主链路
 - `AI_NODE_SSH_TARGET` 只启用 SSH 纳管；它不证明节点凭据匹配，也不应自动派生独立 AI 节点的 relay URL
 
 控制台人工切换使用 `POST /api/ai-routing/switch`：`primary` 和 `backup` 固定对应候选，`auto` 恢复自动探测，`forced_fallback` 让 AI 流量回到数据面直出。固定候选不可达时不会自动改选另一候选，而是报告 `manual_target_unreachable`。
@@ -256,3 +281,15 @@ SSH 采集的详细安全边界、`remote-node-collection.json` 字段和只读�
 
 - [../.env.example](../.env.example)
 - [../app/xray/.env.example](../app/xray/.env.example)
+
+## 故障分析隔离运行配置
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `INCIDENT_FAILURE_THRESHOLD` | `5` | 正整数；同一来源、目标、故障类别与探测主机连续失败达到此次数后才排队 Codex 分析。面板与 AI 管理器必须使用相同值，不影响路由或 DNS 故障切换阈值。 |
+| `INCIDENT_CODEX_IMAGE` | 空 | 已安装 Codex CLI 的固定 Docker 镜像；部署建议使用 immutable digest。为空时分析明确失败。 |
+| `INCIDENT_CODEX_AUTH_HOME` | 空 | Docker 宿主机上的独立认证输入目录，仅含受保护的 `auth.json` 与最小 provider/model `config.toml`。 |
+| `INCIDENT_CODEX_HOST_WORK_ROOT` | `DATA_DIR/probe-incidents/work` | 宿主工作目录；面板运行在容器中时必须显式配置对应宿主路径。 |
+| `INCIDENT_CODEX_TIMEOUT` | `180` | 单次 Codex/Docker 客户端时限，秒，最大 `600`。 |
+
+数据库与私有报告使用现有 `DB_PATH`、`DATA_DIR`。不读取或改写全局 `~/.codex`，不强制覆盖既有 provider 的模型选择。故障生命周期、权限与部署边界见[运维与排障](operations.md#codex-自动故障记录)。

@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from ..config import (
+    COMMERCE_AUTO_PORT_END,
+    COMMERCE_AUTO_PORT_START,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
     LOCAL_TZ,
@@ -364,9 +366,11 @@ class PortsService:
                 summary["disabled_ports"] += 1
         return summary
 
-    def validate_port_payload(self, form):
+    def validate_port_payload(self, form, allow_auto=False):
+        listen_port = form.get("listen_port")
+        auto_assign = allow_auto and (listen_port is None or str(listen_port).strip() == "")
         return {
-            "listen_port": parse_port(form.get("listen_port"), "监听端口"),
+            "listen_port": None if auto_assign else parse_port(listen_port, "监听端口"),
             "upstream_host": DEFAULT_UPSTREAM_HOST,
             "upstream_port": DEFAULT_UPSTREAM_PORT,
             "expires_at": parse_expiry(form.get("expires_at")),
@@ -374,8 +378,24 @@ class PortsService:
             "note": parse_note(form.get("note")),
         }
 
+    def allocate_listen_port_in_tx(self, conn):
+        if COMMERCE_AUTO_PORT_START is None or COMMERCE_AUTO_PORT_END is None:
+            raise ValidationError("自动分配端口范围未配置。")
+        rows = conn.execute(
+            "SELECT listen_port FROM ports WHERE listen_port BETWEEN ? AND ?",
+            (COMMERCE_AUTO_PORT_START, COMMERCE_AUTO_PORT_END),
+        ).fetchall()
+        used = {int(row["listen_port"]) for row in rows}
+        for listen_port in range(COMMERCE_AUTO_PORT_START, COMMERCE_AUTO_PORT_END + 1):
+            if listen_port not in used:
+                return listen_port
+        raise ValidationError("自动分配端口范围已耗尽，请扩容可售端口区间。")
+
     def create_port(self, payload):
         def operation(conn):
+            listen_port = payload.get("listen_port")
+            if listen_port is None:
+                listen_port = self.allocate_listen_port_in_tx(conn)
             now = utc_iso_now()
             conn.execute(
                 """
@@ -386,7 +406,7 @@ class PortsService:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
-                    payload["listen_port"],
+                    listen_port,
                     payload["upstream_host"],
                     payload["upstream_port"],
                     self.generate_unique_port_token(conn, "tenant_token"),

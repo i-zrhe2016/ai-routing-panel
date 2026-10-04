@@ -1,3 +1,4 @@
+import { humanBytes } from "../../shared/formatters.js";
 import { useId, useState } from "react";
 import { buildTrafficTopology, TOPOLOGY_STATES } from "../lib/topology.js";
 import "./traffic-topology.css";
@@ -23,6 +24,7 @@ export default function TrafficTopology({ panel, compact = false }) {
   const detailsId = useId();
   const summaryId = useId();
   const arrowId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const activity = panel.trafficActivity;
   const routes = graph.edges.filter((edge) => nodes.find((node) => node.id === edge.from)?.kind === "entry");
   return (
     <section className={`traffic-topology${compact ? " traffic-topology--compact" : ""}`} aria-label="流量拓扑图" aria-describedby={summaryId}>
@@ -45,7 +47,8 @@ export default function TrafficTopology({ panel, compact = false }) {
             const from = nodes.find(({ id }) => id === edge.from);
             const to = nodes.find(({ id }) => id === edge.to);
             const x1 = from.x + 78, x2 = to.x - 78, mid = (x1 + x2) / 2;
-            return <path key={edge.id} className={`traffic-topology__edge is-${edge.state}`} d={`M ${x1} ${from.y} C ${mid} ${from.y}, ${mid} ${to.y}, ${x2} ${to.y}`} vectorEffect="non-scaling-stroke" markerEnd={`url(#${arrowId})`} />;
+            const moving = edge.from === "client" && edge.state === "active" && activity?.bytes > 0;
+            return <path key={edge.id} data-from={edge.from} data-to={edge.to} className={`traffic-topology__edge is-${edge.state}${moving ? " is-flowing" : ""}`} d={`M ${x1} ${from.y} C ${mid} ${from.y}, ${mid} ${to.y}, ${x2} ${to.y}`} vectorEffect="non-scaling-stroke" markerEnd={`url(#${arrowId})`} />;
           })}
         </svg>
         {nodes.map((node) => <button
@@ -71,7 +74,7 @@ export default function TrafficTopology({ panel, compact = false }) {
         {selected.probeLabel ? <p>{selected.probeLabel}{selected.kind === "ai" ? ` · ${selected.selected ? "报告已选中" : "未选中"}` : ""}</p> : null}
         <p>{selected.description}</p>
       </div>
-      <p className="traffic-topology__footnote">图中配置路径不代表实时吞吐量或目标网站健康。协议限制与阻断规则仍优先执行；DNS 缓存可能使客户端继续使用原入口。</p>
+      <p className="traffic-topology__footnote" aria-live="polite">全站流量速率：{activity ? `${humanBytes(activity.bytesPerSecond)}/s` : "等待下一次流量采样"} · 图中配置路径不代表实时吞吐量或目标网站健康。协议限制与阻断规则仍优先执行；DNS 缓存可能使客户端继续使用原入口。</p>
     </section>
   );
 }

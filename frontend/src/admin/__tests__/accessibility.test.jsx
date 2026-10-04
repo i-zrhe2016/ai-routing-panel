@@ -121,13 +121,13 @@ describe("mobile navigation", () => {
 });
 
 describe("delivery and table access", () => {
-  it("names every credential field and allows keyboard focus on a wide routing table", async () => {
+  it("names every subscription field and allows keyboard focus on a wide routing table", async () => {
     const user = userEvent.setup();
     render(<PanelProvider api={createFakeApi()} pollInterval={0} insightsInterval={0}><App /></PanelProvider>);
     const nav = await screen.findByRole("navigation", { name: "控制台工作区" });
     await user.click(within(nav).getByRole("button", { name: /交付/ }));
-    expect(screen.getByRole("textbox", { name: "租户用户名" }).readOnly).toBe(true);
-    expect(screen.getByRole("textbox", { name: "租户密码" }).readOnly).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Clash 订阅" }).readOnly).toBe(true);
+    expect(screen.getByRole("textbox", { name: "V2Ray 订阅" }).readOnly).toBe(true);
     await user.click(within(nav).getByRole("button", { name: /AI 路由/ }));
     const region = screen.getByRole("region", { name: "AI 候选节点状态" });
     expect(region.tabIndex).toBe(0);

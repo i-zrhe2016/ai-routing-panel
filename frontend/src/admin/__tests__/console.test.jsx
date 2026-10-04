@@ -80,7 +80,7 @@ describe("console shell", () => {
     const api = createFakeApi();
     renderConsole(api);
 
-    await waitFor(() => expect(api.calls.some((call) => call.url === "/api/insights?days=14")).toBe(true));
+    await waitFor(() => expect(api.calls.some((call) => call.url === "/api/insights?days=1")).toBe(true));
   });
 
   it("mounts only the active workspace", async () => {

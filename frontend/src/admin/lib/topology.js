@@ -13,7 +13,8 @@ export function buildTrafficTopology(value = {}) {
   const ai = panel.aiRoutingStatus || {};
   const dns = panel.dnsFailoverStatus || {};
   const candidates = Array.isArray(ai.ai_candidates)
-    ? ai.ai_candidates.filter((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate)) : [];
+    ? ai.ai_candidates.filter((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate))
+      .map((candidate) => candidate.probe_management_error === true ? { ...candidate, is_reachable: null } : candidate) : [];
   const selectedCandidates = candidates.filter((candidate) => candidate.selected === true);
   const selected = selectedCandidates.length === 1 ? selectedCandidates[0] : null;
   const applied = ai.status === "applied" && ["direct", "unchanged"].includes(ai.config_apply_status)

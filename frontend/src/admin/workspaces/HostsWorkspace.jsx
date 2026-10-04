@@ -1,3 +1,4 @@
+import IncidentRecords from "../components/IncidentRecords.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 import { FlowPath } from "../components/charts/index.jsx";
 import { MetricCard, Panel, StatusPill } from "../components/ui.jsx";
@@ -130,6 +131,8 @@ export default function HostsWorkspace() {
         ))}
         {!hosts.length ? <div className="cc-empty">控制面未返回任何纳管主机。</div> : null}
       </div>
+
+      <IncidentRecords />
 
       {confirm.dialog}
     </div>

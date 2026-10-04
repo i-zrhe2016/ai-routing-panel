@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
 
 
 def load_panel_module(temp_root, probe_enabled=False, probe_test_listen_port=""):
@@ -155,8 +156,8 @@ class TenantPanelTest(unittest.TestCase):
         self.assertIn("no-store", response.headers["Cache-Control"])
         self.assertEqual(response.headers["Pragma"], "no-cache")
         body = response.get_data(as_text=True)
-        self.assertIn("admin.js?v=20261002-topology-flow-accuracy", body)
-        self.assertIn("admin.css?v=20261002-topology-flow-accuracy", body)
+        self.assertIn("admin.js?v=20261003-main-integration", body)
+        self.assertIn("admin.css?v=20261003-main-integration", body)
 
     def seed_ai_domain_dashboard(self):
         report_path = self.panel.state.data_plane.config.source_ai_report_path
@@ -230,6 +231,30 @@ class TenantPanelTest(unittest.TestCase):
         self.assertEqual(parsed.path, "/login")
         self.assertEqual(parse_qs(parsed.query).get("next"), [expected_next])
 
+    def test_ai_routing_status_exposes_cache_probe_and_effective_domain_routes(self):
+        self.seed_ai_domain_dashboard()
+        report_path = self.panel.state.data_plane.config.source_ai_report_path
+        report = json.loads(report_path.read_text())
+        report["routing_checked_at"] = "2026-06-18T00:10:00+00:00"
+        report["route_status"].update({"status": "fallback_to_primary", "reason": "ai_upstream_unreachable", "config_apply_status": "direct", "health_interval_seconds": 30, "classification_interval_seconds": 3600})
+        report["domains"][0].update({"source": "codex", "traffic_route": {"outbound_tag": "direct", "status": "fallback_to_primary", "reason": "ai_upstream_unreachable"}})
+        report["domains"][1]["traffic_route"] = {"outbound_tag": "direct", "status": "applied"}
+        report_path.write_text(json.dumps(report))
+        from app.xray.ai_routing.repository import save_classifications
+        save_classifications(self.panel.state.database.path, {"domains": {"openai.com": {"classification": "ai"}, "example.com": {"classification": "not_ai"}}})
+        with patch.object(self.panel.state.ai_routing, "ai_routing_manual_state", return_value={"mode": "auto", "mode_label": "自动探测", "updated_at": "", "updated_at_display": "暂无", "candidate_count": 1, "candidates": [{"checked_at": "invalid", "is_reachable": False}]}):
+            status = self.panel.state.ai_routing_status()
+        self.assertEqual(status["route_status"], "fallback_to_primary")
+        self.assertEqual(status["config_apply_status"], "direct")
+        self.assertEqual(status["last_probe_at_display"], "暂无")
+        self.assertEqual(status["health_interval_seconds"], 30)
+        self.assertEqual(status["classification_interval_seconds"], 3600)
+        self.assertEqual(status["classification_cache"], {"status": "available", "total_domains": 2, "ai_domains": 1, "non_ai_domains": 1})
+        self.assertEqual(status["recent_domains"][0]["traffic_route"]["mode"], "fallback")
+        self.assertEqual(status["recent_domains"][0]["source"], "codex")
+        self.assertEqual(status["recent_domains"][1]["traffic_route"]["mode"], "direct")
+        self.assertNotEqual(status["routing_checked_at_display"], status["report_generated_at_display"])
+
     def tenant_login(self, tenant_token, username, password, follow_redirects=False):
         return self.client.post(
             "/login",
@@ -292,6 +317,73 @@ class TenantPanelTest(unittest.TestCase):
             [port["listen_port"] for port in self.panel.state.query_ports()].count(31201),
             1,
         )
+
+    def test_port_api_auto_allocates_for_missing_or_blank_port(self):
+        with patch.multiple("app.state.ports", COMMERCE_AUTO_PORT_START=35000, COMMERCE_AUTO_PORT_END=35005):
+            for offset, value in enumerate(({}, {"listen_port": ""}, {"listen_port": "  "}, {"listen_port": None})):
+                response = self.client.post("/api/ports", json={**value, "note": f"Auto tenant {offset}"})
+                self.assertEqual(response.status_code, 201)
+                body = response.get_json()
+                created = next(port for port in body["dashboard"]["ports"] if port["id"] == body["created_port_id"])
+                self.assertEqual(created["listen_port"], 35000 + offset)
+                self.assertEqual(created["note"], f"Auto tenant {offset}")
+                self.assertTrue(created["tenant_username"])
+                self.assertTrue(created["tenant_password"])
+                self.assertTrue(created["access"]["tenant_subscription_v2ray_url"])
+
+    def test_port_api_auto_allocation_skips_disabled_ports_and_reuses_deleted_gap(self):
+        first = self.create_port(35000, "Disabled tenant")
+        self.panel.state.toggle_port(first["id"])
+        gap = self.create_port(35001, "Deleted tenant")
+        self.create_port(35002, "Existing tenant")
+        self.panel.state.delete_port(gap["id"])
+        with patch.multiple("app.state.ports", COMMERCE_AUTO_PORT_START=35000, COMMERCE_AUTO_PORT_END=35002):
+            response = self.client.post("/api/ports", json={"note": "Auto tenant"})
+        self.assertEqual(response.status_code, 201)
+        ports = response.get_json()["dashboard"]["ports"]
+        created = next(port for port in ports if port["id"] == response.get_json()["created_port_id"])
+        self.assertEqual(created["listen_port"], 35001)
+        self.assertEqual(len(ports), 3)
+
+    def test_port_api_auto_allocation_handles_range_boundary_and_exhaustion(self):
+        with patch.multiple("app.state.ports", COMMERCE_AUTO_PORT_START=65535, COMMERCE_AUTO_PORT_END=65535):
+            first = self.client.post("/api/ports", json={"note": "Last port"})
+            self.assertEqual(first.status_code, 201)
+            self.assertEqual(first.get_json()["dashboard"]["ports"][0]["listen_port"], 65535)
+            second = self.client.post("/api/ports", json={"note": "No space"})
+        self.assertEqual(second.status_code, 400)
+        self.assertFalse(second.get_json()["ok"])
+        self.assertIn("范围已耗尽", second.get_json()["message"])
+        self.assertEqual(len(self.panel.state.query_ports()), 1)
+
+    def test_port_api_auto_allocation_requires_configured_range(self):
+        with patch.multiple("app.state.ports", COMMERCE_AUTO_PORT_START=None, COMMERCE_AUTO_PORT_END=None):
+            response = self.client.post("/api/ports", json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("范围未配置", response.get_json()["message"])
+        self.assertEqual(self.panel.state.query_ports(), [])
+
+    def test_port_api_auto_allocation_rolls_back_when_config_validation_fails(self):
+        with patch.multiple("app.state.ports", COMMERCE_AUTO_PORT_START=35000, COMMERCE_AUTO_PORT_END=35000):
+            with patch.object(self.panel.state, "xray_config_test", side_effect=RuntimeError("Invalid config")):
+                response = self.client.post("/api/ports", json={"note": "Failed tenant"})
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(self.panel.state.query_ports(), [])
+            retry = self.client.post("/api/ports", json={"note": "Valid tenant"})
+        self.assertEqual(retry.status_code, 201)
+        self.assertEqual(retry.get_json()["dashboard"]["ports"][0]["listen_port"], 35000)
+
+    def test_port_api_update_still_requires_an_explicit_port(self):
+        port = self.create_port(35000, "Existing tenant")
+        response = self.client.put(f"/api/ports/{port['id']}", json={"note": "Update"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.panel.state.query_ports()[0]["listen_port"], 35000)
+
+    def test_port_api_invalid_explicit_port_is_not_auto_allocated(self):
+        for value in (0, 65536, "invalid"):
+            response = self.client.post("/api/ports", json={"listen_port": value})
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.panel.state.query_ports(), [])
 
     def test_port_api_delete_is_idempotent_for_missing_record(self):
         port = self.create_port(31202, "Delete once")
@@ -361,6 +453,11 @@ class TenantPanelTest(unittest.TestCase):
         data_a = sub_a.get_json()["data"]["subscription"]
         self.assertEqual(data_a["listen_port"], 31001)
         self.assertIn("Tenant A", data_a.get("note") or "")
+
+        with self.panel.app.test_request_context("/"):
+            from app.web.core import build_tenant_dashboard_state
+            tenant_dashboard = build_tenant_dashboard_state(port_a["tenant_token"])
+            self.assertEqual(tenant_dashboard["meta"]["timezone_label"], "北京时间（UTC+08:00）")
 
         # Isolation: the port_a tenant session cannot read port_b's subscription.
         sub_b = self.client.get(f"/api/tenant/{port_b['tenant_token']}/subscription")
@@ -482,8 +579,8 @@ class TenantPanelTest(unittest.TestCase):
         self.assertIn("AI 域名统计", body)
         self.assertIn("openai.com", body)
         self.assertIn("已应用 AI 路由", body)
-        expected_report_time = datetime(2026, 6, 18, tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
-        self.assertIn(expected_report_time, body)
+        self.assertIn("2026-06-18 08:00:00", body)
+        self.assertIn("北京时间（UTC+08:00）", body)
 
 
 class PanelAccessTest(unittest.TestCase):
@@ -536,7 +633,11 @@ class PanelAccessTest(unittest.TestCase):
         self.assertEqual(response.get_json()["code"], "forbidden_source")
 
     def test_tailscale_source_reaches_admin(self):
-        response = self.client.get("/api/dashboard", environ_base={"REMOTE_ADDR": "100.100.100.100"})
+        # Use a synthetic client in the configured public CGNAT allocation.
+        from ipaddress import ip_network
+
+        cgnat = ip_network("100.64.0.0/10")
+        response = self.client.get("/api/dashboard", environ_base={"REMOTE_ADDR": str(cgnat.network_address + 1)})
         self.assertEqual(response.status_code, 200)
 
     def test_state_changing_api_still_requires_csrf_token(self):
@@ -631,6 +732,7 @@ class ProbeDashboardRenderTest(unittest.TestCase):
         self.assertIn("最近状态分布", body)
         self.assertIn("当前窗口共", body)
         self.assertIn("timeout", body)
+        self.assertIn("北京时间（UTC+08:00）", body)
 
 
 if __name__ == "__main__":

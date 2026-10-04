@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from ..config import (
     CONTROL_PLANE_BACKUP_XRAY_ENABLED,
     LOCAL_TZ,
+    LOCAL_TZ_LABEL,
 )
 from ..dns_failover import CloudflareApiError, resolve_public_ip
 from ..errors import ValidationError
@@ -94,7 +95,7 @@ class DnsFailoverService:
     def resolve_dns_failover_peak_timezone(self, raw):
         text = str(raw or "").strip()
         if not text:
-            return LOCAL_TZ, "local"
+            return LOCAL_TZ, LOCAL_TZ_LABEL
         if len(text) == 6 and text[0] in {"+", "-"} and text[3] == ":":
             try:
                 hours = int(text[1:3])
@@ -131,7 +132,7 @@ class DnsFailoverService:
             "start": str(config.peak_start or "").strip(),
             "end": str(config.peak_end or "").strip(),
             "timezone": str(config.peak_timezone or "").strip(),
-            "timezone_label": "服务器本地时区",
+            "timezone_label": LOCAL_TZ_LABEL,
             "current_time": "",
             "next_transition_at": "",
             "seconds_to_next_transition": 0,
@@ -335,6 +336,8 @@ class DnsFailoverService:
     def dns_failover_probe_status_label(self, status):
         if status == "healthy":
             return "探测成功"
+        if status == "management_error":
+            return "探测执行异常"
         if status == "unhealthy":
             return "探测失败"
         return "未检测"
@@ -417,6 +420,16 @@ class DnsFailoverService:
             return self.dns_failover_status()
 
         probe = self.failover_manager.probe_once()
+        if probe.get("management_error"):
+            with self.write_lock:
+                with self.repository.connect() as conn:
+                    self.update_dns_failover_state(conn, last_probe_status="management_error",
+                        last_probe_checked_at=utc_iso_now(), last_probe_error=probe.get("error", ""))
+                    self.write_dns_failover_history(conn, "probe", "error", detail=probe.get("error", ""))
+                    conn.commit()
+            emit_business_event("probe.failed", result="failure", resource_type="dns",
+                                error_code="probe_management_error", metadata=probe)
+            return self.dns_failover_status()
         probe_status = "healthy" if probe["ok"] else "unhealthy"
         emit_business_event(
             "dns_failover.checked",

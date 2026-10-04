@@ -69,7 +69,7 @@ def test_retired_metrics_endpoint_is_not_registered():
     assert "/metrics" not in {rule.rule for rule in flask_app.url_map.iter_rules()}
     with flask_app.test_client() as client:
         assert client.get("/metrics").status_code == 404
-        assert client.get("/metrics", headers={"Authorization": "Bearer dummy-scrape-token"}).status_code == 404
+        assert client.get("/metrics", headers={"Authorization": "Bearer dummy-retired-metrics-token"}).status_code == 404
 
 
 def test_create_app_does_not_construct_panel_state(monkeypatch):

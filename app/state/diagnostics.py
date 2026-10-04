@@ -1,23 +1,23 @@
 import concurrent.futures
-import socket
 
-from ..config import PROBE_TIMEOUT
+from ..config import PROBE_TIMEOUT, XRAY_CLIENT_CONFIG_PATH
 from ..helpers import utc_iso_now
 from ..subscriptions import parse_xray_client_profile
-from ..xray.node.probes import reality_handshake_probe
+from ..xray.protocol_probe import build_probe_runner, client_outbound
 
 
 class DiagnosticsService:
     """Deep, on-demand data-plane health check that bridges the control plane
     and the data plane: it verifies not just that node ports are reachable, but
-    that the Reality handshake actually succeeds and that the parameters the
+    that an authenticated VLESS + REALITY request succeeds and that the parameters the
     subscription hands out (uuid / shortId / SNI) still match what the data
     plane is really running. That last consistency check catches the silent
     "port open but node unusable" drift that plain TCP probes miss.
     """
 
-    def __init__(self, ports, node_controller):
+    def __init__(self, ports, node_controller, probe_runner=None):
         self.ports = ports
+        self.probe_runner = probe_runner or build_probe_runner()
         self.node_controller = node_controller
 
     def diagnose_data_plane(self):
@@ -78,14 +78,12 @@ class DiagnosticsService:
         if not node_host:
             entry["tcp_error"] = "订阅 profile 不可用，无法确定节点地址。"
             return entry
-        try:
-            with socket.create_connection((node_host, listen_port), timeout=timeout):
-                entry["tcp_reachable"] = True
-        except OSError as exc:
-            entry["tcp_error"] = str(exc)[:200]
-            return entry
-        if server_name:
-            entry["reality"] = reality_handshake_probe(node_host, listen_port, server_name, timeout=timeout)
+        probe = self.probe_runner.probe_outbound(
+            client_outbound(XRAY_CLIENT_CONFIG_PATH, listen_port, host=node_host), timeout, source="diagnostics", target=f"port:{listen_port}")
+        entry["reality"] = probe
+        entry["protocol"] = probe
+        entry["tcp_reachable"] = bool(probe["ok"])
+        entry["tcp_error"] = probe.get("error", "")
         return entry
 
     def _check_config_consistency(self, profile):

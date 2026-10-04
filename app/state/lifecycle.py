@@ -27,6 +27,7 @@ class ApplicationLifecycle:
         stop_event,
         maintenance_worker=None,
         dns_failover_worker=None,
+        incident_worker=None,
     ):
         self.database = database
         self.schema_bootstrap = schema_bootstrap
@@ -40,6 +41,7 @@ class ApplicationLifecycle:
         self.stop_event = stop_event
         self.maintenance_worker = maintenance_worker
         self.dns_failover_worker = dns_failover_worker
+        self.incident_worker = incident_worker
         self._worker_threads = []
         self._started = False
         self._stopped = False
@@ -86,6 +88,7 @@ class ApplicationLifecycle:
         for worker, name in (
             (self.maintenance_worker, "panel-maintenance"),
             (self.dns_failover_worker, "dns-failover"),
+            (self.incident_worker, "probe-incidents"),
         ):
             if worker is None:
                 continue

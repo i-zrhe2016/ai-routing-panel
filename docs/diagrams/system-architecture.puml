@@ -23,6 +23,14 @@ node "控制面" as control #EFF6FF {
   component "可选备用 Xray\nrelay / freedom" as backup #FEF3C7
 }
 
+node "独立探测执行主机" as probe #F3F4F6 {
+  component "Xray 客户端 / HTTPS 204" as probeClient
+}
+manager ..> probeClient : SSH stdin / 候选凭据
+panel ..> probeClient : SSH stdin / 诊断凭据
+probeClient ..> normalXray : 认证 VLESS + REALITY
+probeClient ..> aiXray : 认证 VLESS + REALITY
+
 client ..> dns : 解析入口
 client --> normalXray : 正常代理流量
 normalXray --> internet : 普通流量 / AI 不可用时回退
@@ -34,8 +42,8 @@ panel --> manager : 调度与人工模式
 manager ..> normalXray : 日志观测 / 路由产物
 panel ..> normalXray : 配置与节点管理
 client ..> backup : DNS 切换后的入口
-backup ..> aiXray : AI 可用时 relay
-backup ..> internet : AI 不可用时直出
+backup ..> aiXray : 配置为 relay 时中继全部域名
+backup ..> internet : 配置为 freedom 时直出全部域名
 
 
 note right of control

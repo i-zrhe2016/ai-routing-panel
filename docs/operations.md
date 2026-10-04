@@ -77,26 +77,25 @@ AI 路由状态至少应同时查看 `ai_candidates`、`manual_mode`、`route_st
 
 SSH 采集的认证、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
 
-## TCP 探针
+## 协议探测
 
-当 `PROBE_ENABLED=1` 时，面板会周期性对 `DATAPLANE_PROBE_HOST:<listen_port>` 做 TCP 连通性探测。
+AI 候选选择、启用租户端口的周期探测、DNS 故障切换和按需诊断均通过 `PROBE_SSH_TARGET` 的独立执行主机运行 Xray VLESS + REALITY 客户端。健康要求经认证隧道请求 `https://www.gstatic.com/generate_204` 返回 HTTP 204；TCP 开放或 TLS/SNI 握手不能建立业务健康。该固定目标无需 HTTPS 外的其他健康请求。
 
-相关页面与配置：
+配置键的默认值见[配置参考](configuration.md)。在独立主机安装 Python 3.10+、curl 和与节点一致的 Xray 客户端版本；将仓库 `scripts/xray_protocol_probe.py` 与 Xray 二进制放在 `/opt/xray-probe/releases/<version>/` 的 root 只读文件中。先校验二进制 SHA-256 和版本，再将 `PROBE_REMOTE_SCRIPT`、`PROBE_XRAY_BIN` 固定到 release 路径；使用 `current` 符号链接时应原子切换。先从控制面容器验证严格 SSH 主机密钥与认证，随后测试正确凭据成功、错误 UUID 拒绝、执行主机故障保留状态。回滚只需恢复此前脚本/二进制路径并重启 panel 和 manager；不得回退到普通/AI 节点执行。
 
-- 页面：`/probe-dashboard`
-- 常用变量：`PROBE_INTERVAL`、`PROBE_TIMEOUT`、`PROBE_TEST_LISTEN_PORT`
-- compose 默认把 `PROBE_INTERVAL` 设为 `180` 秒
+客户端 UUID、REALITY 公钥/Short ID 等仅经 SSH stdin 传输，写入每次调用独立的 0700 临时目录和 0600 配置；不进入 argv、输出或日志。每次启动独立 loopback SOCKS 监听，curl 强制使用 SOCKS5h 并禁用 NO_PROXY/用户 curl 配置，进程超时后终止并清理临时文件。请求超时接受 0.1–30 秒；SSH 总时限为请求时限加启动时限（最多 3 秒）和 4 秒清理余量。
 
-远端模式注意：
+缺失凭据、客户端依赖、无效返回、SSH/执行主机不可用均标记 `management_error`，不计为目标故障。AI 保留此前选择和动态片段，DNS 保留失败/成功计数及目标，租户周期探测保留此前业务健康。结果携带 `error_code`、`stage`、`checked_at`、`probe_origin` 与请求状态供控制面诊断使用；异常报告回调不改变健康决策。
 
-- 探针目标不能继续是 `redacted-ip-007`
-- 把 `DATAPLANE_PROBE_HOST` 设置成远端入口 IP 或域名
+普通租户探测使用 `client-test.json` 的实际账户凭据；统一 443 入口使用 `panelSubscription.users[listen_port]`，缺失/禁用账户不会借用其他 UUID。AI 候选使用实际渲染的 `ai_proxy` outbound，分享链接保留独立凭据。DNS 使用生成的主诊断客户端，并覆盖主探测 host/port，避免 DNS 别名已经指向备用时探测错误目标。
+
+节点 Xray admin API socket、配置/日志/流量读取仍使用各节点管理 transport；这些是管理状态，不能替代业务协议健康。`/probe-dashboard` 展示周期业务探测，`PROBE_INTERVAL`、`PROBE_TIMEOUT`、`PROBE_TEST_LISTEN_PORT` 控制采样。
 
 ## DNS 故障切换
 
 当 `DNS_FAILOVER_ENABLED=1` 且配置完整时，面板会后台周期性执行以下规则：
 
-- 只探测 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
+- 通过独立执行主机探测主入口 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
 - DNS 故障切换探测运行在独立 worker 中，不会被数据面 SSH、日志同步或流量统计阻塞
 - 连续失败达到 `DNS_FAILOVER_FAILURE_THRESHOLD` 时，把单条 Cloudflare DNS 记录切到备用目标
 - 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD` 时，自动回切到主数据面
@@ -260,3 +259,19 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 - AI 候选是否可达，以及 `manual_mode` 是否意外固定在故障节点
 - 自动模式下全部候选不可达时，`route_status` 应为 `fallback_to_primary`
 - 人工固定目标不可达时，`route_status` 应为 `manual_target_unreachable`
+
+## Codex 自动故障记录
+
+独立协议探测的普通上游、AI 上游、DNS 主入口和按需体检结果继续记录既有探测结果；自动分析另由控制面 `IncidentStore` 使用共享面板 SQLite 数据库确认连续失败。节点认证请求失败与探测执行器错误分别标记为 `node_failure`、`executor_error`，后者不构成节点故障结论。连续失败默认达到五次才生成并排队故障记录，前四次仅持久化连续次数、首末时间和最新脱敏证据，不调用模型。阈值配置见[配置说明](configuration.md#故障分析隔离运行配置)。同一来源、目标、故障类别与探测主机的计数在面板和独立 AI 管理器进程间原子共享，进程重启不会丢失。故障类别或探测主机改变会中断未确认的连续计数；成功清空计数。既有健康判断与故障切换时序不变。
+
+达到阈值时记录首个失败时间和实际观测次数；持续失败在尚未恢复的同类记录中累加，只排队一次分析，不为前几次失败伪造重复事件。执行器恢复后即使目标请求失败，也关闭旧执行器故障并重新确认节点故障；执行器再次失败不会表示节点恢复，尚未恢复的节点故障仍保留。成功目标请求关闭两个类别的故障并保留恢复时间，后续复发重新达到阈值才生成新记录。迁移保留旧记录、事件、报告和状态；旧排队记录的累计次数不作为连续失败证据，只有新观测达到阈值才允许认领。已经运行、完成或失败的旧分析保留原有生命周期，超时运行任务仍可恢复认领。
+
+后台独立工作线程处理 `queued → running → completed/failed`，探测与故障切换不等待模型。超时的旧运行认领重新进入队列；模型不可用、超时、非零退出或格式错误保留 `failed`，不生成假诊断。故障后排查工作区显示状态、来源、目标、探测主机、时间、次数和恢复信息。文档按纯文本打开，模型内容不会执行 HTML。
+
+文档保存在 `DATA_DIR/probe-incidents/reports/<固定32位事件ID>.md`，目录权限 `0700`、文件 `0600`，包含观测事实、Codex 分析、不确定性和建议检查。模型提示要求分析正文使用简体中文，JSON 字段名和主机名、协议名、错误码等技术标识保留原样；文档标题、章节和固定失败说明使用中文。已知历史英文分析错误在接口读取时显示为中文，不改写原始错误、失败状态或事件历史；分析失败文档明确说明未获得模型诊断。每份文档最多 128 KiB，接口拒绝无效 ID、符号链接和超限内容；访问仍受面板内网/Tailscale 来源限制。文档是私有运行数据，不追加到 Git 文档，也不自动发布到 GitHub。
+
+每次分析通过已有 Docker CLI 启动固定镜像的临时容器：只读根文件系统、全部 capabilities 禁用、禁止权限提升、限制进程数/内存/CPU、独立 bridge 网络和私有 `/tmp`。只绑定经过筛选的认证输入目录（只读）和本次已脱敏的工作目录；不绑定生产配置、数据库、日志、SSH 密钥或 Docker socket。容器内仅复制 `auth.json` 与最小 `config.toml` 到私有 Codex home，使用只读 sandbox、临时模式、忽略规则并禁用 shell tool。模型只收到白名单探测快照，输出再次脱敏；不会自动修复或更改生产节点。
+
+部署前必须由运维准备只含这两个文件的独立认证目录，文件权限 `0600`。配置仅保留当前认证所需的模型/provider 字段，不包含 hooks、plugins、projects、skills 或任意用户配置。Docker daemon 使用宿主路径，因此 `INCIDENT_CODEX_AUTH_HOME` 是宿主认证目录，`INCIDENT_CODEX_HOST_WORK_ROOT` 必须映射面板容器内 `DATA_DIR/probe-incidents/work` 的宿主路径。未提供镜像或认证路径时分析明确失败。环境配置见[配置说明](configuration.md)。
+
+模型超时默认 180 秒（最大 600 秒）。容器内也有独立进程时限；父工作线程超时后显式 `docker rm -f` 本次容器，避免 Docker 客户端终止后模型继续运行。恢复观测与模型分析相互独立，恢复并不会伪造模型分析成功。

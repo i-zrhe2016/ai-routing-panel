@@ -24,6 +24,7 @@ from ..config import (
     CUSTOMER_SESSION_ID_KEY,
     DEFAULT_UPSTREAM_HOST,
     DEFAULT_UPSTREAM_PORT,
+    LOCAL_TZ_LABEL,
     PANEL_HOST,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
@@ -455,7 +456,7 @@ def collect_dashboard_state(message="", level="info", ai_sync_error=""):
             "panel_address": PANEL_PUBLIC_URL or f"{PANEL_HOST}:{PANEL_PORT}",
             "data_plane_running": bool(data_plane_status.get("xray_running")),
             "ai_node_running": bool(ai_node_status.get("reachable")),
-            "timezone_label": datetime.now().astimezone().strftime("%Z"),
+            "timezone_label": LOCAL_TZ_LABEL,
             "probe_enabled": PROBE_ENABLED,
             "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
             "ai_domain_dashboard_url": url_for("ai_domain_dashboard"),
@@ -603,7 +604,7 @@ def build_tenant_dashboard_state(tenant_token, message="", level="info"):
         },
         "meta": {
             "panel_address": PANEL_PUBLIC_URL or f"{PANEL_HOST}:{PANEL_PORT}",
-            "timezone_label": datetime.now().astimezone().strftime("%Z"),
+            "timezone_label": LOCAL_TZ_LABEL,
             "probe_enabled": PROBE_ENABLED,
             "probe_dashboard_url": url_for("probe_dashboard") if PROBE_ENABLED else "",
             "tenant_login_url": tenant_login_target(tenant_token),
@@ -642,7 +643,7 @@ def build_customer_dashboard_state(customer, message="", level="info"):
     return {
         "flash": {"message": message, "level": level},
         "meta": {
-            "timezone_label": datetime.now().astimezone().strftime("%Z"),
+            "timezone_label": LOCAL_TZ_LABEL,
             "plans_page_url": url_for("plans_page"),
             "orders_url": url_for("customer_orders"),
             "subscriptions_url": url_for("customer_subscriptions"),
@@ -669,7 +670,7 @@ def build_customer_dashboard_state(customer, message="", level="info"):
     }
 
 
-def collect_insights_state(days=14):
+def collect_insights_state(days=1):
     """Read-only operational history for the console visualization workspaces.
 
     Deliberately separate from :func:`build_dashboard_state`: it performs no
@@ -743,7 +744,7 @@ def json_success_response(message="", level="success", status_code=200):
     )
 
 
-def json_snapshot_success_response(message="", level="success", status_code=200):
+def json_snapshot_success_response(message="", level="success", status_code=200, created_port_id=None):
     """Return the current dashboard without running maintenance a second time."""
     return (
         jsonify(
@@ -752,6 +753,7 @@ def json_snapshot_success_response(message="", level="success", status_code=200)
                 "message": message,
                 "level": level,
                 "dashboard": collect_dashboard_state(message=message, level=level),
+                **({"created_port_id": created_port_id} if created_port_id is not None else {}),
             }
         ),
         status_code,

@@ -28,10 +28,29 @@ def api_insights():
     """Read-only history for the console: hosts, traffic series, probe uptime,
     and DNS failover events. No sync, no reload, no write."""
     try:
-        days = int(request.args.get("days", "14"))
+        days = int(request.args.get("days", "1"))
     except (TypeError, ValueError):
-        days = 14
+        days = 1
     return jsonify({"ok": True, "insights": collect_insights_state(days=days)})
+
+
+@route("/api/probe-incidents", methods=["GET"])
+def api_probe_incidents():
+    response = jsonify({"ok": True, "incidents": state.incidents.list()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@route("/api/probe-incidents/<incident_id>/report", methods=["GET"])
+def api_probe_incident_report(incident_id):
+    try:
+        report = state.incidents.read_report(incident_id)
+    except (ValueError, OSError, UnicodeError):
+        return json_error_response("故障文档不存在或不可用。", status_code=404)
+    response = jsonify({"ok": True, "report": report})
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @route("/api/plans", methods=["GET"])
@@ -193,7 +212,7 @@ def api_rotate_subscription():
 def api_create_port():
     payload = {}
     try:
-        payload = state.validate_port_payload(request_payload())
+        payload = state.validate_port_payload(request_payload(), allow_auto=True)
         port_id = state.create_port(payload)
         log_business_event("port.created", resource_type="port", resource_id=port_id, metadata={"listen_port": payload.get("listen_port")})
     except sqlite3.IntegrityError as exc:
@@ -208,7 +227,7 @@ def api_create_port():
     except (ValidationError, RuntimeError) as exc:
         log_business_event("port.created", result="failure", error_code="validation", message=str(exc), resource_type="port")
         return json_error_response(str(exc), status_code=400)
-    return json_snapshot_success_response("端口已创建并写入 Xray。", status_code=201)
+    return json_snapshot_success_response("端口已创建并写入 Xray。", status_code=201, created_port_id=port_id)
 
 
 @route("/api/ports/<int:port_id>", methods=["PUT"])

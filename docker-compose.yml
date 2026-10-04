@@ -31,7 +31,18 @@ services:
       # point both at the same database and runtime execution strategy.
       AI_DOMAIN_MANAGER_EXECUTION_MODE: "${AI_DOMAIN_MANAGER_EXECUTION_MODE:-docker}"
       PANEL_DB_PATH: "/data/panel.db"
+      INCIDENT_FAILURE_THRESHOLD: "${INCIDENT_FAILURE_THRESHOLD:-5}"
+      INCIDENT_CODEX_IMAGE: "${INCIDENT_CODEX_IMAGE:-}"
+      INCIDENT_CODEX_AUTH_HOME: "${INCIDENT_CODEX_AUTH_HOME:-}"
+      INCIDENT_CODEX_HOST_WORK_ROOT: "${INCIDENT_CODEX_HOST_WORK_ROOT:-/root/ai-routing-panel/data/probe-incidents/work}"
+      INCIDENT_CODEX_TIMEOUT: "${INCIDENT_CODEX_TIMEOUT:-180}"
       DATAPLANE_EXTERNAL_RELOADER_ENABLED: "${DATAPLANE_EXTERNAL_RELOADER_ENABLED:-0}"
+      PROBE_SSH_TARGET: "${PROBE_SSH_TARGET:-}"
+      PROBE_SSH_BIN: "${PROBE_SSH_BIN:-ssh}"
+      PROBE_SSH_OPTIONS: "${PROBE_SSH_OPTIONS:-}"
+      PROBE_SSH_KNOWN_HOSTS: "${PROBE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      PROBE_REMOTE_SCRIPT: "${PROBE_REMOTE_SCRIPT:-/opt/xray-probe/current/xray_protocol_probe.py}"
+      PROBE_XRAY_BIN: "${PROBE_XRAY_BIN:-/opt/xray-probe/current/xray}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@<normal-data-plane-host>}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
       DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
@@ -283,7 +294,7 @@ services:
     # require a local xray-reality service.
     image: xray-routing-panel-xray-routing-panel:latest
     restart: unless-stopped
-    # AI upstream probes must traverse the control plane's Tailscale network.
+    # SSH to the dedicated probe executor uses the host's Tailscale network.
     # The default bridge network cannot reach the host's Tailscale routes.
     network_mode: host
     working_dir: /workspace
@@ -293,7 +304,9 @@ services:
     environment:
       XRAY_WORKSPACE_DIR: "/workspace/app/xray"
       PANEL_DB_PATH: "/panel-data/panel.db"
-      AI_DOMAIN_INTERVAL_SECONDS: "3600"
+      INCIDENT_FAILURE_THRESHOLD: "${INCIDENT_FAILURE_THRESHOLD:-5}"
+      AI_DOMAIN_INTERVAL_SECONDS: "${AI_DOMAIN_INTERVAL_SECONDS:-3600}"
+      AI_ROUTING_HEALTH_INTERVAL_SECONDS: "${AI_ROUTING_HEALTH_INTERVAL_SECONDS:-30}"
       AI_DOMAIN_LOOKBACK_SECONDS: "3600"
       AI_DOMAIN_BATCH_SIZE: "50"
       AI_DOMAIN_CLASSIFIER_PROVIDER: "${AI_DOMAIN_CLASSIFIER_PROVIDER:-openrouter}"
@@ -314,6 +327,12 @@ services:
       DATAPLANE_EXTERNAL_RELOADER_ENABLED: "${DATAPLANE_EXTERNAL_RELOADER_ENABLED:-0}"
       DATAPLANE_CONFIG_PATH: "${DATAPLANE_CONFIG_PATH:-}"
       DATAPLANE_DYNAMIC_ROUTING_PATH: "${DATAPLANE_DYNAMIC_ROUTING_PATH:-}"
+      PROBE_SSH_TARGET: "${PROBE_SSH_TARGET:-}"
+      PROBE_SSH_BIN: "${PROBE_SSH_BIN:-ssh}"
+      PROBE_SSH_OPTIONS: "${PROBE_SSH_OPTIONS:-}"
+      PROBE_SSH_KNOWN_HOSTS: "${PROBE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      PROBE_REMOTE_SCRIPT: "${PROBE_REMOTE_SCRIPT:-/opt/xray-probe/current/xray_protocol_probe.py}"
+      PROBE_XRAY_BIN: "${PROBE_XRAY_BIN:-/opt/xray-probe/current/xray}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@<normal-data-plane-host>}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
       DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"

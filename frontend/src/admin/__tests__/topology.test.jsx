@@ -149,6 +149,32 @@ describe("traffic topology source of truth", () => {
     expect(buildTrafficTopology(snapshot("normal_ai", [])).nodes.some(({ kind }) => kind === "ai")).toBe(false);
   });
 
+  it("treats probe management failures as unknown AI reachability", () => {
+    const panel = snapshot("normal_ai", [{ index: 0, selected: true, is_reachable: false, probe_management_error: true }]);
+    const graph = buildTrafficTopology(panel);
+    expect(graph.nodes.find(({ id }) => id === "ai-0").state).toBe("unknown");
+    expect(activeEdges(graph)).not.toContain("normal>ai-0");
+    expect(activeEdges(graph)).toContain("normal>normal-direct");
+  });
+
+  it("matches the actual backup relay target instead of the normal AI selection", () => {
+    const panel = snapshot("dns_backup_relay_ai");
+    panel.dnsFailoverStatus.backup_relay_target = { upstream_host: "backup.example.com", upstream_port: 8443 };
+    panel.aiRoutingStatus.ai_candidates[1].upstream_port = 8443;
+    panel.aiRoutingStatus.ai_candidates[1].is_reachable = true;
+    const graph = buildTrafficTopology(panel);
+    expect(activeEdges(graph)).toEqual(["client>backup", "backup>backup-relay", "backup-relay>backup-exit"]);
+    expect(graph.nodes.find(({ id }) => id === "ai-0").state).toBe("standby");
+  });
+
+  it("never marks an ambiguous candidate selection as the active AI branch", () => {
+    const panel = snapshot("normal_ai");
+    panel.aiRoutingStatus.ai_candidates[1].selected = true;
+    panel.aiRoutingStatus.ai_candidates[1].is_reachable = true;
+    const graph = buildTrafficTopology(panel);
+    expect(activeEdges(graph)).toEqual(["client>normal", "normal>normal-direct", "normal-direct>ordinary-exit"]);
+  });
+
   it("omits unconfigured entries and marks missing/invalid routes unknown", () => {
     const graph = buildTrafficTopology({ trafficRouting: { path: "bogus" } });
     expect(graph.path).toBe("unknown");
@@ -206,6 +232,24 @@ describe("accessible traffic topology", () => {
     expect(screen.getByRole("button", { name: /主 AI.*不可达/ }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText(/候选探测不可达/)).toBeTruthy();
     expect(screen.getByText("当前 normal_fallback")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /数据面直出.*配置路径/ })).toBeTruthy();
+    changed.aiRoutingStatus.ai_candidates[0].is_reachable = true;
+    changed.trafficRouting.path = "normal_ai";
+    changed.trafficRouting.ai_branch_state = "active";
+    rerender(<TrafficTopology panel={changed} />);
+    expect(screen.getByRole("button", { name: /主 AI.*配置路径/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /数据面直出.*配置路径/ })).toBeTruthy();
+  });
+
+  it("changes measured ingress animation with traffic without inventing branch throughput", () => {
+    const panel = snapshot("normal_ai");
+    const { container, rerender } = render(<TrafficTopology panel={{ ...panel, trafficActivity: { bytes: 1024, bytesPerSecond: 512 } }} />);
+    expect(screen.getByText(/全站流量速率：512 B\/s/)).toBeTruthy();
+    expect(container.querySelectorAll(".is-flowing")).toHaveLength(1);
+    expect(container.querySelector(".is-flowing").getAttribute("data-from")).toBe("client");
+    rerender(<TrafficTopology panel={{ ...panel, trafficActivity: { bytes: 0, bytesPerSecond: 0 } }} />);
+    expect(container.querySelectorAll(".is-flowing")).toHaveLength(0);
+    expect(screen.getByText(/全站流量速率：0 B\/s/)).toBeTruthy();
   });
 
   it("falls back to client details when the selected candidate disappears", async () => {
