@@ -21,30 +21,29 @@ export default function DeliveryWorkspace() {
     panel.setFlash("浏览器未允许复制，请手动复制。", "error");
   }
 
-  function rotate(kind, port) {
-    const labels = {
-      tenant: { title: `重置端口 ${port.listen_port} 的租户面板地址？`, body: "旧地址会立即失效，已登录的租户需要重新获取地址。", run: () => panel.rotateTenantToken(port) },
-      credentials: { title: `重置端口 ${port.listen_port} 的租户账号密码？`, body: "旧凭据会立即失效。", run: () => panel.rotateTenantCredentials(port) },
-      subscription: { title: `重置端口 ${port.listen_port} 的订阅地址？`, body: "旧订阅地址会立即失效，客户端需要重新导入。", run: () => panel.rotatePortSubscription(port) },
-    };
-    const item = labels[kind];
-    confirm.ask({ title: item.title, body: item.body, tone: "danger", confirmLabel: "确认重置", onConfirm: item.run });
+  function rotateSubscription(port) {
+    confirm.ask({
+      title: `重置端口 ${port.listen_port} 的订阅地址？`,
+      body: "旧订阅地址会立即失效，客户端需要重新导入。",
+      tone: "danger",
+      confirmLabel: "确认重置",
+      onConfirm: () => panel.rotatePortSubscription(port),
+    });
   }
 
   return (
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">DELIVERY</p>
-          <h2>端口与租户交付</h2>
-          <p>新增监听入口、维护租户配额与到期时间，并生成每个端口独立的登录地址、凭据和订阅链接。</p>
+          <h1>端口与租户交付</h1>
+          <p>新增租户时自动分配监听端口，维护配额与到期时间，并生成独立的订阅链接。</p>
         </div>
         <span className="cc-status-line">
           {panel.filteredPorts.length} / {panel.summary.total_ports || 0} 个端口
         </span>
       </section>
 
-      <Panel kicker="NEW LISTENER" title="新增端口" description="沿用当前节点的 REALITY 参数，只新增一个监听入口。">
+      <Panel title="新增端口" description="沿用当前节点的 REALITY 参数，只新增一个监听入口。">
         <form
           className="form-grid"
           onSubmit={(event) => {
@@ -53,19 +52,19 @@ export default function DeliveryWorkspace() {
           }}
         >
           <label className="field">
-            <span>监听端口</span>
+            <span>监听端口（可选）</span>
             <input
               className="a-input"
               type="number"
               min="1"
               max="65535"
-              required
+              placeholder="留空自动分配"
               value={panel.createForm.listen_port}
               onChange={(event) => panel.setCreateForm({ ...panel.createForm, listen_port: event.target.value })}
             />
           </label>
           <label className="field">
-            <span>到期时间（{panel.meta.timezone_label || "服务器时区"}）</span>
+            <span>到期时间（{panel.meta.timezone_label || "北京时间（UTC+08:00）"}）</span>
             <input
               className="a-input"
               type="datetime-local"
@@ -104,7 +103,6 @@ export default function DeliveryWorkspace() {
 
       <div className="resource-layout">
         <Panel
-          kicker="PORT INVENTORY"
           title="端口管理"
           description="按端口号、备注或状态筛选。"
         >
@@ -166,7 +164,6 @@ export default function DeliveryWorkspace() {
         {selected ? (
           <Panel
             id="port-detail-panel"
-            kicker="SELECTED PORT"
             title={`端口 ${selected.listen_port}`}
             description={`${selected.note ? `${selected.note} · ` : ""}租户直接接入当前 Xray Reality 入站。`}
             actions={<StatusPill tone={portTone(selected)} label={selected.status_label || selected.status} />}
@@ -198,7 +195,7 @@ export default function DeliveryWorkspace() {
                 />
               </label>
               <label className="field">
-                <span>到期时间（{panel.meta.timezone_label || "服务器时区"}）</span>
+                <span>到期时间（{panel.meta.timezone_label || "北京时间（UTC+08:00）"}）</span>
                 <input
                   className="a-input"
                   type="datetime-local"
@@ -237,26 +234,16 @@ export default function DeliveryWorkspace() {
               <div className="access-block">
                 <div className="section-heading">
                   <div>
-                    <p className="section-kicker">TENANT DELIVERY</p>
-                    <h3>租户面板与订阅输出</h3>
-                    <p className="section-description">当前端口的登录地址、账号密码和订阅地址独立生成。</p>
+                    <h3>订阅与连接信息</h3>
+                    <p className="section-description">复制订阅地址或直连分享链接，导入客户端即可使用。</p>
                   </div>
                 </div>
                 <div className="action-row">
-                  <button className="a-btn secondary" type="button" disabled={panel.isBusy(`rotate-tenant:${selected.id}`)} onClick={() => rotate("tenant", selected)}>
-                    重置面板地址
-                  </button>
-                  <button className="a-btn secondary" type="button" disabled={panel.isBusy(`rotate-credentials:${selected.id}`)} onClick={() => rotate("credentials", selected)}>
-                    重置账号密码
-                  </button>
-                  <button className="a-btn secondary" type="button" disabled={panel.isBusy(`rotate-subscription:${selected.id}`)} onClick={() => rotate("subscription", selected)}>
+                  <button className="a-btn secondary" type="button" disabled={panel.isBusy(`rotate-subscription:${selected.id}`)} onClick={() => rotateSubscription(selected)}>
                     重置订阅地址
                   </button>
                 </div>
                 <div className="access-grid">
-                  <CopyField label="租户登录地址" value={selected.access.tenant_login_url} onError={onCopyError} />
-                  <CopyField label="租户用户名" value={selected.access.tenant_username} onError={onCopyError} />
-                  <CopyField label="租户密码" value={selected.access.tenant_password} onError={onCopyError} />
                   <CopyField label="Clash 订阅" value={selected.access.tenant_subscription_clash_url} onError={onCopyError} />
                   <CopyField label="V2Ray 订阅" value={selected.access.tenant_subscription_v2ray_url} onError={onCopyError} />
                   <CopyField label="VLESS 直连分享" value={selected.access.share_link} onError={onCopyError} />

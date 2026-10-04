@@ -21,7 +21,7 @@
 架构、拓扑、流程和时序图统一采用 PlantUML，不在 Markdown 内维护 Mermaid 或字符拓扑。命令、配置、目录清单、日志样例和普通表格保留原格式。
 
 - 源文件为 `diagrams/<topic>.puml`，预览为同目录同名 `.svg`。
-- 根专题图表位于 `docs/diagrams/`；运维日报专题图表位于 `docs/ops-reporting/diagrams/`。
+- 根专题图表位于 `docs/diagrams/`。
 - 所有源文件引用 [统一样式](diagrams/style.iuml)，使用 `plain` 主题和支持中文的 `Noto Sans CJK SC` 字体。
 - 组件边界使用组件图，操作流程使用活动图，状态变化使用状态图，交互顺序使用时序图。
 - 在所属文档中嵌入 SVG，并在相邻位置链接 `.puml` 源文件。
@@ -35,9 +35,9 @@
 
 ```bash
 java -Djava.awt.headless=true -jar /path/to/plantuml-1.2025.10.jar \
-  -charset UTF-8 -checkonly 'docs/diagrams/*.puml' 'docs/ops-reporting/diagrams/*.puml'
+  -charset UTF-8 -checkonly 'docs/diagrams/*.puml'
 java -Djava.awt.headless=true -jar /path/to/plantuml-1.2025.10.jar \
-  -charset UTF-8 -tsvg 'docs/diagrams/*.puml' 'docs/ops-reporting/diagrams/*.puml'
+  -charset UTF-8 -tsvg 'docs/diagrams/*.puml'
 ```
 
 完成后检查渲染退出状态、SVG 内容和所有图表引用，并检查图片中文字、箭头和组件边界是否清晰。

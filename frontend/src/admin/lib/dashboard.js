@@ -16,7 +16,6 @@ export const EMPTY_PANEL = {
   trafficRouting: {},
   aiDomainStats: {},
   ports: [],
-  commerce: { summary: {}, settings: {}, plans: [], orders: [] },
 };
 
 export function preparePort(port) {
@@ -31,29 +30,6 @@ export function preparePort(port) {
   };
 }
 
-export function preparePlan(plan) {
-  return {
-    ...plan,
-    form: {
-      slug: String(plan.slug || ""),
-      name: String(plan.name || ""),
-      description: String(plan.description || ""),
-      price_fen: String(plan.price_fen ?? ""),
-      duration_days: String(plan.duration_days ?? ""),
-      traffic_limit: String(plan.traffic_limit_display || ""),
-      enabled: Boolean(plan.enabled),
-      sort_order: String(plan.sort_order ?? 0),
-    },
-  };
-}
-
-export function prepareOrder(order) {
-  return {
-    ...order,
-    form: { review_note: String(order.review_note || order.rejection_reason || "") },
-  };
-}
-
 export function normalizeDashboard(dashboard) {
   const payload = dashboard || {};
   const meta = payload.meta || {};
@@ -61,7 +37,6 @@ export function normalizeDashboard(dashboard) {
   const aiNodes = Array.isArray(meta.ai_nodes)
     ? meta.ai_nodes
     : (Array.isArray(aiNodeStatus.nodes) ? aiNodeStatus.nodes : []);
-  const commerce = payload.commerce || {};
   return {
     meta,
     summary: payload.summary || {},
@@ -75,12 +50,6 @@ export function normalizeDashboard(dashboard) {
     trafficRouting: meta.traffic_routing || {},
     aiDomainStats: meta.ai_domain_stats || {},
     ports: (payload.ports || []).map(preparePort),
-    commerce: {
-      summary: commerce.summary || {},
-      settings: { ...(commerce.settings || {}) },
-      plans: (commerce.plans || []).map(preparePlan),
-      orders: (commerce.orders || []).map(prepareOrder),
-    },
   };
 }
 
@@ -89,6 +58,7 @@ export function normalizeDashboard(dashboard) {
 export function routingSignature(panel) {
   return JSON.stringify({
     path: panel.trafficRouting?.path || "unknown",
+    target: panel.aiRoutingStatus?.ai_candidates?.filter((candidate) => candidate.selected).map((candidate) => [candidate.upstream_host, candidate.upstream_port, candidate.is_reachable]),
     dnsTarget: panel.dnsFailoverStatus?.current_target || "",
     aiMode: panel.aiRoutingStatus?.manual_mode || "auto",
     backupMode: panel.meta?.backup_xray_mode || "",

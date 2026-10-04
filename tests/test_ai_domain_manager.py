@@ -476,7 +476,7 @@ class AiDomainManagerTest(unittest.TestCase):
             lock_path.parent.mkdir()
             args = mock.Mock(config_out=root / "runtime" / "config.json", apply_lock_path=lock_path)
             with exclusive_file_lock(lock_path), self.assertRaises(LockBusyError):
-                manager.run_once(args)
+                manager.run_once(args, routing_only=True)
 
     def test_run_once_delegates_unmanaged_data_plane_reload(self):
         controller = mock.Mock()
@@ -1016,36 +1016,35 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual(decisions["domains"], {})
         self.assertIn("openai classifier unavailable", stderr.getvalue())
 
-    def test_probe_uses_reality_callback_when_candidate_has_sni(self):
+    def test_probe_uses_authenticated_outbound_callback(self):
         controller = mock.Mock()
-        controller.probe_reality_endpoint.return_value = {
+        controller.probe_outbound.return_value = {
             "ok": False,
-            "error": "TLS handshake failed",
-            "method": "reality",
+            "error": "protocol_request_failed",
+            "method": "vless_reality",
         }
 
         result = candidates.probe_ai_upstream_candidate(
             {
                 "upstream_host": "ai.example.com",
                 "upstream_port": 443,
-                "probe_server_name": "www.example.com",
+                "probe_outbound": {"protocol": "vless", "credential": "independent"},
             },
             2.0,
             probe_controller=controller,
         )
 
         self.assertFalse(result["is_reachable"])
-        self.assertEqual(result["probe_method"], "reality")
-        controller.probe_reality_endpoint.assert_called_once_with(
-            "ai.example.com",
-            443,
-            "www.example.com",
-            2.0,
-        )
+        self.assertEqual(result["probe_method"], "vless_reality")
+        controller.probe_outbound.assert_called_once_with(
+            {"protocol": "vless", "credential": "independent"}, 2.0,
+            source="ai_upstream", target="ai.example.com:443")
+        controller.probe_tcp_endpoint.assert_not_called()
+        controller.probe_reality_endpoint.assert_not_called()
 
     def test_select_ai_target_does_not_call_all_unreachable_on_probe_management_error(self):
         controller = mock.Mock()
-        controller.probe_tcp_endpoint.return_value = {
+        controller.probe_outbound.return_value = {
             "ok": False,
             "error": "ssh authentication failed",
             "management_error": True,

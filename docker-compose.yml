@@ -31,7 +31,18 @@ services:
       # point both at the same database and runtime execution strategy.
       AI_DOMAIN_MANAGER_EXECUTION_MODE: "${AI_DOMAIN_MANAGER_EXECUTION_MODE:-docker}"
       PANEL_DB_PATH: "/data/panel.db"
+      INCIDENT_FAILURE_THRESHOLD: "${INCIDENT_FAILURE_THRESHOLD:-5}"
+      INCIDENT_CODEX_IMAGE: "${INCIDENT_CODEX_IMAGE:-}"
+      INCIDENT_CODEX_AUTH_HOME: "${INCIDENT_CODEX_AUTH_HOME:-}"
+      INCIDENT_CODEX_HOST_WORK_ROOT: "${INCIDENT_CODEX_HOST_WORK_ROOT:-/root/ai-routing-panel/data/probe-incidents/work}"
+      INCIDENT_CODEX_TIMEOUT: "${INCIDENT_CODEX_TIMEOUT:-180}"
       DATAPLANE_EXTERNAL_RELOADER_ENABLED: "${DATAPLANE_EXTERNAL_RELOADER_ENABLED:-0}"
+      PROBE_SSH_TARGET: "${PROBE_SSH_TARGET:-}"
+      PROBE_SSH_BIN: "${PROBE_SSH_BIN:-ssh}"
+      PROBE_SSH_OPTIONS: "${PROBE_SSH_OPTIONS:-}"
+      PROBE_SSH_KNOWN_HOSTS: "${PROBE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      PROBE_REMOTE_SCRIPT: "${PROBE_REMOTE_SCRIPT:-/opt/xray-probe/current/xray_protocol_probe.py}"
+      PROBE_XRAY_BIN: "${PROBE_XRAY_BIN:-/opt/xray-probe/current/xray}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@<normal-data-plane-host>}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
       DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
@@ -63,10 +74,7 @@ services:
       AI_NODE_CONFIG_PATHS: "${AI_NODE_CONFIG_PATHS:-}"
       AI_NODE_API_SERVER: "${AI_NODE_API_SERVER:-127.0.0.1:10085}"
       AI_NODE_API_SERVERS: "${AI_NODE_API_SERVERS:-}"
-      AI_NODE_METRICS_URL: "${AI_NODE_METRICS_URL:-}"
       AI_NODE_ACCESS_LOG_PATH: "${AI_NODE_ACCESS_LOG_PATH:-}"
-      AI_NODE_DESTINATION_WINDOW_SECONDS: "${AI_NODE_DESTINATION_WINDOW_SECONDS:-600}"
-      AI_NODE_DESTINATION_MAX_LABELS: "${AI_NODE_DESTINATION_MAX_LABELS:-50}"
       AI_NODE_PROBE_HOST: "${AI_NODE_PROBE_HOST:-}"
       AI_NODE_PROBE_HOSTS: "${AI_NODE_PROBE_HOSTS:-}"
       AI_NODE_XRAY_BIN: "${AI_NODE_XRAY_BIN:-/usr/local/bin/xray}"
@@ -103,8 +111,6 @@ services:
       PROBE_ENABLED: "1"
       PROBE_INTERVAL: "180"
       PROBE_TEST_LISTEN_PORT: "31098"
-      METRICS_TOKEN: "${METRICS_TOKEN:-}"
-      METRICS_DP_TTL: "${METRICS_DP_TTL:-30}"
     volumes:
       - ./data:/data
       - ./app/xray:/app/xray
@@ -191,8 +197,7 @@ services:
       DB_BACKUP_BUNDLE_PREFIX: "${DB_BACKUP_BUNDLE_PREFIX:-xray-routing-panel}"
       DB_BACKUP_RECOVERY_REQUIRED: "${DB_BACKUP_RECOVERY_REQUIRED:-0}"
       DB_BACKUP_RECOVERY_STATUS_PATH: "${DB_BACKUP_RECOVERY_STATUS_PATH:-/backups/node-recovery-status.json}"
-      DB_BACKUP_OPS_DB_PATH: "${DB_BACKUP_OPS_DB_PATH:-/ops-data/ops.db}"
-      DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/docker-compose.ops-reporting.yml,/project/docker-compose.ops-reporting.deploy.yml,/project/.env,/project/.env.ops-reporting,/project/.env.example,/project/app/xray/.env,/project/app/xray/runtime,/project/app/xray/reports,/project/scripts,/data/uploads}"
+      DB_BACKUP_EXTRA_PATHS: "${DB_BACKUP_EXTRA_PATHS:-/project/docker-compose.yml,/project/.env,/project/.env.example,/project/app/xray/.env,/project/app/xray/runtime,/project/app/xray/reports,/project/scripts,/data/uploads}"
       # Full node capture is opt-in: set the collection/recovery flags to 1,
       # provide real targets and host-side Tailscale mounts, then recreate it.
       # The target aliases are passed through so the backup collector sees the
@@ -233,7 +238,6 @@ services:
       # even when a full image rebuild is deferred on a disk-constrained host.
       - ./scripts:/app/scripts:ro
       - ./:/project:ro
-      - /srv/xray-ops:/ops-data:ro
       - /root/.ssh/known_hosts:/root/.ssh/known_hosts:ro
       - /root/.ssh/known_hosts_ai:/root/.ssh/known_hosts_ai:ro
       - xray-routing-panel-db-backup-tailscale-socket:/var/run/xray-backup:ro
@@ -290,7 +294,7 @@ services:
     # require a local xray-reality service.
     image: xray-routing-panel-xray-routing-panel:latest
     restart: unless-stopped
-    # AI upstream probes must traverse the control plane's Tailscale network.
+    # SSH to the dedicated probe executor uses the host's Tailscale network.
     # The default bridge network cannot reach the host's Tailscale routes.
     network_mode: host
     working_dir: /workspace
@@ -300,9 +304,16 @@ services:
     environment:
       XRAY_WORKSPACE_DIR: "/workspace/app/xray"
       PANEL_DB_PATH: "/panel-data/panel.db"
-      AI_DOMAIN_INTERVAL_SECONDS: "3600"
+      INCIDENT_FAILURE_THRESHOLD: "${INCIDENT_FAILURE_THRESHOLD:-5}"
+      AI_DOMAIN_INTERVAL_SECONDS: "${AI_DOMAIN_INTERVAL_SECONDS:-3600}"
+      AI_ROUTING_HEALTH_INTERVAL_SECONDS: "${AI_ROUTING_HEALTH_INTERVAL_SECONDS:-30}"
       AI_DOMAIN_LOOKBACK_SECONDS: "3600"
       AI_DOMAIN_BATCH_SIZE: "50"
+      AI_DOMAIN_CLASSIFIER_PROVIDER: "${AI_DOMAIN_CLASSIFIER_PROVIDER:-openrouter}"
+      OPENROUTER_MODEL: "${OPENROUTER_MODEL:-openai/gpt-5-nano}"
+      OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_api_key
+      OPENROUTER_TIMEOUT_SECONDS: "${OPENROUTER_TIMEOUT_SECONDS:-90}"
+      OPENROUTER_MAX_OUTPUT_TOKENS: "${OPENROUTER_MAX_OUTPUT_TOKENS:-8192}"
       CODEX_SOURCE_HOME: "/host-codex-home"
       CODEX_RUNTIME_HOME: "/workspace/app/xray/runtime/codex-home"
       CODEX_WORKDIR: "/tmp/codex-domain-classifier"
@@ -316,6 +327,12 @@ services:
       DATAPLANE_EXTERNAL_RELOADER_ENABLED: "${DATAPLANE_EXTERNAL_RELOADER_ENABLED:-0}"
       DATAPLANE_CONFIG_PATH: "${DATAPLANE_CONFIG_PATH:-}"
       DATAPLANE_DYNAMIC_ROUTING_PATH: "${DATAPLANE_DYNAMIC_ROUTING_PATH:-}"
+      PROBE_SSH_TARGET: "${PROBE_SSH_TARGET:-}"
+      PROBE_SSH_BIN: "${PROBE_SSH_BIN:-ssh}"
+      PROBE_SSH_OPTIONS: "${PROBE_SSH_OPTIONS:-}"
+      PROBE_SSH_KNOWN_HOSTS: "${PROBE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
+      PROBE_REMOTE_SCRIPT: "${PROBE_REMOTE_SCRIPT:-/opt/xray-probe/current/xray_protocol_probe.py}"
+      PROBE_XRAY_BIN: "${PROBE_XRAY_BIN:-/opt/xray-probe/current/xray}"
       DATAPLANE_SSH_TARGET: "${DATAPLANE_SSH_TARGET:-root@<normal-data-plane-host>}"
       DATAPLANE_SSH_OPTIONS: "${DATAPLANE_SSH_OPTIONS:-}"
       DATAPLANE_SSH_KNOWN_HOSTS: "${DATAPLANE_SSH_KNOWN_HOSTS:-/root/.ssh/known_hosts}"
@@ -324,6 +341,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
+      - type: bind
+        source: "${OPENROUTER_API_KEY_HOST_PATH:-/dev/null}"
+        target: /run/secrets/openrouter_api_key
+        read_only: true
+        bind:
+          create_host_path: false
       - ./:/workspace
       - ./data:/panel-data
       - /var/run/docker.sock:/var/run/docker.sock

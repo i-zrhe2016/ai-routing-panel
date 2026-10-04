@@ -46,13 +46,14 @@ AI 节点使用独立凭据和监听端口，不参与此迁移。
 1. 备份两端实际 Xray 配置、控制面 `.env`、客户端配置、订阅服务及其 systemd
    配置。检查 443 当前所有使用者；本部署的 HTTPS 服务为 `verge-sub`。
 2. 安装 HAProxy（已验证 2.8 配置语法）。将 `scripts/render_entry_gateway.py`
-   和 `scripts/run_subscription_backend.py` 安装至 `/usr/local/lib/xray-entry/`。
+   和 `scripts/run_subscription_backend.py`、`scripts/cleanup_xray_sockets.py`
+   安装至 `/usr/local/lib/xray-entry/`。
    如果主机启用了 `ai-routing-panel-firewall.timer`，同时安装
    `deploy/normal-data-plane/sync-ai-routing-panel-firewall.sh`；统一模式下 Xray
    使用 Unix socket，防火墙必须从统一配置读取 443 和旧端口别名，不能只扫描
    Xray 容器的 TCP 监听。
 3. 安装 `deploy/normal-data-plane/xray-entry.service`、
-   `xray-legacy-forwarder.service`、`xray-entry-refresh.service` 和
+   `xray-legacy-forwarder.service`、`xray-socket-cleanup.service`、`xray-entry-refresh.service` 和
    `xray-entry-refresh.path` 至 `/etc/systemd/system/`。配置 `/etc/xray-entry.env`：
 
    ```dotenv
@@ -62,6 +63,11 @@ AI 节点使用独立凭据和监听端口，不参与此迁移。
 
    这里必须指向 Docker 实际挂载的配置和日志目录。若路径不同，也须修改 `.path`
    监听的路径。`.path` 在增删账号或到期移除端口后重新生成并平滑重载 HAProxy。
+   执行 `systemctl daemon-reload` 和 `systemctl enable xray-socket-cleanup.service`。
+   清理服务在 Docker 每次启动前运行，只删除名称匹配的、连接明确返回
+   `ECONNREFUSED` 的 socket；保留活跃 socket、普通文件和符号链接。
+   这可防止 VPS 重启后残留 socket 导致 Xray 报 `bind: address already in use`，
+   进而阻止控制面启动。清理服务自身失败不会阻止其他 Docker 服务启动。
 4. 暂停控制面的配置写入进程，生成统一模式的候选 Xray 配置。使用实际运行版本的
    `xray run -test -config ...` 校验；用 `render_entry_gateway.py` 校验 HAProxy
    配置。保留已有 REALITY SNI、密钥、AI 路由和备用出站配置。
@@ -75,7 +81,7 @@ AI 节点使用独立凭据和监听端口，不参与此迁移。
    恢复控制面配置写入进程。原 `verge_sub/node_info.json` 若也提供节点
    订阅，必须同步为对应活跃账号的 443 UUID，不能保留旧共享 UUID。
 
-HAProxy 仅对来自 `127.0.0.2` 的内部转发接受 PROXY 头。公网连接不接受客户端
+HAProxy 仅对来自内部转发器专用回环源地址的连接接受 PROXY 头。公网连接不接受客户端
 伪造的 PROXY 元数据；Xray 的 Unix socket 不对公网开放。
 
 ## 验证与回退

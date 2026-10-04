@@ -15,7 +15,7 @@ function renderConsole(api, props = {}) {
   );
 }
 
-const WORKSPACE_LABELS = ["总览", "主机", "流量", "故障排查", "AI 路由", "交付", "订单与套餐", "可观测"];
+const WORKSPACE_LABELS = ["总览", "主机", "流量", "故障排查", "AI 路由", "交付", "流量拓扑"];
 
 describe("console shell", () => {
   it("renders every workspace and loads the dashboard on mount", async () => {
@@ -29,11 +29,56 @@ describe("console shell", () => {
     }
   });
 
+  it("groups all workspaces and gives every active page one primary heading", async () => {
+    const user = userEvent.setup();
+    renderConsole(createFakeApi());
+    const nav = await screen.findByRole("navigation", { name: "控制台工作区" });
+    expect(within(nav).getByText("运行监控")).toBeTruthy();
+    expect(within(nav).getByText("配置与业务")).toBeTruthy();
+    for (const label of WORKSPACE_LABELS) {
+      await user.click(within(nav).getByRole("button", { name: new RegExp(`^${label}(?:\\s|$)`) }));
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    }
+  });
+
+  it("removes commerce and embedded monitoring even when legacy metadata is supplied", async () => {
+    const user = userEvent.setup();
+    const api = createFakeApi();
+    const { container } = renderConsole(api);
+    await screen.findByRole("heading", { name: "系统总览" });
+    const nav = screen.getByRole("navigation", { name: "控制台工作区" });
+    expect(within(nav).queryByRole("button", { name: /订单与套餐|可观测/ })).toBeNull();
+    expect(screen.queryByText("待审订单")).toBeNull();
+    expect(screen.queryByRole("button", { name: "查看订单" })).toBeNull();
+    for (const label of WORKSPACE_LABELS) {
+      await user.click(within(nav).getByRole("button", { name: new RegExp(`^${label}(?:\\s|$)`) }));
+      expect(container.querySelector("iframe")).toBeNull();
+      expect(screen.queryByText(/Grafana|Prometheus|新增套餐|商业设置|订单审核/)).toBeNull();
+    }
+    expect(api.calls.some((call) => /\/api\/(plans|orders|commerce-settings)/.test(call.url))).toBe(false);
+  });
+
+  it("blocks duplicate manual refreshes while a request is pending", async () => {
+    const user = userEvent.setup();
+    const api = createFakeApi();
+    renderConsole(api);
+    const refresh = await screen.findByRole("button", { name: "刷新数据" });
+    let finish;
+    api.get = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    await user.click(refresh);
+    const busy = screen.getByRole("button", { name: "正在刷新" });
+    expect(busy.disabled).toBe(true);
+    await user.click(busy);
+    expect(api.get).toHaveBeenCalledTimes(1);
+    finish({ ok: true, dashboard: makeDashboard() });
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新数据" }).disabled).toBe(false));
+  });
+
   it("loads the read-only insights history next to the dashboard", async () => {
     const api = createFakeApi();
     renderConsole(api);
 
-    await waitFor(() => expect(api.calls.some((call) => call.url === "/api/insights?days=14")).toBe(true));
+    await waitFor(() => expect(api.calls.some((call) => call.url === "/api/insights?days=1")).toBe(true));
   });
 
   it("mounts only the active workspace", async () => {
@@ -41,12 +86,12 @@ describe("console shell", () => {
     const api = createFakeApi();
     renderConsole(api);
 
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
     const nav = screen.getByRole("navigation", { name: "控制台工作区" });
     await user.click(within(nav).getByRole("button", { name: /主机/ }));
 
     expect(await screen.findByRole("heading", { name: "主机与数据面" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "今天的路径，是否值得信任？" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "系统总览" })).toBeNull();
   });
 
   it("renders an error notice when the dashboard cannot be loaded", async () => {
@@ -60,7 +105,7 @@ describe("console shell", () => {
     const user = userEvent.setup();
     const api = createFakeApi();
     renderConsole(api);
-    await screen.findByRole("heading", { name: "今天的路径，是否值得信任？" });
+    await screen.findByRole("heading", { name: "系统总览" });
 
     const before = api.calls.filter((call) => call.url === "/api/dashboard").length;
     await user.click(screen.getByRole("button", { name: "刷新数据" }));
@@ -70,14 +115,14 @@ describe("console shell", () => {
     });
   });
 
-  it("surfaces the pending review count on the commerce workspace", async () => {
-    const api = createFakeApi();
-    renderConsole(api);
-
-    const nav = await screen.findByRole("navigation", { name: "控制台工作区" });
-    const commerceButton = within(nav).getByRole("button", { name: /订单与套餐/ });
-    expect(commerceButton.textContent).toContain("1");
+  it("opens the full traffic topology from the overview", async () => {
+    const user = userEvent.setup();
+    renderConsole(createFakeApi());
+    await user.click(await screen.findByRole("button", { name: "查看完整拓扑" }));
+    expect(await screen.findByRole("heading", { name: "流量拓扑", level: 1 })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "系统总览" })).toBeNull();
   });
+
 });
 
 describe("sameOriginLoginUrl", () => {

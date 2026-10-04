@@ -51,10 +51,6 @@
     "error": "/var/log/xray/ai-error.log",
     "loglevel": "warning"
   },
-  "metrics": {
-    "listen": "127.0.0.1:31097",
-    "tag": "ai-metrics"
-  },
   "outbounds": [
     {
       "protocol": "freedom",

@@ -35,7 +35,7 @@
 
 ## 云侧待办（仓库外）
 
-域名入口的清理不在本仓库内：需要在 Cloudflare 控制台删除 `xray.zrhe2016.cc` 对应的 Access 应用，并清理不再使用的 DNS 记录。同一域名下的 Grafana 入口（`/grafana/`）目前仍由 Access 保护，删除前先确认是否保留。
+域名入口的清理不在本仓库内：需要在 Cloudflare 控制台删除 `xray.zrhe2016.cc` 对应的 Access 应用，并清理不再使用的 DNS 记录。
 
 ## 租户与客户登录
 

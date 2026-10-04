@@ -5,10 +5,7 @@ from ..config import (
     XRAY_ACCESS_LOG_PATH,
 )
 from ..errors import ValidationError
-from ..helpers import (
-    utc_iso_now,
-    utc_now,
-)
+from ..helpers import utc_now
 from ._constants import XRAY_ACCESS_LOG_LINE_RE
 
 
@@ -196,11 +193,12 @@ class TrafficService:
         timestamp_text = match.group("seen_at")
         timestamp_format = "%Y/%m/%d %H:%M:%S.%f" if "." in timestamp_text else "%Y/%m/%d %H:%M:%S"
         try:
-            seen_local = datetime.strptime(timestamp_text, timestamp_format).replace(tzinfo=LOCAL_TZ)
+            # Xray log readers use UTC for timestamps without an explicit offset.
+            seen_utc = datetime.strptime(timestamp_text, timestamp_format).replace(tzinfo=timezone.utc)
         except ValueError:
             return None
-        seen_at = seen_local.astimezone(timezone.utc).isoformat(timespec="seconds")
-        stat_date = seen_at[:10]
+        seen_at = seen_utc.isoformat(timespec="seconds")
+        stat_date = seen_utc.astimezone(LOCAL_TZ).date().isoformat()
         return listen_port, stat_date, seen_at
 
     def sync_xray_traffic_stats_in_tx(self, conn):
@@ -208,8 +206,9 @@ class TrafficService:
         if not stats:
             return 0
 
-        now_text = utc_iso_now()
-        stat_date = now_text[:10]
+        now_dt = utc_now()
+        now_text = now_dt.isoformat(timespec="seconds")
+        stat_date = now_dt.astimezone(LOCAL_TZ).date().isoformat()
         for listen_port, item in stats.items():
             last_seen = now_text if item["bytes_sent"] or item["bytes_received"] else None
             conn.execute(
@@ -329,18 +328,19 @@ class TrafficService:
 
         return self.renderer.apply_mutation(operation)
 
-    def query_traffic_series(self, days=14):
+    def query_traffic_series(self, days=1):
         """Read-only daily traffic series for the console history charts.
 
         Reads only ``traffic_daily`` and ``ports``; it never triggers a sync or
         a render, so an admin refresh cannot change node state. The window is
         clamped to [1, 30] days and every port is aligned to the same date list
         so the SPA can plot a dense series without client-side gap filling.
+        Dates use the local calendar, including today and the preceding days.
         """
         try:
             day_count = int(days)
         except (TypeError, ValueError):
-            day_count = 14
+            day_count = 1
         day_count = max(1, min(day_count, 30))
         end_date = datetime.now(LOCAL_TZ).date()
         start_date = end_date - timedelta(days=day_count - 1)
@@ -358,9 +358,9 @@ class TrafficService:
                 """
                 SELECT listen_port, stat_date, total_connections, total_bytes_sent, total_bytes_received
                 FROM traffic_daily
-                WHERE stat_date >= ?
+                WHERE stat_date >= ? AND stat_date <= ?
                 """,
-                (start_date.isoformat(),),
+                (start_date.isoformat(), end_date.isoformat()),
             ).fetchall()
 
         daily = {}

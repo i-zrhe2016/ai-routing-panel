@@ -4,8 +4,10 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.config import LOCAL_TZ
 from app.helpers import utc_iso_now
@@ -153,6 +155,7 @@ class InsightsApiTest(unittest.TestCase):
         self.assertEqual(insights["probes"]["ports"], [])
         self.assertEqual(insights["failover_events"]["events"], [])
         self.assertTrue(insights["hosts"])
+        self.assertEqual(insights["traffic"]["days"], 1)
 
     def test_insights_endpoint_returns_seeded_daily_traffic_series(self):
         self.create_port(31098, "客户A")
@@ -176,7 +179,94 @@ class InsightsApiTest(unittest.TestCase):
         payload = self.client.get("/api/insights?days=9999").get_json()["insights"]
         self.assertEqual(payload["traffic"]["days"], 30)
         payload = self.client.get("/api/insights?days=abc").get_json()["insights"]
-        self.assertEqual(payload["traffic"]["days"], 14)
+        self.assertEqual(payload["traffic"]["days"], 1)
+        for requested in ("0", "-7"):
+            payload = self.client.get(f"/api/insights?days={requested}").get_json()["insights"]
+            self.assertEqual(payload["traffic"]["days"], 1)
+
+    def test_calendar_windows_include_today_and_exclude_previous_and_future_dates(self):
+        self.create_port(31098, "客户A")
+        self.create_port(31099, "客户B")
+        local_tz = timezone(timedelta(hours=8))
+        today = datetime(2026, 10, 2, 0, 0, tzinfo=local_tz)
+        traffic_module = importlib.import_module("app.state.traffic")
+        with self.panel.state.connect() as conn:
+            for offset in (-1, 0, 1, 6, 7, 29, 30):
+                stat_date = (today.date() - timedelta(days=offset)).isoformat()
+                for listen_port, multiplier in ((31098, 1), (31099, 2)):
+                    conn.execute(
+                        "INSERT INTO traffic_daily VALUES (?, ?, ?, ?, ?)",
+                        (listen_port, stat_date, 3 * multiplier, 100 * multiplier, 200 * multiplier),
+                    )
+            conn.commit()
+
+        with patch.object(traffic_module, "LOCAL_TZ", local_tz), patch.object(traffic_module, "datetime") as clock:
+            clock.now.side_effect = lambda tz: today.astimezone(tz)
+            for days, included_rows in ((1, 1), (7, 3), (30, 5)):
+                with self.subTest(days=days):
+                    traffic = self.client.get(f"/api/insights?days={days}").get_json()["insights"]["traffic"]
+                    dates = [(today.date() - timedelta(days=offset)).isoformat() for offset in reversed(range(days))]
+                    self.assertEqual(traffic["dates"], dates)
+                    self.assertEqual(traffic["range_start"], dates[0])
+                    self.assertEqual(traffic["range_end"], "2026-10-02")
+                    self.assertEqual(traffic["totals"], {
+                        "bytes_sent": 300 * included_rows,
+                        "bytes_received": 600 * included_rows,
+                        "connections": 9 * included_rows,
+                        "total_bytes": 900 * included_rows,
+                    })
+                    for port in traffic["ports"]:
+                        multiplier = 1 if port["listen_port"] == 31098 else 2
+                        self.assertEqual(port["totals"]["total_bytes"], 300 * multiplier * included_rows)
+                        self.assertEqual(port["today"]["total_bytes"], 300 * multiplier)
+                    for key, total in traffic["totals"].items():
+                        self.assertEqual(total, sum(port["totals"][key] for port in traffic["ports"]))
+                        self.assertEqual(total, sum(traffic["series"][key]))
+
+    def test_dashboard_reports_beijing_timezone(self):
+        dashboard = self.client.get("/api/dashboard").get_json()["dashboard"]
+        self.assertEqual(dashboard["meta"]["timezone_label"], "北京时间（UTC+08:00）")
+
+    def test_today_changes_at_beijing_midnight(self):
+        traffic_module = importlib.import_module("app.state.traffic")
+        with patch.object(traffic_module, "datetime") as clock:
+            for instant, expected_date in (
+                (datetime(2026, 10, 1, 15, 59, 59, tzinfo=timezone.utc), "2026-10-01"),
+                (datetime(2026, 10, 1, 16, 0, 0, tzinfo=timezone.utc), "2026-10-02"),
+            ):
+                clock.now.side_effect = lambda tz, instant=instant: instant.astimezone(tz)
+                traffic = self.client.get("/api/insights").get_json()["insights"]["traffic"]
+                self.assertEqual(traffic["dates"], [expected_date])
+
+    def test_access_and_byte_accounting_use_the_local_calendar_date(self):
+        self.create_port(31098, "客户A")
+        traffic_module = importlib.import_module("app.state.traffic")
+        service = traffic_module.TrafficService(
+            stats_reader=SimpleNamespace(read_xray_traffic_stats=lambda: {
+                31098: {"bytes_sent": 100, "bytes_received": 200},
+            }),
+        )
+        for source_time, instant, expected_date in (
+            ("2026/10/01 15:59:59", datetime(2026, 10, 1, 15, 59, 59, tzinfo=timezone.utc), "2026-10-01"),
+            ("2026/10/01 16:00:00", datetime(2026, 10, 1, 16, 0, tzinfo=timezone.utc), "2026-10-02"),
+        ):
+            with self.subTest(source_time=source_time):
+                listen_port, stat_date, seen_at = service.parse_xray_access_log_line(
+                    f"{source_time} from 192.0.2.1:12345 accepted tcp:example.com:443 [panel-31098 >> direct]"
+                )
+                self.assertEqual(listen_port, 31098)
+                self.assertEqual(stat_date, expected_date)
+                self.assertEqual(seen_at, instant.isoformat(timespec="seconds"))
+                with patch.object(traffic_module, "utc_now", return_value=instant), \
+                        self.panel.state.connect() as conn:
+                    conn.execute("DELETE FROM traffic_daily")
+                    service.sync_xray_traffic_stats_in_tx(conn)
+                    row = conn.execute("SELECT * FROM traffic_daily WHERE listen_port = 31098").fetchone()
+                    self.assertEqual(row["stat_date"], expected_date)
+                    self.assertEqual(row["total_bytes_sent"], 100)
+                    self.assertEqual(row["total_bytes_received"], 200)
+                    last_seen = conn.execute("SELECT last_seen FROM traffic_totals WHERE listen_port = 31098").fetchone()[0]
+                    self.assertEqual(last_seen, instant.isoformat(timespec="seconds"))
 
     def test_insights_endpoint_summarizes_probe_history(self):
         self.create_port(31098, "客户A")
@@ -227,6 +317,65 @@ class InsightsApiTest(unittest.TestCase):
         self.assertEqual(before["total_bytes_sent"], after["total_bytes_sent"])
         self.assertEqual(before["total_bytes_received"], after["total_bytes_received"])
         self.assertEqual(before["total_connections"], after["total_connections"])
+
+
+class ProbeIncidentsApiTest(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.panel = load_panel_module(self.root)
+        self.client = self.panel.app.test_client()
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def test_legacy_diagnosis_errors_are_chinese_without_rewriting_failed_records(self):
+        incidents = self.panel.state.incidents
+        for _ in range(5):
+            incident_id = incidents.record("diagnostics", "legacy-target", {"ok": False, "error": "request failed"})
+        incidents.finish(incident_id, error="Codex diagnosis unavailable or invalid")
+        with incidents.database.connect() as conn:
+            before = dict(conn.execute("SELECT * FROM probe_incidents WHERE id=?", (incident_id,)).fetchone())
+        events = incidents.events(incident_id)
+        for _ in range(2):
+            response = self.client.get("/api/probe-incidents")
+            self.assertEqual(response.status_code, 200)
+            item = response.get_json()["incidents"][0]
+            self.assertEqual(item["status"], "failed")
+            self.assertEqual(item["diagnosis_error"], "Codex 暂不可用或返回结果无效")
+            report = self.client.get(f"/api/probe-incidents/{incident_id}/report").get_json()["report"]
+            self.assertIn("## 分析不可用\n\nCodex 暂不可用或返回结果无效", report)
+            self.assertIn("未获得模型诊断。观测到的失败不足以确定根因。", report)
+        with incidents.database.connect() as conn:
+            after = dict(conn.execute("SELECT * FROM probe_incidents WHERE id=?", (incident_id,)).fetchone())
+        self.assertEqual(before["diagnosis_error"], "Codex diagnosis unavailable or invalid")
+        self.assertEqual(before["status"], "failed")
+        self.assertEqual(before, after)
+        self.assertEqual(events, incidents.events(incident_id))
+
+    def test_incident_records_and_report_are_internal_safe_read_api(self):
+        for _ in range(4):
+            self.assertIsNone(self.panel.state.incidents.record("diagnostics", "target:443", {"ok": False, "probe_origin": "dedicated-probe", "error": "request failed"}))
+            self.assertEqual(self.client.get("/api/probe-incidents").get_json()["incidents"], [])
+        incident_id = self.panel.state.incidents.record("diagnostics", "target:443", {"ok": False, "probe_origin": "dedicated-probe", "error": "request failed"})
+        response = self.client.get("/api/probe-incidents")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        item = response.get_json()["incidents"][0]
+        self.assertEqual(item["status"], "queued")
+        self.assertEqual(item["occurrences"], 5)
+        self.assertEqual(item["target"], "target:443")
+        self.assertEqual(item["probe_origin"], "dedicated-probe")
+        self.assertEqual(self.client.get(f"/api/probe-incidents/{incident_id}/report").status_code, 404)
+        self.panel.state.incidents.finish(incident_id, {"diagnosis": '<script>alert("x")</script>', "uncertainty": "Insufficient evidence", "recommended_checks": ["Check target"]})
+        response = self.client.get(f"/api/probe-incidents/{incident_id}/report")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('<script>alert("x")</script>', response.get_json()["report"])
+        self.assertEqual(response.mimetype, "application/json")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(self.client.get("/api/probe-incidents/not-an-id/report").status_code, 404)
+        self.assertEqual(self.client.get("/api/probe-incidents", environ_base={"REMOTE_ADDR": "203.0.113.10"}).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/probe-incidents/{incident_id}/report", environ_base={"REMOTE_ADDR": "203.0.113.10"}).status_code, 403)
 
 
 if __name__ == "__main__":

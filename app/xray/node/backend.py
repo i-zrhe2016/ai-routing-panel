@@ -232,9 +232,6 @@ class NodeBackend:
         del recorded_inode, offset, since_epoch, skip_until_newline
         return {"exists": False, "inode": "", "offset": 0, "data": "", "skip_until_newline": False}
 
-    def read_metrics_payload(self, metrics_url, timeout_seconds):
-        del metrics_url, timeout_seconds
-
     def run_statsquery(self, timeout_seconds, pattern):
         return None
 

@@ -22,7 +22,14 @@ node "控制面" as control #EFF6FF {
   database "panel.db\n业务与配置状态" as db #E5E7EB
   component "可选备用 Xray\nrelay / freedom" as backup #FEF3C7
 }
-component "指标与运维日报\nPrometheus / Grafana / Reporter" as observability #DCFCE7
+
+node "独立探测执行主机" as probe #F3F4F6 {
+  component "Xray 客户端 / HTTPS 204" as probeClient
+}
+manager ..> probeClient : SSH stdin / 候选凭据
+panel ..> probeClient : SSH stdin / 诊断凭据
+probeClient ..> normalXray : 认证 VLESS + REALITY
+probeClient ..> aiXray : 认证 VLESS + REALITY
 
 client ..> dns : 解析入口
 client --> normalXray : 正常代理流量
@@ -38,12 +45,10 @@ client ..> backup : DNS 切换后的入口
 backup ..> aiXray : AI 可用时 relay
 backup ..> internet : AI 不可用时直出
 
-planes ..> observability : Tailscale 指标
-control ..> observability : 面板与主机指标
 
 note right of control
 控制面负责 DNS 与节点编排，正常代理流量由数据面承载。
 控制面离线时，已下发的配置仍可工作。
-详细监控、日志与灾备流程见对应专题。
+详细路由与灾备流程见对应专题。
 end note
 @enduml

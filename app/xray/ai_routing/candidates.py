@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import re
-import socket
 from urllib.parse import parse_qsl, unquote, urlparse
 
-from app.xray.node.probes import reality_handshake_probe
 
 from .common import format_timestamp, utc_now
 
@@ -225,45 +223,17 @@ def probe_ai_upstream_candidate(candidate, timeout_seconds, probe_controller=Non
     checked_at = format_timestamp(utc_now())
     reachable = False
     failure_reason = ""
-    probe_server_name = str(candidate.get("probe_server_name", "")).strip()
-    if probe_controller is not None:
-        if probe_server_name:
-            probe_result = probe_controller.probe_reality_endpoint(
-                candidate["upstream_host"], candidate["upstream_port"], probe_server_name, timeout_seconds
-            )
-        else:
-            probe_result = probe_controller.probe_tcp_endpoint(
-                candidate["upstream_host"], candidate["upstream_port"], timeout_seconds
-            )
-        if not isinstance(probe_result, dict):
-            probe_result = {
-                "ok": False,
-                "error": "AI 上游探测返回格式无效",
-                "management_error": True,
-                "method": "unknown",
-            }
-        reachable = bool(probe_result.get("ok"))
-        failure_reason = str(probe_result.get("error", "")).strip()[:200]
-        probe_method = str(probe_result.get("method", "tcp")).strip() or "tcp"
-        management_error = bool(probe_result.get("management_error"))
-    elif probe_server_name:
-        probe_result = reality_handshake_probe(
-            candidate["upstream_host"], candidate["upstream_port"], probe_server_name, timeout=timeout_seconds
-        )
-        reachable = bool(probe_result.get("ok"))
-        failure_reason = str(probe_result.get("error", "")).strip()[:200]
-        probe_method = "reality"
-        management_error = False
-    else:
-        try:
-            with socket.create_connection(
-                (candidate["upstream_host"], int(candidate["upstream_port"])), timeout=timeout_seconds
-            ):
-                reachable = True
-        except OSError as exc:
-            failure_reason = str(exc)[:200]
-        probe_method = "tcp"
-        management_error = False
+    from app.xray.protocol_probe import build_probe_runner
+    controller = probe_controller or build_probe_runner()
+    probe_result = controller.probe_outbound(candidate.get("probe_outbound"), timeout_seconds,
+        source="ai_upstream", target=join_host_port(candidate["upstream_host"], candidate["upstream_port"]))
+    if not isinstance(probe_result, dict):
+        probe_result = {"ok": False, "error": "invalid_probe_response", "management_error": True,
+                        "method": "vless_reality"}
+    reachable = bool(probe_result.get("ok"))
+    failure_reason = str(probe_result.get("error", "")).strip()[:200]
+    probe_method = "vless_reality"
+    management_error = bool(probe_result.get("management_error"))
 
     result = dict(candidate)
     result.update(
@@ -275,6 +245,7 @@ def probe_ai_upstream_candidate(candidate, timeout_seconds, probe_controller=Non
             "checked_at": checked_at,
             "probe_method": probe_method,
             "probe_management_error": management_error,
+            "probe_evidence": {key: probe_result[key] for key in ("error_code", "stage", "http_status", "curl_exit_code", "duration_ms", "probe_origin", "checked_at") if key in probe_result},
         }
     )
     return result
@@ -294,6 +265,7 @@ def summarize_ai_target_candidate(candidate):
         "checked_at": str(candidate.get("checked_at", "")).strip(),
         "probe_method": str(candidate.get("probe_method", "tcp")).strip() or "tcp",
     }
+    summary["probe_evidence"] = candidate.get("probe_evidence", {})
     if host:
         summary["upstream_host"] = host
     if port:

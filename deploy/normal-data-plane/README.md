@@ -2,6 +2,8 @@
 
 For a shared Clash/HTTPS port 443 with legacy proxy aliases, see
 [the unified entry deployment procedure](../../docs/unified-entry.md).
+That procedure includes the pre-Docker stale-socket cleanup unit required for
+reliable host reboot recovery with filesystem Unix sockets.
 
 This directory contains the minimal Docker Compose definition used to run the
 normal Xray data plane on a replacement host. It intentionally does not run

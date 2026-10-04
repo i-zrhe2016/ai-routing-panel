@@ -16,120 +16,13 @@
 
 `ai_node_running` 反映 AI 节点远端 Socket 可达性，不代表 REALITY 凭据匹配或实际 ChatGPT 请求成功。
 
-## Prometheus 监控（`/metrics`）
+## AI 路由状态
 
-面板把已采集的状态以 Prometheus 文本格式暴露在 `GET /metrics`，可直接接入 Prometheus + Grafana。
-
-- 鉴权：必须设置 `METRICS_TOKEN`。
-  - 未设置时端点返回 `404`（默认不对外开放）。
-  - 设置后需带请求头 `Authorization: X <METRICS_TOKEN>`，否则返回 `401`。
-- 可选 `METRICS_DP_TTL`（默认 `30` 秒）：缓存数据面存活检测和 AI Xray 指标读取，避免高频/并发抓取叠加 I/O。
-- 抓取路径严格只读、不触发流量同步与探针，可放心按 15–30s 抓取。
-
-暴露的指标（前缀 `xray_panel_`）：
-
-- 业务：`port_traffic_bytes_total`(counter, `port`/`note`/`direction`)、`port_connections_total`(counter)、`ports_total`/`ports_enabled`/`ports_active`/`ports_expired`/`ports_quota`/`ports_disabled`(gauge)
-- 存活/可用性：`up`、`port_reachable`(gauge, 来自 TCP 探针)、`port_probe_timestamp_seconds`
-- 数据面：`data_plane_configured`/`data_plane_running`(gauge, 带 `mode` 标签)
-- AI 节点：`ai_node_configured`/`ai_node_running`(gauge, 带 `mode` 标签)、`ai_node_metrics_available`(gauge)、`ai_node_traffic_bytes_total` 和 `ai_node_egress_bytes_total`(counter, `direction` 标签)
-- AI 域名/端口：`ai_destination_log_available`、`ai_destination_window_seconds`、`ai_destination_requests`、`ai_destination_requests_per_second`、`ai_destination_last_seen_timestamp_seconds`（`domain`/`port`/`network` 标签，仅展开最近窗口 Top 50）和 `ai_destination_other_requests`
-- DNS 故障切换：`dns_failover_enabled`、`dns_failover_target_info`、`dns_failover_last_probe_healthy`、`dns_failover_consecutive_failures`/`_successes`、`dns_failover_peak_window_active`
-- AI 路由：`ai_domains_total`、`ai_domain_hits_total`、`ai_domains_last_update_timestamp_seconds`
-
-> `traffic`/`connections` 为 counter，但“重置流量并启用”/配额恢复会清零累计值——这是合法的 counter reset，`rate()`/`increase()` 能正确处理。
-
-- 本机 Docker AI 与控制面共享 Node Exporter/cAdvisor；业务端口仍为 `27166`，不承担监控流量。AI Xray metrics 只监听控制面回环地址，由面板聚合后进入 Prometheus。远端 SSH AI 通过已纳管 SSH 通道在节点回环读取 `/debug/vars` 和 access log；Prometheus 仍单独采集 AI 主机的 node-exporter/cAdvisor target。
-- 控制面 cAdvisor 监听 `redacted-ip-007:18081`，用于采集 `xray-ai-node` 容器级 CPU、内存和网络总量；该总量不能替代 Xray 入站/出站业务计数。
-- AI 域名/端口指标来自本机或远端 AI `ai-access.log` 的 `accepted` 记录，默认聚合最近 10 分钟请求量；access log 没有按目标拆分的字节数，不应把请求量指标解释为 per-domain 字节量。
-- 高流量查询：`topk(20, xray_panel_ai_destination_requests)`；高请求速率查询：`topk(20, xray_panel_ai_destination_requests_per_second)`。
-- 控制面 Prometheus 的普通数据面和控制面 targets 应显示 `up`；若远端 AI target 出现 `timeout` 或 `connection refused`，再检查远端 AI 节点的 exporter 容器和端口监听。
-
-AI 路由状态至少应同时查看：
-
-- `ai_candidates`：主、备候选及各自探测结果；
-- `manual_mode`：`auto`、`primary`、`backup` 或 `forced_fallback`；
-- `route_status`：例如 `applied`、`fallback_to_primary`、`manual_target_unreachable`；
-- `ai_target.selected_index`：实际写入 `ai_proxy` 的候选。
-
-
-Prometheus `scrape_config` 示例：
-
-```yaml
-scrape_configs:
-  - job_name: xray-panel
-    metrics_path: /metrics
-    scheme: https
-    authorization: { type: Bearer, credentials: "${METRICS_TOKEN}" }
-    static_configs: [{ targets: ["panel.example.com"], labels: { role: control_plane } }]
-  - job_name: node
-    static_configs:
-      - { targets: ["panel-host:9100"],     labels: { host: panel } }
-      - { targets: ["dataplane-host:9100"],  labels: { host: dataplane } }
-```
-
-## 管理后台 Observability 工作区（内嵌 Grafana）
-
-管理后台的 Observability 工作区（内含「监控」区块）把 Grafana 的单图（`d-solo`）以 iframe 内嵌进来，让管理员无需单独登录 Grafana 即可看到主机系统资源（CPU/内存/磁盘/网络/负载/Swap）与每端口流量/连接速率。其余总览/端口/商务/DNS 等数据仍由面板自身（SQLite）提供，不受影响。
-
-启用步骤：
-
-1. 启动 `monitoring/` 监控栈（Prometheus + Grafana + node_exporter）。其中 Grafana 已开启匿名只读（`GF_AUTH_ANONYMOUS_ENABLED=true` + `Viewer`）与内嵌（`GF_SECURITY_ALLOW_EMBEDDING=true`），并通过 provisioning 自动加载内嵌专用 dashboard `monitoring/grafana/dashboards/xray-observability.json`（UID `xray-observability`，带显式 panel id）。
-2. 给面板设置 `GRAFANA_PUBLIC_URL=https://xray.zrhe2016.cc/grafana/`；该路径由 Cloudflare Access Email OTP 保护。
-3. Grafana 使用 `GF_SERVER_ROOT_URL=https://xray.zrhe2016.cc/grafana/` 和 `GF_SERVER_SERVE_FROM_SUB_PATH=true`，重新启动监控栈后访问 `/grafana/`。
-4. 重新部署包含 `app/static/` 发布资源的面板镜像，打开后台进入 Observability 工作区即可。顶部可切换 1h/6h/24h 时间范围。
-
-> ✅ **当前入口**：Grafana 通过 `https://xray.zrhe2016.cc/grafana/` 访问，Cloudflare Access 是公网认证边界；Grafana 的 `3001` 仅供本机 Nginx 反代使用。Cloudflare Access 邮箱会由 Nginx 转为 Grafana Auth Proxy 用户标识，认证后不再显示 Grafana 登录页。
-
-> 前置项：数据面必须部署 node-exporter 和 cAdvisor，并允许控制面经 Tailscale 抓取。仓库已配置普通数据面与台湾 AI 节点 targets；地址、端口和标签见[Prometheus 目标配置](ops-reporting/prometheus-targets.md#当前配置-targets)。
-
-### 监控栈启停
-
-监控栈由 `monitoring/docker-compose.monitoring.yml` 定义，包括 node_exporter、cAdvisor、Prometheus
-和 Grafana；Prometheus 配置及 Grafana provisioning/dashboard 也全部位于 `monitoring/`。
-
-```bash
-cd monitoring
-docker compose -f docker-compose.monitoring.yml up -d
-docker compose -f docker-compose.monitoring.yml ps
-docker compose -f docker-compose.monitoring.yml down  # 保留数据卷
-```
-
-修改 `prometheus.yml` 后可热加载：
-
-```bash
-curl -X POST http://redacted-ip-007:9090/-/reload
-```
-
-访问入口：Grafana 使用 `https://xray.zrhe2016.cc/grafana/`，Prometheus 是 `redacted-ip-007:9090`。Grafana 管理员密码来自
-`monitoring/.env`。公网访问 Grafana 前必须通过 Cloudflare Access；不要直接暴露 `3001`、`9090` 或 node_exporter 的 `:9100`。
-
-### Fluent Bit 日志采集
-
-日志采集由三类独立组件组成：日志中心主机上的 Loki、三台 Docker 主机上的 Fluent Bit Agent，以及控制面上的 Grafana。Agent 不修改业务容器的 logging driver，而是读取 Docker JSON 日志、Xray `error.log` 和 allowlist 内的 systemd 错误日志，通过 Tailscale 发送到远端 Loki。
-
-```bash
-# 日志中心
-cd monitoring/loki
-docker compose up -d
-
-# 每台控制面/普通数据面/AI 数据面主机
-cd ../fluent-bit
-docker compose -f docker-compose.agent.yml up -d
-
-# 控制面的 Grafana/Prometheus
-cd ..
-docker compose -f docker-compose.monitoring.yml up -d prometheus grafana
-```
-
-Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailscale ACL、LogQL 示例和排障命令见 [Fluent Bit 日志采集](logging-fluent-bit.md)。
-
-当前三节点部署状态和生产路径见 [Fluent Bit 日志采集·当前生产部署](logging-fluent-bit.md#当前生产部署)。控制面业务日志可直接查询：
-
-```logql
-{job="platform-logs",node_role="control_plane",category="business"} | json
-```
+AI 路由状态至少应同时查看 `ai_candidates`、`manual_mode`、`route_status` 和 `ai_target.selected_index`，核对候选探测结果、人工策略和实际写入的上游。详见 [AI 路由](ai-routing.md)。
 
 ## 流量与连接统计
+
+后台流量拓扑的使用与数据边界见[开发流程](development.md)。
 
 当前统计链路拆成两部分：
 
@@ -184,26 +77,25 @@ Grafana Explore 中使用 `{job="platform-logs"}` 查询。完整边界、Tailsc
 
 SSH 采集的认证、known_hosts、实测路径和只读排障命令见[远端节点配置采集](remote-node-backup.md)。采集器不会在远端写入、重启或执行配置同步。
 
-## TCP 探针
+## 协议探测
 
-当 `PROBE_ENABLED=1` 时，面板会周期性对 `DATAPLANE_PROBE_HOST:<listen_port>` 做 TCP 连通性探测。
+AI 候选选择、启用租户端口的周期探测、DNS 故障切换和按需诊断均通过 `PROBE_SSH_TARGET` 的独立执行主机运行 Xray VLESS + REALITY 客户端。健康要求经认证隧道请求 `https://www.gstatic.com/generate_204` 返回 HTTP 204；TCP 开放或 TLS/SNI 握手不能建立业务健康。该固定目标无需 HTTPS 外的其他健康请求。
 
-相关页面与配置：
+配置键的默认值见[配置参考](configuration.md)。在独立主机安装 Python 3.10+、curl 和与节点一致的 Xray 客户端版本；将仓库 `scripts/xray_protocol_probe.py` 与 Xray 二进制放在 `/opt/xray-probe/releases/<version>/` 的 root 只读文件中。先校验二进制 SHA-256 和版本，再将 `PROBE_REMOTE_SCRIPT`、`PROBE_XRAY_BIN` 固定到 release 路径；使用 `current` 符号链接时应原子切换。先从控制面容器验证严格 SSH 主机密钥与认证，随后测试正确凭据成功、错误 UUID 拒绝、执行主机故障保留状态。回滚只需恢复此前脚本/二进制路径并重启 panel 和 manager；不得回退到普通/AI 节点执行。
 
-- 页面：`/probe-dashboard`
-- 常用变量：`PROBE_INTERVAL`、`PROBE_TIMEOUT`、`PROBE_TEST_LISTEN_PORT`
-- compose 默认把 `PROBE_INTERVAL` 设为 `180` 秒
+客户端 UUID、REALITY 公钥/Short ID 等仅经 SSH stdin 传输，写入每次调用独立的 0700 临时目录和 0600 配置；不进入 argv、输出或日志。每次启动独立 loopback SOCKS 监听，curl 强制使用 SOCKS5h 并禁用 NO_PROXY/用户 curl 配置，进程超时后终止并清理临时文件。请求超时接受 0.1–30 秒；SSH 总时限为请求时限加启动时限（最多 3 秒）和 4 秒清理余量。
 
-远端模式注意：
+缺失凭据、客户端依赖、无效返回、SSH/执行主机不可用均标记 `management_error`，不计为目标故障。AI 保留此前选择和动态片段，DNS 保留失败/成功计数及目标，租户周期探测保留此前业务健康。结果携带 `error_code`、`stage`、`checked_at`、`probe_origin` 与请求状态供控制面诊断使用；异常报告回调不改变健康决策。
 
-- 探针目标不能继续是 `redacted-ip-007`
-- 把 `DATAPLANE_PROBE_HOST` 设置成远端入口 IP 或域名
+普通租户探测使用 `client-test.json` 的实际账户凭据；统一 443 入口使用 `panelSubscription.users[listen_port]`，缺失/禁用账户不会借用其他 UUID。AI 候选使用实际渲染的 `ai_proxy` outbound，分享链接保留独立凭据。DNS 使用生成的主诊断客户端，并覆盖主探测 host/port，避免 DNS 别名已经指向备用时探测错误目标。
+
+节点 Xray admin API socket、配置/日志/流量读取仍使用各节点管理 transport；这些是管理状态，不能替代业务协议健康。`/probe-dashboard` 展示周期业务探测，`PROBE_INTERVAL`、`PROBE_TIMEOUT`、`PROBE_TEST_LISTEN_PORT` 控制采样。
 
 ## DNS 故障切换
 
 当 `DNS_FAILOVER_ENABLED=1` 且配置完整时，面板会后台周期性执行以下规则：
 
-- 只探测 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
+- 通过独立执行主机探测主入口 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT`
 - DNS 故障切换探测运行在独立 worker 中，不会被数据面 SSH、日志同步或流量统计阻塞
 - 连续失败达到 `DNS_FAILOVER_FAILURE_THRESHOLD` 时，把单条 Cloudflare DNS 记录切到备用目标
 - 连续成功达到 `DNS_FAILOVER_RECOVERY_THRESHOLD` 时，自动回切到主数据面
@@ -367,3 +259,19 @@ AI 节点的模式判定与普通数据面相同（`ssh` / `local` / `docker` / 
 - AI 候选是否可达，以及 `manual_mode` 是否意外固定在故障节点
 - 自动模式下全部候选不可达时，`route_status` 应为 `fallback_to_primary`
 - 人工固定目标不可达时，`route_status` 应为 `manual_target_unreachable`
+
+## Codex 自动故障记录
+
+独立协议探测的普通上游、AI 上游、DNS 主入口和按需体检结果继续记录既有探测结果；自动分析另由控制面 `IncidentStore` 使用共享面板 SQLite 数据库确认连续失败。节点认证请求失败与探测执行器错误分别标记为 `node_failure`、`executor_error`，后者不构成节点故障结论。连续失败默认达到五次才生成并排队故障记录，前四次仅持久化连续次数、首末时间和最新脱敏证据，不调用模型。阈值配置见[配置说明](configuration.md#故障分析隔离运行配置)。同一来源、目标、故障类别与探测主机的计数在面板和独立 AI 管理器进程间原子共享，进程重启不会丢失。故障类别或探测主机改变会中断未确认的连续计数；成功清空计数。既有健康判断与故障切换时序不变。
+
+达到阈值时记录首个失败时间和实际观测次数；持续失败在尚未恢复的同类记录中累加，只排队一次分析，不为前几次失败伪造重复事件。执行器恢复后即使目标请求失败，也关闭旧执行器故障并重新确认节点故障；执行器再次失败不会表示节点恢复，尚未恢复的节点故障仍保留。成功目标请求关闭两个类别的故障并保留恢复时间，后续复发重新达到阈值才生成新记录。迁移保留旧记录、事件、报告和状态；旧排队记录的累计次数不作为连续失败证据，只有新观测达到阈值才允许认领。已经运行、完成或失败的旧分析保留原有生命周期，超时运行任务仍可恢复认领。
+
+后台独立工作线程处理 `queued → running → completed/failed`，探测与故障切换不等待模型。超时的旧运行认领重新进入队列；模型不可用、超时、非零退出或格式错误保留 `failed`，不生成假诊断。故障后排查工作区显示状态、来源、目标、探测主机、时间、次数和恢复信息。文档按纯文本打开，模型内容不会执行 HTML。
+
+文档保存在 `DATA_DIR/probe-incidents/reports/<固定32位事件ID>.md`，目录权限 `0700`、文件 `0600`，包含观测事实、Codex 分析、不确定性和建议检查。模型提示要求分析正文使用简体中文，JSON 字段名和主机名、协议名、错误码等技术标识保留原样；文档标题、章节和固定失败说明使用中文。已知历史英文分析错误在接口读取时显示为中文，不改写原始错误、失败状态或事件历史；分析失败文档明确说明未获得模型诊断。每份文档最多 128 KiB，接口拒绝无效 ID、符号链接和超限内容；访问仍受面板内网/Tailscale 来源限制。文档是私有运行数据，不追加到 Git 文档，也不自动发布到 GitHub。
+
+每次分析通过已有 Docker CLI 启动固定镜像的临时容器：只读根文件系统、全部 capabilities 禁用、禁止权限提升、限制进程数/内存/CPU、独立 bridge 网络和私有 `/tmp`。只绑定经过筛选的认证输入目录（只读）和本次已脱敏的工作目录；不绑定生产配置、数据库、日志、SSH 密钥或 Docker socket。容器内仅复制 `auth.json` 与最小 `config.toml` 到私有 Codex home，使用只读 sandbox、临时模式、忽略规则并禁用 shell tool。模型只收到白名单探测快照，输出再次脱敏；不会自动修复或更改生产节点。
+
+部署前必须由运维准备只含这两个文件的独立认证目录，文件权限 `0600`。配置仅保留当前认证所需的模型/provider 字段，不包含 hooks、plugins、projects、skills 或任意用户配置。Docker daemon 使用宿主路径，因此 `INCIDENT_CODEX_AUTH_HOME` 是宿主认证目录，`INCIDENT_CODEX_HOST_WORK_ROOT` 必须映射面板容器内 `DATA_DIR/probe-incidents/work` 的宿主路径。未提供镜像或认证路径时分析明确失败。环境配置见[配置说明](configuration.md)。
+
+模型超时默认 180 秒（最大 600 秒）。容器内也有独立进程时限；父工作线程超时后显式 `docker rm -f` 本次容器，避免 Docker 客户端终止后模型继续运行。恢复观测与模型分析相互独立，恢复并不会伪造模型分析成功。

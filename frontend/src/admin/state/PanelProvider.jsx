@@ -3,7 +3,7 @@
 // perform. Workspaces stay presentational and read this through usePanel().
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { createEmptyPlanForm, createEmptyPortForm } from "../../utils.js";
+import { createEmptyPortForm } from "../../utils.js";
 import { createConsoleApi, installClientErrorLogging, reportClientError } from "../lib/consoleApi.js";
 import {
   EMPTY_PANEL,
@@ -49,14 +49,29 @@ export function PanelProvider({
   const [insights, setInsights] = useState(null);
   const [insightsError, setInsightsError] = useState("");
   const [insightsLoading, setInsightsLoading] = useState(false);
-  const [insightsDays, setInsightsDays] = useState(14);
+  const [insightsDays, setInsightsDays] = useState(1);
+  const [incidents, setIncidents] = useState([]);
+  const [incidentsError, setIncidentsError] = useState("");
+  const [incidentsLoading, setIncidentsLoading] = useState(false);
+  const incidentRequestRef = useRef(0);
   const [diagnosis, setDiagnosis] = useState(null);
   const [pathChangedAt, setPathChangedAt] = useState(0);
   const signatureRef = useRef("");
   const readyRef = useRef(false);
+  const historyRequestRef = useRef(0);
+  const trafficSampleRef = useRef(null);
+  const [trafficActivity, setTrafficActivity] = useState(null);
 
   const applyDashboard = useCallback((dashboard) => {
     const next = normalizeDashboard(dashboard);
+    const now = performance.now();
+    const bytes = totalTrafficBytes(next.summary);
+    const portIds = next.ports.map((port) => port.id).sort((a, b) => a - b).join(",");
+    const previous = trafficSampleRef.current;
+    const elapsed = previous ? (now - previous.at) / 1000 : 0;
+    const comparable = previous && previous.portIds === portIds && bytes >= previous.bytes && elapsed >= 1;
+    setTrafficActivity(comparable ? { bytesPerSecond: (bytes - previous.bytes) / elapsed, bytes: bytes - previous.bytes } : null);
+    trafficSampleRef.current = { at: now, bytes, portIds };
     const nextSignature = routingSignature(next);
     if (readyRef.current && signatureRef.current && signatureRef.current !== nextSignature) {
       setPathChangedAt(Date.now());
@@ -118,24 +133,56 @@ export function PanelProvider({
 
   const loadInsights = useCallback(
     async (days = insightsDays) => {
+      const requestId = ++historyRequestRef.current;
       setInsightsLoading(true);
+      setInsightsError("");
       try {
         const data = await client.get(`/api/insights?days=${days}`);
+        if (requestId !== historyRequestRef.current) return;
         setInsights(data.insights || null);
         setInsightsError("");
       } catch (error) {
+        if (requestId !== historyRequestRef.current) return;
         setInsights(null);
         setInsightsError(error?.message || "历史数据加载失败。");
       } finally {
-        setInsightsLoading(false);
+        if (requestId === historyRequestRef.current) setInsightsLoading(false);
       }
     },
     [client, insightsDays],
   );
 
+  const loadIncidents = useCallback(async () => {
+    const request = ++incidentRequestRef.current;
+    setIncidentsLoading(true);
+    setIncidentsError("");
+    try {
+      const data = await client.get("/api/probe-incidents");
+      if (request === incidentRequestRef.current) setIncidents(data.incidents || []);
+    } catch (error) {
+      if (request === incidentRequestRef.current) setIncidentsError(error?.message || "故障记录加载失败。");
+    } finally {
+      if (request === incidentRequestRef.current) setIncidentsLoading(false);
+    }
+  }, [client]);
+
+  const loadIncidentReport = useCallback(async (id) => {
+    const data = await client.get(`/api/probe-incidents/${encodeURIComponent(id)}/report`);
+    return data.report || "";
+  }, [client]);
+
+  useEffect(() => {
+    if (!autoLoad) return undefined;
+    loadIncidents();
+    if (!insightsInterval) return undefined;
+    const timer = window.setInterval(loadIncidents, insightsInterval);
+    return () => window.clearInterval(timer);
+  }, [autoLoad, insightsInterval, loadIncidents]);
+
   const changeInsightsDays = useCallback(
     (days) => {
       setInsightsDays(days);
+      setInsights(null);
       loadInsights(days);
     },
     [loadInsights],
@@ -180,7 +227,6 @@ export function PanelProvider({
   }, [autoLoad]);
 
   const [createForm, setCreateForm] = useState(createEmptyPortForm);
-  const [planCreateForm, setPlanCreateForm] = useState(createEmptyPlanForm);
   const [filters, setFilters] = useState({ query: "", status: "all" });
   const [selectedPortId, setSelectedPortId] = useState(null);
 
@@ -228,37 +274,6 @@ export function PanelProvider({
     }));
   }, []);
 
-  const updatePlanForm = useCallback((planId, patch) => {
-    setPanel((current) => ({
-      ...current,
-      commerce: {
-        ...current.commerce,
-        plans: current.commerce.plans.map((plan) =>
-          plan.id === planId ? { ...plan, form: { ...plan.form, ...patch } } : plan,
-        ),
-      },
-    }));
-  }, []);
-
-  const updateOrderNote = useCallback((orderId, note) => {
-    setPanel((current) => ({
-      ...current,
-      commerce: {
-        ...current.commerce,
-        orders: current.commerce.orders.map((order) =>
-          order.id === orderId ? { ...order, form: { ...order.form, review_note: note } } : order,
-        ),
-      },
-    }));
-  }, []);
-
-  const editCommerceSettings = useCallback((patch) => {
-    setPanel((current) => ({
-      ...current,
-      commerce: { ...current.commerce, settings: { ...current.commerce.settings, ...patch } },
-    }));
-  }, []);
-
   const actions = useMemo(() => {
     const mutate = (key, request) => runAction(key, async () => applyResponse(await request()));
 
@@ -281,7 +296,9 @@ export function PanelProvider({
           applyResponse(data);
           setCreateForm(createEmptyPortForm());
           const created = normalizeDashboard(data.dashboard || {}).ports.find(
-            (port) => String(port.listen_port) === createdListenPort,
+            (port) => data.created_port_id != null
+              ? port.id === data.created_port_id
+              : String(port.listen_port) === createdListenPort,
           );
           if (created) {
             setFilters({ query: "", status: "all" });
@@ -310,31 +327,6 @@ export function PanelProvider({
         mutate(`rotate-credentials:${port.id}`, () => client.post(`/api/ports/${port.id}/rotate-tenant-credentials`)),
       rotatePortSubscription: (port) =>
         mutate(`rotate-subscription:${port.id}`, () => client.post(`/api/ports/${port.id}/rotate-subscription-token`)),
-      createPlan: () =>
-        runAction("create-plan", async () => {
-          applyResponse(await client.post("/api/plans", planCreateForm));
-          setPlanCreateForm(createEmptyPlanForm());
-        }),
-      updatePlan: (plan) => mutate(`update-plan:${plan.id}`, () => client.put(`/api/plans/${plan.id}`, plan.form)),
-      updateCommerceSettings: (settings) =>
-        mutate("update-commerce-settings", () => client.put("/api/commerce-settings", settings)),
-      fulfillOrder: (order) =>
-        mutate(`fulfill-order:${order.id}`, () =>
-          client.post(`/api/orders/${order.id}/fulfill`, { review_note: order.form.review_note }),
-        ),
-      rejectOrder: (order) => {
-        if (!String(order.form.review_note || "").trim()) {
-          setFlash({ message: "驳回订单前请填写原因。", level: "error" });
-          return undefined;
-        }
-        return mutate(`reject-order:${order.id}`, () =>
-          client.post(`/api/orders/${order.id}/reject`, { review_note: order.form.review_note }),
-        );
-      },
-      cancelOrder: (order) =>
-        mutate(`cancel-order:${order.id}`, () =>
-          client.post(`/api/orders/${order.id}/cancel`, { review_note: order.form.review_note }),
-        ),
       runDnsFailoverCheck: () => mutate("dns-failover-check", () => client.post("/api/dns-failover/check")),
       switchDnsTarget: (target) =>
         mutate(`dns-failover-switch:${target}`, () => client.post("/api/dns-failover/switch", { target })),
@@ -359,7 +351,7 @@ export function PanelProvider({
           applyResponse(data);
         }),
     };
-  }, [applyResponse, client, createForm, panel.dataPlaneStatus, planCreateForm, refreshDashboard, runAction]);
+  }, [applyResponse, client, createForm, panel.dataPlaneStatus, refreshDashboard, runAction]);
 
   const value = useMemo(
     () => ({
@@ -372,9 +364,6 @@ export function PanelProvider({
       selectedPort,
       selectPort,
       updatePortForm,
-      updatePlanForm,
-      updateOrderNote,
-      editCommerceSettings,
       findPortByListenPort,
       dataPlaneStatus: panel.dataPlaneStatus,
       aiNodeStatus: panel.aiNodeStatus,
@@ -383,14 +372,19 @@ export function PanelProvider({
       dnsFailoverStatus: panel.dnsFailoverStatus,
       nodes: panel.nodes,
       trafficRouting: panel.trafficRouting,
+      trafficActivity,
       aiDomainStats: panel.aiDomainStats,
-      commerce: panel.commerce,
       insights,
       insightsError,
       insightsLoading,
       insightsDays,
       changeInsightsDays,
       loadInsights,
+      incidents,
+      incidentsLoading,
+      incidentsError,
+      loadIncidents,
+      loadIncidentReport,
       diagnosis,
       setDiagnosis,
       flash,
@@ -405,8 +399,6 @@ export function PanelProvider({
       setFilters,
       createForm,
       setCreateForm,
-      planCreateForm,
-      setPlanCreateForm,
       attentionPortCount: attentionPortCount(panel.summary),
       totalTrafficBytes: totalTrafficBytes(panel.summary),
       trafficToday,
@@ -417,6 +409,11 @@ export function PanelProvider({
       actions,
       busy,
       createForm,
+      incidents,
+      incidentsLoading,
+      incidentsError,
+      loadIncidents,
+      loadIncidentReport,
       diagnosis,
       filteredPorts,
       findPortByListenPort,
@@ -429,14 +426,11 @@ export function PanelProvider({
       loadInsights,
       loading,
       panel,
+      trafficActivity,
       pathChangedAt,
-      planCreateForm,
       refreshDashboard,
       selectPort,
       selectedPort,
-      editCommerceSettings,
-      updateOrderNote,
-      updatePlanForm,
       updatePortForm,
     ],
   );

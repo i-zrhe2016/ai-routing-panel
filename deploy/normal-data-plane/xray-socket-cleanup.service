@@ -1,0 +1,13 @@
+[Unit]
+Description=Remove stale Xray entry sockets before Docker startup
+After=local-fs.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/xray-entry.env
+ExecStart=/usr/bin/python3 /usr/local/lib/xray-entry/cleanup_xray_sockets.py --socket-dir ${XRAY_ENTRY_SOCKET_DIR}
+TimeoutStartSec=30
+
+[Install]
+WantedBy=docker.service

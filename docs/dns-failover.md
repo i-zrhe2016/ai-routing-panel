@@ -57,11 +57,11 @@ DNS 切到控制面 IP，控制面探测到 AI 节点不可达，自动将备用
 | --- | --- | --- | --- |
 | `DNS_FAILOVER_ENABLED` | `0` | 是 | 是否启用 Cloudflare DNS 故障切换 |
 | `DNS_FAILOVER_INTERVAL` | `15` | 否 | 后台检测周期（秒）|
-| `DNS_FAILOVER_TIMEOUT` | `3` | 否 | 单次 TCP 探测超时（秒）|
+| `DNS_FAILOVER_TIMEOUT` | `3` | 否 | 单次协议请求超时（秒）|
 | `DNS_FAILOVER_FAILURE_THRESHOLD` | `3` | 否 | 连续失败多少次切到备用 |
 | `DNS_FAILOVER_RECOVERY_THRESHOLD` | `2` | 否 | 连续成功多少次回切主数据面 |
-| `DNS_FAILOVER_PROBE_HOST` | — | 是 | 数据面公网 TCP 探测目标（域名或 IP）|
-| `DNS_FAILOVER_PROBE_PORT` | — | 是 | 数据面公网 TCP 探测端口 |
+| `DNS_FAILOVER_PROBE_HOST` | — | 是 | 主数据面 VLESS + REALITY 探测目标（域名或 IP）|
+| `DNS_FAILOVER_PROBE_PORT` | — | 是 | 主数据面 VLESS + REALITY 探测端口 |
 | `DNS_FAILOVER_PRIMARY_CONTENT` | — | 远端模式必填 | 主数据面入口 IP 或 CNAME；本地模式留空时自动获取数据面公网 IP |
 | `DNS_FAILOVER_BACKUP_CONTENT` | — | 否 | 控制面备用节点 IP 或 CNAME；留空时自动获取控制面本机公网 IP |
 | `DNS_FAILOVER_BACKUP_LABEL` | `控制面备用Xray` | 否 | 面板展示用备用节点名称 |
@@ -92,26 +92,13 @@ DNS 切到控制面 IP，控制面探测到 AI 节点不可达，自动将备用
 | `DNS_FAILOVER_PEAK_ENABLED` | `0` | 否 | 是否启用"高峰窗口优先专用节点" |
 | `DNS_FAILOVER_PEAK_START` | — | 否 | 高峰窗口起始时间，格式 `HH:MM` |
 | `DNS_FAILOVER_PEAK_END` | — | 否 | 高峰窗口结束时间，格式 `HH:MM` |
-| `DNS_FAILOVER_PEAK_TIMEZONE` | — | 否 | 高峰窗口时区；支持 `Asia/Shanghai` 或 `+08:00` |
+| `DNS_FAILOVER_PEAK_TIMEZONE` | 留空 | 否 | 高峰窗口时区；留空采用[面板默认时区](configuration.md)，可显式设置 IANA 时区名或 UTC 偏移 |
 
 ## 工作机制
 
 ### 探测逻辑
 
-控制面在独立的 DNS failover worker 中周期性执行 `run_dns_failover_check()`（`app/state/dns_failover.py:320`），对 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT` 做 TCP 连通性探测。该 worker 不依赖数据面日志同步、流量统计、Xray API 或配置同步，因此主数据面完全失联时仍可以执行切换：
-
-```python
-# app/dns_failover.py:147
-def probe_once(self):
-    try:
-        with socket.create_connection(
-            (self.config.probe_host, int(self.config.probe_port)),
-            timeout=self.config.timeout,
-        ):
-            return {"ok": True, "error": ""}
-    except OSError as exc:
-        return {"ok": False, "error": str(exc)[:200]}
-```
+控制面独立 DNS failover worker 周期性经专用执行主机运行主诊断客户端，对 `DNS_FAILOVER_PROBE_HOST:DNS_FAILOVER_PROBE_PORT` 做认证 VLESS + REALITY 请求。主机与凭据错误不会改变连续失败/成功计数或 DNS 目标；实际协议请求失败才参与阈值判定。该 worker 不依赖数据面日志、流量、API 或配置同步，主数据面失联时仍可执行切换。执行与凭据约束见[协议探测运维](operations.md#协议探测)。
 
 ### 自动切换与回切
 
@@ -447,21 +434,6 @@ curl -u admin:secret http://redacted-ip-007:18080/api/ai-routing/switch \
 ```
 
 恢复自动只清除人工覆盖，不立即运行 AI 管理器；下一轮管理器探测成功后才重新应用 AI 动态路由。
-
-## 监控指标
-
-`/metrics` 端点暴露以下 DNS failover 相关 Prometheus 指标：
-
-| 指标 | 类型 | 标签 | 说明 |
-| --- | --- | --- | --- |
-| `xray_panel_dns_failover_enabled` | gauge | — | DNS failover 是否启用 |
-| `xray_panel_dns_failover_target_info` | gauge | `target`, `record_content` | 当前 DNS 指向（1.0 常量）|
-| `xray_panel_dns_failover_last_probe_healthy` | gauge | — | 最近探测是否成功（1/0）|
-| `xray_panel_dns_failover_consecutive_failures` | gauge | — | 连续失败次数 |
-| `xray_panel_dns_failover_consecutive_successes` | gauge | — | 连续成功次数 |
-| `xray_panel_dns_failover_peak_window_active` | gauge | — | 高峰窗口是否活跃 |
-
-> 指标需要 `METRICS_TOKEN` 鉴权，未设置时 `/metrics` 返回 404。
 
 ## 排障
 

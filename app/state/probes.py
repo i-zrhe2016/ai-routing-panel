@@ -1,4 +1,3 @@
-import socket
 from datetime import datetime, timezone
 
 from ..config import (
@@ -7,6 +6,7 @@ from ..config import (
     PROBE_ENABLED,
     PROBE_TEST_LISTEN_PORT,
     PROBE_TIMEOUT,
+    XRAY_CLIENT_CONFIG_PATH,
 )
 from ..helpers import (
     localize_time,
@@ -14,14 +14,16 @@ from ..helpers import (
     utc_now,
 )
 from ..observability.logging import emit_business_event
+from ..xray.protocol_probe import build_probe_runner, client_outbound
 
 
 class ProbesService:
     """Upstream reachability sampling and dashboard aggregation."""
 
-    def __init__(self, repository=None, write_lock=None):
+    def __init__(self, repository=None, write_lock=None, probe_runner=None):
         self.repository = repository
         self.write_lock = write_lock
+        self.probe_runner = probe_runner or build_probe_runner()
 
     def ensure_probe_schema(self, conn):
         conn.executescript(
@@ -62,14 +64,15 @@ class ProbesService:
             checked_at = utc_iso_now()
             reachable = 0
             failure_reason = ""
-            try:
-                with socket.create_connection(
-                    (DATAPLANE_PROBE_HOST, int(row["listen_port"])),
-                    timeout=PROBE_TIMEOUT,
-                ):
-                    reachable = 1
-            except OSError as exc:
-                failure_reason = str(exc)[:200]
+            outbound = client_outbound(XRAY_CLIENT_CONFIG_PATH, row["listen_port"], host=DATAPLANE_PROBE_HOST)
+            probe = self.probe_runner.probe_outbound(outbound, PROBE_TIMEOUT, source="upstream", target=f"port:{row['listen_port']}")
+            reachable = int(probe["ok"])
+            failure_reason = probe.get("error", "")
+            if probe.get("management_error"):
+                emit_business_event("probe.failed", result="failure", actor_type="system", resource_type="port",
+                                    resource_id=row["listen_port"], error_code="probe_management_error",
+                                    message=failure_reason, metadata=probe)
+                continue  # Preserve last health; executor errors are not target failures.
             results.append((row["listen_port"], reachable, checked_at, failure_reason))
             if not reachable:
                 emit_business_event(
@@ -80,7 +83,7 @@ class ProbesService:
                     resource_id=row["listen_port"],
                     error_code="unreachable",
                     message=failure_reason,
-                    metadata={"listen_port": row["listen_port"]},
+                    metadata={"listen_port": row["listen_port"], **probe},
                 )
 
         with self.write_lock:

@@ -6,14 +6,16 @@ import os
 import sys
 from pathlib import Path
 
+from app.probe_incidents import database_incident_observer
 from app.xray.node import DataPlaneConfig, NodeController
 from app.xray.operation_lock import LockBusyError, exclusive_file_lock
+from app.xray.protocol_probe import build_probe_runner
 
 from .artifact import (
     build_domain_report,
+    refresh_routing_report,
     render_proxy_template,
     rerender_config,
-    resolve_probe_server_name,
     restart_xray_command,
     restart_xray_container,
     write_domain_report,
@@ -24,13 +26,16 @@ from .classifier import (
     load_decisions,
     sync_builtin_domain_decisions,
 )
-from .common import save_json, utc_now
+from .common import format_timestamp, load_json, save_json, utc_now
 from .observations import load_log_state, purge_old_events, save_log_state, sync_log
 from .repository import (
+    load_classifications,
     normalize_ai_routing_manual_mode,
+    normalize_classifications,
     read_ai_routing_manual_mode,
     read_panel_target,
     save_ai_domains_to_panel_db,
+    save_classifications,
 )
 from .selector import select_ai_target, should_fallback_to_primary_route
 
@@ -93,44 +98,69 @@ def _resolve_lock_path(args, attribute, default_name):
     return Path(args.config_out).with_name(default_name)
 
 
-def run_once(args):
-    """Run one apply cycle while excluding every other manager process."""
+def load_routing_decisions(args):
+    """Merge durable history with the latest atomically published JSON cache."""
+    try:
+        current = load_decisions(args.classification_state_path)
+    except (AttributeError, TypeError):
+        current = {"domains": {}}
+    domains = load_classifications(args.panel_db_path)
+    for domain, item in normalize_classifications(current["domains"]).items():
+        previous = domains.get(domain)
+        if previous is None or item["classified_at"] >= previous["classified_at"]:
+            domains[domain] = item
+    return {"domains": domains}
 
-    lock_path = _resolve_lock_path(args, "apply_lock_path", ".ai-domain-manager.lock")
+
+def analyze_domains(args):
+    """Publish classifications without holding routing/manual locks during model calls."""
+    analysis_lock = _resolve_lock_path(args, "analysis_lock_path", ".ai-domain-manager-analysis.lock")
+    with exclusive_file_lock(analysis_lock):
+        now = utc_now()
+        log_state = load_log_state(args.log_state_path)
+        sync_log(
+            args.log_path,
+            log_state,
+            data_plane_controller=build_data_plane_controller(args),
+            lookback_seconds=args.lookback_seconds,
+            now=now,
+        )
+        cutoff = purge_old_events(log_state, args.lookback_seconds, now)
+        decisions = load_routing_decisions(args)
+        observed_domains = {item["domain"] for item in log_state["events"]}
+        sync_builtin_domain_decisions(decisions, args.classification_state_path, observed_domains)
+        if read_ai_routing_manual_mode(args.panel_db_path) == "forced_fallback":
+            pending = []
+        else:
+            pending = classify_pending_domains(decisions, args.classification_state_path, observed_domains, args)
+        # Persist before remote rendering/sync/restart: external failure cannot lose classifications.
+        save_classifications(args.panel_db_path, decisions)
+        save_json(args.classification_state_path, decisions)
+        save_log_state(args.log_state_path, log_state)
+        return log_state, cutoff, now, pending
+
+
+def run_once(args, *, routing_only=False):
+    """Run an hourly analysis or a health-only apply with shared cross-process locks."""
     manual_mode_override = getattr(args, "manual_mode", None)
     has_manual_override = isinstance(manual_mode_override, str) and bool(manual_mode_override.strip())
+    # Manual switches must also stay responsive and reuse existing classifications.
+    analysis = None if routing_only or has_manual_override else analyze_domains(args)
+    lock_path = _resolve_lock_path(args, "apply_lock_path", ".ai-domain-manager.lock")
     manual_lock_held = getattr(args, "manual_lock_held", False)
-    if not isinstance(manual_lock_held, bool):
-        manual_lock_held = False
-    if has_manual_override:
-        if manual_lock_held:
-            with exclusive_file_lock(lock_path):
-                return _run_once_locked(args)
-        manual_lock_path = _resolve_lock_path(args, "manual_lock_path", ".ai-domain-manager-manual.lock")
-        with exclusive_file_lock(manual_lock_path), exclusive_file_lock(lock_path):
-            return _run_once_locked(args)
-
+    if has_manual_override and manual_lock_held is True:
+        with exclusive_file_lock(lock_path):
+            return _run_once_locked(args, analysis)
     manual_lock_path = _resolve_lock_path(args, "manual_lock_path", ".ai-domain-manager-manual.lock")
     with exclusive_file_lock(manual_lock_path), exclusive_file_lock(lock_path):
-        return _run_once_locked(args)
+        return _run_once_locked(args, analysis)
 
 
-def _run_once_locked(args):
+def _run_once_locked(args, analysis=None):
     now = utc_now()
     data_plane_controller = build_data_plane_controller(args)
-    log_state = load_log_state(args.log_state_path)
-    sync_log(
-        args.log_path,
-        log_state,
-        data_plane_controller=data_plane_controller,
-        lookback_seconds=args.lookback_seconds,
-        now=now,
-    )
-    cutoff = purge_old_events(log_state, args.lookback_seconds, now)
-
-    decisions = load_decisions(args.classification_state_path)
-    observed_domains = {item["domain"] for item in log_state["events"]}
-    sync_builtin_domain_decisions(decisions, args.classification_state_path, observed_domains)
+    decisions = load_routing_decisions(args)
+    save_classifications(args.panel_db_path, decisions)
     panel_target = read_panel_target(args.panel_db_path, args.panel_route_listen_port)
     manual_mode_override = getattr(args, "manual_mode", None)
     if not isinstance(manual_mode_override, str):
@@ -151,31 +181,28 @@ def _run_once_locked(args):
             "candidates": [],
         }
     else:
-        for candidate in args.ai_upstream_candidates:
-            candidate["probe_server_name"] = resolve_probe_server_name(
-                args.proxy_template_path,
-                candidate,
-                panel_target,
-                getattr(args, "ai_upstream_probe_server_name", ""),
-            )
+        candidates = [dict(candidate) for candidate in args.ai_upstream_candidates]
+        for candidate in candidates:
+            try:
+                payload, _reason = render_proxy_template(args.proxy_template_path, candidate, panel_target)
+                candidate["probe_outbound"] = payload["outbounds"][0] if payload else None
+            except (OSError, ValueError, TypeError, KeyError):
+                candidate["probe_outbound"] = None
         preferred_index = {"primary": 0, "backup": 1}.get(manual_mode)
         ai_target = select_ai_target(
-            args.ai_upstream_candidates,
+            candidates,
             args.ai_upstream_probe_timeout_seconds,
-            probe_controller=data_plane_controller,
+            probe_controller=build_probe_runner(observation_hook=database_incident_observer(args.panel_db_path)),
             preferred_index=preferred_index,
         )
+    probe_management_error = ai_target.get("probe_status") == "probe_error"
+    if probe_management_error:
+        previous = load_json(args.report_output_dir / "latest.json", {}).get("ai_target") or {}
+        for key in ("selected_index", "selected_number", "upstream_host", "upstream_port", "failover_active"):
+            if key in previous:
+                ai_target[key] = previous[key]
+        ai_target["selection_preserved"] = True
     route_status = {"status": "disabled", "reason": ""}
-
-    if manual_mode == "forced_fallback":
-        pending_without_classifier = []
-    else:
-        pending_without_classifier = classify_pending_domains(
-            decisions,
-            args.classification_state_path,
-            observed_domains,
-            args,
-        )
 
     ai_domains = sorted(domain for domain, item in decisions["domains"].items() if item.get("classification") == "ai")
 
@@ -199,8 +226,8 @@ def _run_once_locked(args):
                     else "ai_upstream_unreachable"
                 ),
             }
-        elif str(ai_target.get("probe_status", "")).strip().lower() == "probe_error":
-            args.dynamic_routing_path.unlink(missing_ok=True)
+        elif probe_management_error:
+            # Executor faults say nothing about targets. Keep the last routing fragment.
             route_status = {
                 "status": "probe_error",
                 "reason": ai_target.get("failure_reason", "ai_probe_management_failed"),
@@ -219,6 +246,8 @@ def _run_once_locked(args):
     elif manual_mode == "forced_fallback":
         args.dynamic_routing_path.unlink(missing_ok=True)
         route_status = {"status": "manual_fallback", "reason": "manual_override"}
+    elif probe_management_error:
+        route_status = {"status": "probe_error", "reason": "probe_management_failed"}
     else:
         args.dynamic_routing_path.unlink(missing_ok=True)
         route_status = {"status": "idle", "reason": "no_ai_domains"}
@@ -291,17 +320,38 @@ def _run_once_locked(args):
         if config_apply_status != "delegated":
             pending_apply_path.unlink(missing_ok=True)
 
+    route_status.update(
+        {
+            "checked_at": format_timestamp(now),
+            "known_ai_domains": len(ai_domains),
+        }
+    )
+    for attribute, key in (
+        ("health_interval_seconds", "health_interval_seconds"),
+        ("interval_seconds", "classification_interval_seconds"),
+    ):
+        value = getattr(args, attribute, None)
+        if isinstance(value, int):
+            route_status[key] = value
+    route_status["config_changed"] = config_changed or remote_config_changed
+    route_status["config_retried"] = config_retried
+    route_status["config_apply_status"] = config_apply_status
     try:
-        report = build_domain_report(log_state, cutoff, now, decisions, ai_target, panel_target, route_status)
-        if pending_without_classifier:
-            report["route_status"]["pending_domains_without_classifier"] = pending_without_classifier
-        report["route_status"]["config_changed"] = config_changed or remote_config_changed
-        report["route_status"]["config_retried"] = config_retried
-        report["route_status"]["config_apply_status"] = config_apply_status
-        report["panel_db_status"] = save_ai_domains_to_panel_db(args.panel_db_path, report, decisions)
-        write_domain_report(args.report_output_dir, report)
-        save_log_state(args.log_state_path, log_state)
-        save_json(args.classification_state_path, decisions)
+        if analysis is None:
+            report = refresh_routing_report(
+                args.report_output_dir, now, decisions, ai_target, panel_target, route_status
+            )
+            write_domain_report(args.report_output_dir, report, history=False)
+        else:
+            log_state, cutoff, analyzed_at, pending_without_classifier = analysis
+            report = build_domain_report(
+                log_state, cutoff, analyzed_at, decisions, ai_target, panel_target, route_status
+            )
+            report["routing_checked_at"] = format_timestamp(now)
+            if pending_without_classifier:
+                report["route_status"]["pending_domains_without_classifier"] = pending_without_classifier
+            report["panel_db_status"] = save_ai_domains_to_panel_db(args.panel_db_path, report, decisions)
+            write_domain_report(args.report_output_dir, report)
         print(
             "[ai_domain_manager] "
             f"domains={report['unique_domains']} ai_domains={len(report['ai_domains'])} "
@@ -320,6 +370,8 @@ def _run_once_locked(args):
             "config_changed": config_changed or remote_config_changed,
             "config_retried": config_retried,
         }
+    if probe_management_error and manual_mode_override.strip():
+        raise RuntimeError("独立探测执行异常，保留此前人工模式与路由。")
     return {
         "status": "applied",
         "config_apply_status": config_apply_status,
@@ -331,6 +383,8 @@ def _run_once_locked(args):
 __all__ = [
     "LOCK_BUSY_EXIT_CODE",
     "LockBusyError",
+    "analyze_domains",
     "build_data_plane_controller",
+    "load_routing_decisions",
     "run_once",
 ]

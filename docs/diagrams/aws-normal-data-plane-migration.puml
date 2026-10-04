@@ -10,7 +10,6 @@ cloud "Cloudflare DNS\nprimary → AWS 公网 IP\nbackup → 控制面公网 IP"
 node "AWS 普通数据面\nTailscale control-plane-host\n公网 redacted-ip-010" as aws #A9DFBF {
   component "Xray 26.5.3\n8 个 VLESS + REALITY TCP 入口" as xray
   component "verge-sub\n订阅 HTTPS" as subscription
-  component "Exporter / cAdvisor\nFluent Bit" as monitoring
 }
 
 node "原普通数据面（回退源）\nTailscale redacted-ip-003\n公网 redacted-ip-011" as old #FAD7A0
@@ -23,7 +22,6 @@ control --> aws : Tailscale SSH\n同步 / 探测 / 重启
 control ..> old : 手工回退
 aws --> xray
 aws --> subscription
-aws --> monitoring
 
 note bottom of aws
 图示为切换后的当前状态：primary DNS 指向 AWS。

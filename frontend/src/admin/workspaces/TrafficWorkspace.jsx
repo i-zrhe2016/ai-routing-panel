@@ -1,20 +1,24 @@
 import { BarRanking, GaugeRing, SeriesChart, Sparkline } from "../components/charts/index.jsx";
 import { MetricCard, Panel, StatusPill, Tone } from "../components/ui.jsx";
 import { humanBytes } from "../../shared/formatters.js";
-import { portTone, trafficToday } from "../lib/dashboard.js";
+import { portTone } from "../lib/dashboard.js";
 import { usePanel } from "../state/PanelProvider.jsx";
 
 const RECEIVED_COLOR = "var(--c-primary)";
 const SENT_COLOR = "var(--c-success)";
 const RANGES = [
-  { days: 7, label: "7 天" },
-  { days: 14, label: "14 天" },
-  { days: 30, label: "30 天" },
+  { days: 1, label: "今日" },
+  { days: 7, label: "近 7 天" },
+  { days: 30, label: "近 30 天" },
 ];
 
 export default function TrafficWorkspace() {
   const panel = usePanel();
-  const traffic = panel.insights?.traffic || null;
+  const history = panel.insights?.traffic;
+  const traffic = history?.days === panel.insightsDays ? history : null;
+  const periodLabel = RANGES.find((range) => range.days === panel.insightsDays)?.label || "所选周期";
+  const historyMessage = panel.insightsLoading ? "正在加载流量统计…" : panel.insightsError || "流量统计尚未加载。";
+  const periodNote = traffic ? `${traffic.range_start} → ${traffic.range_end}` : historyMessage;
   const ports = traffic?.ports || [];
   const selected = panel.selectedPort;
   const selectedTraffic = ports.find((item) => item.listen_port === selected?.listen_port) || null;
@@ -23,7 +27,7 @@ export default function TrafficWorkspace() {
     key: item.listen_port,
     label: `:${item.listen_port}`,
     value: item.totals.total_bytes,
-    note: `${item.note || "未命名"} · ${item.totals.connections} 连接 · 今日 ${humanBytes(item.today.total_bytes)}`,
+    note: `${item.note || "未命名"} · ${periodLabel} ${item.totals.connections} 连接`,
     color: "var(--c-primary)",
   }));
 
@@ -31,9 +35,8 @@ export default function TrafficWorkspace() {
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">TRAFFIC</p>
-          <h2>流量与端口负载</h2>
-          <p>累计计数来自 Xray 统计接口，日粒度历史来自控制面自身的 traffic_daily 表，两者都无需浏览器直接解析 /metrics。</p>
+          <h1>流量与端口负载</h1>
+          <p>查看全站与端口的流量趋势、连接负载和配额使用情况。</p>
         </div>
         <div className="cc-toolbar__group">
           {RANGES.map((range) => (
@@ -41,6 +44,7 @@ export default function TrafficWorkspace() {
               key={range.days}
               type="button"
               className={`a-btn ${panel.insightsDays === range.days ? "primary" : "ghost"}`}
+              aria-pressed={panel.insightsDays === range.days}
               onClick={() => panel.changeInsightsDays(range.days)}
             >
               {range.label}
@@ -49,24 +53,17 @@ export default function TrafficWorkspace() {
         </div>
       </section>
 
-      <section className="cc-metric-grid">
-        <MetricCard label="TOTAL TRAFFIC" value={humanBytes(panel.totalTrafficBytes)} note="累计接收 + 发送" accent />
-        <MetricCard label="RECEIVED" value={humanBytes(panel.summary.total_bytes_received || 0)} note="累计入站" />
-        <MetricCard label="SENT" value={humanBytes(panel.summary.total_bytes_sent || 0)} note="累计出站" />
-        <MetricCard label="CONNECTIONS" value={panel.summary.total_connections || 0} note={`${panel.summary.active_ports || 0} 个活跃端口`} />
-        <MetricCard
-          label={`最近 ${panel.insightsDays} 天`}
-          value={traffic ? humanBytes(traffic.totals.total_bytes) : "—"}
-          note={traffic ? `${traffic.range_start} → ${traffic.range_end}` : panel.insightsError || "历史未加载"}
-          tone="info"
-        />
+      <section className="cc-metric-grid" aria-label={`${periodLabel}流量统计`} aria-busy={panel.insightsLoading}>
+        <MetricCard label={`${periodLabel}总流量`} value={traffic ? humanBytes(traffic.totals.total_bytes) : "—"} note={periodNote} accent />
+        <MetricCard label={`${periodLabel}入站`} value={traffic ? humanBytes(traffic.totals.bytes_received) : "—"} note={periodNote} />
+        <MetricCard label={`${periodLabel}出站`} value={traffic ? humanBytes(traffic.totals.bytes_sent) : "—"} note={periodNote} />
+        <MetricCard label={`${periodLabel}连接`} value={traffic ? traffic.totals.connections : "—"} note={periodNote} />
       </section>
 
       <section className="cc-split">
         <Panel
-          kicker="FLEET HISTORY"
           title="全站日流量"
-          description={traffic ? `按天统计，共 ${traffic.days} 天。` : "历史数据尚未加载。"}
+          description={traffic ? `${periodLabel}，从首日北京时间 0 点开始统计。` : historyMessage}
         >
           {traffic ? (
             <SeriesChart
@@ -78,16 +75,16 @@ export default function TrafficWorkspace() {
               ]}
             />
           ) : (
-            <div className="cc-chart-empty">{panel.insightsError || "历史数据尚未加载。"}</div>
+            <div className="cc-chart-empty">{historyMessage}</div>
           )}
         </Panel>
 
-        <Panel kicker="TOP PORTS" title="端口负载排行" description="按所选区间的累计流量排序。">
-          <BarRanking items={ranking} ariaLabel="端口流量排行" emptyLabel={panel.insightsError || "暂无端口流量数据。"} />
+        <Panel title="端口负载排行" description="按所选区间的累计流量排序。">
+          <BarRanking items={ranking} ariaLabel="端口流量排行" emptyLabel={traffic ? "暂无端口流量数据。" : historyMessage} />
         </Panel>
       </section>
 
-      <Panel kicker="PORT LOAD" title="端口明细" description="点击端口查看该入口的历史曲线与配额使用。">
+      <Panel title="端口明细" description={`${periodLabel}的连接与流量；点击端口查看历史曲线与累计配额。`}>
         {panel.ports.length ? (
           <div className="cc-table-wrap">
             <table className="cc-table">
@@ -97,8 +94,9 @@ export default function TrafficWorkspace() {
                   <th scope="col">租户</th>
                   <th scope="col">状态</th>
                   <th scope="col">连接</th>
-                  <th scope="col">今日</th>
-                  <th scope="col">累计</th>
+                  <th scope="col">入站</th>
+                  <th scope="col">出站</th>
+                  <th scope="col">总流量</th>
                   <th scope="col">趋势</th>
                 </tr>
               </thead>
@@ -120,9 +118,10 @@ export default function TrafficWorkspace() {
                       <td>
                         <StatusPill tone={portTone(port)} label={port.status_label || port.status} />
                       </td>
-                      <td>{port.total_connections || 0}</td>
-                      <td>{humanBytes(trafficToday(port))}</td>
-                      <td>{port.traffic_used_display}</td>
+                      <td>{series ? series.totals.connections : "—"}</td>
+                      <td>{series ? humanBytes(series.totals.bytes_received) : "—"}</td>
+                      <td>{series ? humanBytes(series.totals.bytes_sent) : "—"}</td>
+                      <td>{series ? humanBytes(series.totals.total_bytes) : "—"}</td>
                       <td>
                         <Sparkline values={series?.series.total_bytes || []} label={`端口 ${port.listen_port}`} />
                       </td>
@@ -140,7 +139,6 @@ export default function TrafficWorkspace() {
       {selected ? (
         <section className="cc-split">
           <Panel
-            kicker="SELECTED PORT"
             title={`端口 ${selected.listen_port}`}
             description={selected.note || "未填写备注"}
             actions={<StatusPill tone={portTone(selected)} label={selected.status_label || selected.status} />}
@@ -149,21 +147,25 @@ export default function TrafficWorkspace() {
               <GaugeRing
                 value={selected.traffic_usage_bytes}
                 max={selected.traffic_limit_bytes || 0}
-                label="流量配额"
+                label="累计流量配额"
                 caption={`${selected.traffic_used_display}${selected.traffic_limit_bytes ? ` / ${selected.traffic_limit_display}` : ""}`}
               />
               <dl className="cc-facts">
                 <div>
-                  <dt>今日流量</dt>
-                  <dd>{humanBytes(trafficToday(selected))}</dd>
+                  <dt>{periodLabel}流量</dt>
+                  <dd>{selectedTraffic ? humanBytes(selectedTraffic.totals.total_bytes) : "—"}</dd>
                 </div>
                 <div>
-                  <dt>累计入站</dt>
-                  <dd>{humanBytes(selected.total_bytes_received)}</dd>
+                  <dt>{periodLabel}入站</dt>
+                  <dd>{selectedTraffic ? humanBytes(selectedTraffic.totals.bytes_received) : "—"}</dd>
                 </div>
                 <div>
-                  <dt>累计出站</dt>
-                  <dd>{humanBytes(selected.total_bytes_sent)}</dd>
+                  <dt>{periodLabel}出站</dt>
+                  <dd>{selectedTraffic ? humanBytes(selectedTraffic.totals.bytes_sent) : "—"}</dd>
+                </div>
+                <div>
+                  <dt>{periodLabel}连接</dt>
+                  <dd>{selectedTraffic ? selectedTraffic.totals.connections : "—"}</dd>
                 </div>
                 <div>
                   <dt>剩余配额</dt>
@@ -185,7 +187,7 @@ export default function TrafficWorkspace() {
             </div>
           </Panel>
 
-          <Panel kicker="PORT HISTORY" title="该端口日流量" description={selectedTraffic ? "所选区间的每日合计。" : "历史数据尚未加载。"}>
+          <Panel title="该端口日流量" description={selectedTraffic ? "所选区间的每日合计。" : historyMessage}>
             {selectedTraffic ? (
               <SeriesChart
                 labels={traffic.dates}
@@ -196,7 +198,7 @@ export default function TrafficWorkspace() {
                 ]}
               />
             ) : (
-              <div className="cc-chart-empty">该端口在所选区间内没有历史记录。</div>
+              <div className="cc-chart-empty">{traffic ? "该端口在所选区间内没有历史记录。" : historyMessage}</div>
             )}
           </Panel>
         </section>

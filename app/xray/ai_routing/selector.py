@@ -16,6 +16,7 @@ def summarize_ai_target_for_report(ai_target):
         }
     summary = summarize_ai_target_candidate(ai_target)
     for key in (
+        "selection_preserved",
         "selected_index",
         "selected_number",
         "candidate_count",

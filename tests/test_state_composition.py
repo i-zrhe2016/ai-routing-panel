@@ -42,6 +42,9 @@ def test_panel_state_wires_domains_with_explicit_dependencies():
     assert state.lifecycle.xray_apply is state.xray_apply
     assert state.lifecycle.maintenance_worker is state.maintenance_worker
     assert state.lifecycle.dns_failover_worker is state.dns_failover_worker
+    assert state.lifecycle.incident_worker is state.incident_worker
+    assert state.incident_worker.store is state.incidents
+    assert state.probes.probe_runner.observation_hook.__self__ is state.incidents
 
 
 def test_bootstrap_builds_canonical_application_from_one_component_graph():
@@ -69,6 +72,7 @@ def test_bootstrap_builds_canonical_application_from_one_component_graph():
         "dns_failover",
         "commerce",
         "diagnostics",
+        "incidents",
         "lifecycle",
     )
     assert application.nodes is components["nodes"]
@@ -129,3 +133,27 @@ def test_ai_routing_service_accepts_named_route_dependencies():
 
     assert service.repository is repository
     assert service.node_controller is node_controller
+
+
+@pytest.mark.parametrize("threshold", [5, 3])
+def test_panel_bootstrap_and_recreated_ai_manager_observers_share_threshold(tmp_path, monkeypatch, threshold):
+    from app import config
+    from app.bootstrap import build_application_components
+    from app.probe_incidents import database_incident_observer
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "panel.db")
+    monkeypatch.setattr(config, "INCIDENT_FAILURE_THRESHOLD", threshold)
+    monkeypatch.setenv("INCIDENT_FAILURE_THRESHOLD", str(threshold))
+    components = build_application_components()
+    incidents = components["incidents"]
+    assert incidents.failure_threshold == threshold
+    failure = {"ok": False, "probe_origin": "same-probe", "error": "request failed"}
+    incidents.record("ai_upstream", "node", failure)
+    # The scheduled manager creates its observer anew each health cycle.
+    for _ in range(threshold - 2):
+        database_incident_observer(tmp_path / "panel.db")("ai_upstream", "node", failure)
+        assert incidents.list() == [] and incidents.claim() is None
+    database_incident_observer(tmp_path / "panel.db")("ai_upstream", "node", failure)
+    assert incidents.list()[0]["occurrences"] == threshold
+    assert incidents.claim()["source"] == "ai_upstream" and incidents.claim() is None

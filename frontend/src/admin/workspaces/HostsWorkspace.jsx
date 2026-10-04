@@ -1,5 +1,4 @@
 import { useConfirm } from "../components/ConfirmDialog.jsx";
-import { GrafanaPanels, GrafanaToolbar, HOST_PANELS, useGrafana } from "../components/GrafanaPanels.jsx";
 import { FlowPath } from "../components/charts/index.jsx";
 import { MetricCard, Panel, StatusPill } from "../components/ui.jsx";
 import { buildHostInventory, hostStateLabel, hostTone } from "../lib/hosts.js";
@@ -8,7 +7,6 @@ import { usePanel } from "../state/PanelProvider.jsx";
 export default function HostsWorkspace() {
   const panel = usePanel();
   const confirm = useConfirm();
-  const grafana = useGrafana(panel.meta);
   const hosts = buildHostInventory(panel.panel, panel.insights);
   const reachable = hosts.filter((host) => host.reachable).length;
   const running = hosts.filter((host) => host.running === true).length;
@@ -39,9 +37,8 @@ export default function HostsWorkspace() {
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">HOSTS</p>
-          <h2>主机与数据面</h2>
-          <p>每台纳管主机的角色、管理通道、运行时状态和可用操作都在这里；重启和体检是主机级的唯一写操作。</p>
+          <h1>主机与数据面</h1>
+          <p>查看纳管主机的角色、管理通道与运行状态，按需重启或运行数据面体检。</p>
         </div>
         <span className="cc-status-line">{hosts.length} 台纳管主机</span>
       </section>
@@ -58,7 +55,7 @@ export default function HostsWorkspace() {
         />
       </section>
 
-      <Panel kicker="PATH" title="当前流量路径" description={panel.trafficRouting?.scenario || "等待路由状态同步。"}>
+      <Panel title="当前流量路径" description={panel.trafficRouting?.scenario || "等待路由状态同步。"}>
         <FlowPath nodes={flowNodes} />
       </Panel>
 
@@ -133,16 +130,6 @@ export default function HostsWorkspace() {
         ))}
         {!hosts.length ? <div className="cc-empty">控制面未返回任何纳管主机。</div> : null}
       </div>
-
-      <Panel
-        kicker="HOST RESOURCES"
-        title="主机资源"
-        description="CPU、内存、磁盘和负载来自 Prometheus，由 Grafana 出图。"
-        actions={null}
-      >
-        <GrafanaToolbar grafana={grafana} />
-        <GrafanaPanels grafana={grafana} panels={HOST_PANELS} />
-      </Panel>
 
       {confirm.dialog}
     </div>

@@ -6,11 +6,14 @@ import argparse
 import os
 import shlex
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from app.xray.config import BASE_DIR, DEFAULT_RENDER_MODULE
 from app.xray.operation_lock import LockBusyError
+from components.openrouter import OpenRouterConfig
 
 from .candidates import build_ai_upstream_candidates
 from .classifier import is_local_openai_base_url, normalize_openai_base_url
@@ -34,6 +37,12 @@ def build_args():
     parser = argparse.ArgumentParser(description="Classify Xray destination domains and maintain dynamic AI routing.")
     parser.add_argument("--workspace-dir", default=os.environ.get("XRAY_WORKSPACE_DIR", str(BASE_DIR)))
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--routing-only", action="store_true", help="Probe/apply known classifications without analysis."
+    )
+    parser.add_argument(
+        "--health-interval-seconds", type=int, default=env_int("AI_ROUTING_HEALTH_INTERVAL_SECONDS", 30)
+    )
     parser.add_argument("--interval-seconds", type=int, default=env_int("AI_DOMAIN_INTERVAL_SECONDS", 3600))
     parser.add_argument("--lookback-seconds", type=int, default=env_int("AI_DOMAIN_LOOKBACK_SECONDS", 3600))
     parser.add_argument("--batch-size", type=int, default=env_int("AI_DOMAIN_BATCH_SIZE", 50))
@@ -77,6 +86,11 @@ def build_args():
             "AI_DOMAIN_MANAGER_MANUAL_LOCK_PATH", str(args.config_out.with_name(".ai-domain-manager-manual.lock"))
         )
     )
+    args.analysis_lock_path = Path(
+        os.environ.get(
+            "AI_DOMAIN_MANAGER_ANALYSIS_LOCK_PATH", str(args.config_out.with_name(".ai-domain-manager-analysis.lock"))
+        )
+    )
     args.client_out = Path(os.environ.get("XRAY_CLIENT_OUT", str(workspace / "runtime" / "client-test.json")))
     args.share_out = Path(os.environ.get("XRAY_SHARE_OUT", str(workspace / "runtime" / "client-share.txt")))
     args.panel_db_path = Path(os.environ.get("PANEL_DB_PATH", "/panel-data/panel.db"))
@@ -84,6 +98,22 @@ def build_args():
         os.environ.get("AI_PROXY_OUTBOUND_TEMPLATE_PATH", str(workspace / "ai-proxy-outbound.json"))
     )
     env_file_values = load_env_file_values(args.env_file)
+    args.ai_domain_classifier_provider = (
+        read_env_or_file("AI_DOMAIN_CLASSIFIER_PROVIDER", "openrouter", env_file_values).strip().lower()
+    )
+    if args.ai_domain_classifier_provider not in {"openrouter", "legacy"}:
+        parser.error("AI_DOMAIN_CLASSIFIER_PROVIDER must be openrouter or legacy")
+    args.openrouter_config = OpenRouterConfig(
+        api_key=read_env_or_file("OPENROUTER_API_KEY", "", env_file_values).strip(),
+        api_key_file=read_env_or_file("OPENROUTER_API_KEY_FILE", "", env_file_values).strip(),
+        model=read_env_or_file("OPENROUTER_MODEL", "openai/gpt-5-nano", env_file_values).strip() or "openai/gpt-5-nano",
+        timeout_seconds=parse_positive_float(
+            read_env_or_file("OPENROUTER_TIMEOUT_SECONDS", "90", env_file_values), "OPENROUTER_TIMEOUT_SECONDS"
+        ),
+        max_output_tokens=int(read_env_or_file("OPENROUTER_MAX_OUTPUT_TOKENS", "8192", env_file_values)),
+    )
+    if args.openrouter_config.max_output_tokens <= 0:
+        parser.error("OPENROUTER_MAX_OUTPUT_TOKENS must be > 0")
     args.restart_container_name = os.environ.get("DATAPLANE_RESTART_CONTAINER", "").strip()
     args.restart_command = os.environ.get("DATAPLANE_RESTART_COMMAND", "").strip()
     args.data_plane_ssh_target = os.environ.get("DATAPLANE_SSH_TARGET", "").strip()
@@ -148,11 +178,44 @@ def build_args():
     return args
 
 
+def _run_scheduled_cycle(args, *, routing_only):
+    try:
+        run_once(args, routing_only=routing_only)
+    except LockBusyError as exc:
+        print(f"[ai_domain_manager] busy: {exc}", file=sys.stderr, flush=True)
+        return LOCK_BUSY_EXIT_CODE
+    except Exception as exc:  # noqa: BLE001 - failures must not stop subsequent health/recovery cycles
+        print(f"[ai_domain_manager] error: {exc}", file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+def run_scheduler(args, stop_event=None):
+    """Keep health independent of model latency; allow only one analysis job at a time."""
+    stop_event = stop_event or threading.Event()
+    analysis = None
+    next_analysis_at = time.monotonic()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-domain-analysis") as executor:
+        while not stop_event.is_set():
+            if analysis is not None and analysis.done():
+                if analysis.result() != 0:
+                    next_analysis_at = time.monotonic()
+                analysis = None
+            if not args.routing_only and analysis is None and time.monotonic() >= next_analysis_at:
+                analysis = executor.submit(_run_scheduled_cycle, args, routing_only=False)
+                next_analysis_at = time.monotonic() + args.interval_seconds
+            _run_scheduled_cycle(args, routing_only=True)
+            stop_event.wait(args.health_interval_seconds)
+
+
 def main():
     args = build_args()
 
     if args.interval_seconds <= 0:
         print("AI_DOMAIN_INTERVAL_SECONDS must be > 0", file=sys.stderr)
+        return 1
+    if args.health_interval_seconds <= 0:
+        print("AI_ROUTING_HEALTH_INTERVAL_SECONDS must be > 0", file=sys.stderr)
         return 1
     if args.lookback_seconds <= 0:
         print("AI_DOMAIN_LOOKBACK_SECONDS must be > 0", file=sys.stderr)
@@ -164,21 +227,10 @@ def main():
         print("at least one AI upstream must be configured", file=sys.stderr)
         return 1
 
-    while True:
-        try:
-            run_once(args)
-        except LockBusyError as exc:
-            print(f"[ai_domain_manager] busy: {exc}", file=sys.stderr, flush=True)
-            if args.once:
-                return LOCK_BUSY_EXIT_CODE
-        except Exception as exc:  # noqa: BLE001 - scheduler reports one-cycle failures and continues
-            print(f"[ai_domain_manager] error: {exc}", file=sys.stderr, flush=True)
-            if args.once:
-                return 1
-        else:
-            if args.once:
-                return 0
-        time.sleep(seconds_until_next_boundary(args.interval_seconds))
+    if args.once:
+        return _run_scheduled_cycle(args, routing_only=args.routing_only)
+    run_scheduler(args)
+    return 0
 
 
 if __name__ == "__main__":

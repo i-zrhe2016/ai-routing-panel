@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 from ..config import (
@@ -35,6 +36,14 @@ def _ai_candidate_identity(candidate):
     if not host or port <= 0:
         return None
     return candidate_type, host, port
+
+
+def _report_timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(str(value or ""))
+        return parsed.isoformat() if parsed.utcoffset() is not None else None
+    except (ValueError, TypeError):
+        return None
 
 
 class AiRoutingService:
@@ -420,11 +429,21 @@ class AiRoutingService:
 
     def serialize_ai_report_domain(self, item):
         protocols = self.decode_json_text_list(item.get("protocols", []))
+        raw_route = item.get("traffic_route")
+        raw_route = raw_route if isinstance(raw_route, dict) else {}
+        outbound = str(raw_route.get("outbound_tag", "unknown"))
+        status = str(raw_route.get("status", "unknown"))
+        mode = "ai" if outbound == "ai_proxy" else (
+            "fallback" if outbound == "direct" and status in {"fallback_to_primary", "manual_fallback", "manual_target_unreachable", "probe_error"}
+            else "direct" if outbound == "direct" else "unknown"
+        )
         return {
             "domain": str(item.get("domain", "")).strip(),
             "hits": int(item.get("hits", 0) or 0),
             "classification": str(item.get("classification", "unknown") or "unknown").strip() or "unknown",
             "reason": str(item.get("reason", "") or "").strip(),
+            "source": str(item.get("source", "") or "").strip(),
+            "traffic_route": {"outbound_tag": outbound, "mode": mode, "reason": str(raw_route.get("reason", "") or "")},
             "protocols": protocols,
             "protocols_display": ", ".join(protocols) if protocols else "暂无",
             "first_seen": str(item.get("first_seen") or "").strip() or None,
@@ -489,9 +508,18 @@ class AiRoutingService:
         if not isinstance(panel_target, dict):
             panel_target = None
 
+        generated_at = _report_timestamp(payload.get("generated_at"))
+        config_apply_status = route_status.get("config_apply_status")
+        if not isinstance(config_apply_status, str) or config_apply_status not in {
+            "direct", "unchanged", "delegated", "unmanaged", "not_needed"
+        }:
+            config_apply_status = "unknown"
+
         return {
-            "generated_at": str(payload.get("generated_at") or "").strip() or None,
-            "generated_at_display": format_optional_display_time(payload.get("generated_at")),
+            "generated_at": generated_at,
+            "routing_checked_at": _report_timestamp(payload.get("routing_checked_at")) or generated_at,
+            "config_apply_status": config_apply_status,
+            "generated_at_display": format_optional_display_time(generated_at),
             "window_start": str(payload.get("window_start") or "").strip() or None,
             "window_start_display": format_optional_display_time(payload.get("window_start")),
             "window_end": str(payload.get("window_end") or "").strip() or None,
@@ -507,6 +535,9 @@ class AiRoutingService:
             "route_status_tone": self.ai_route_status_tone(route_status_code),
             "config_changed": bool(route_status.get("config_changed")),
             "config_retried": bool(route_status.get("config_retried")),
+            "health_interval_seconds": route_status.get("health_interval_seconds"),
+            "classification_interval_seconds": route_status.get("classification_interval_seconds"),
+            "known_ai_domains": self.normalize_pending_domain_count(route_status.get("known_ai_domains", 0)),
             "pending_domains_without_classifier": self.normalize_pending_domain_count(
                 route_status.get("pending_domains_without_classifier", 0)
             ),
@@ -619,13 +650,23 @@ class AiRoutingService:
             status_code = "waiting_report"
             status_label = "等待 AI 路由报告"
             tone = "warn"
+        probe_stamps = [stamp for candidate in manual["candidates"] if (stamp := _report_timestamp(candidate.get("checked_at")))]
+        latest_probe = max(probe_stamps, key=lambda stamp: datetime.fromisoformat(stamp).timestamp(), default=None)
+        cache = self.query_classification_cache_summary()
         return {
             "configured": configured,
             "status": status_code,
             "status_label": status_label,
             "status_tone": tone,
+            "route_status": report["route_status"] if report else "unknown",
+            "route_status_reason": report["route_status_reason"] if report else "",
             "sync_mode_label": self.ai_domain_sync_mode_label(),
+            "report_generated_at": report["generated_at"] if report else None,
+            "config_apply_status": (
+                report["config_apply_status"] if report and status_code == report["route_status"] else "unknown"
+            ),
             "report_generated_at_display": report["generated_at_display"] if report else "暂无",
+            "routing_checked_at_display": format_optional_display_time(report["routing_checked_at"]) if report else "暂无",
             "current_ai_domains": report["ai_domain_count"] if report else 0,
             "total_ai_domains": aggregate["total_ai_domains"],
             "manual_mode": manual["mode"],
@@ -634,8 +675,30 @@ class AiRoutingService:
             "manual_updated_at_display": manual["updated_at_display"],
             "ai_candidates": manual["candidates"],
             "ai_candidate_count": manual["candidate_count"],
+            "config_changed": report["config_changed"] if report else False,
+            "config_retried": report["config_retried"] if report else False,
+            "probe_method": (report.get("ai_target") or {}).get("probe_method", "") if report else "",
+            "last_probe_at_display": format_optional_display_time(latest_probe),
+            "health_interval_seconds": report.get("health_interval_seconds") if report else None,
+            "classification_interval_seconds": report.get("classification_interval_seconds") if report else None,
+            "window_start_display": report["window_start_display"] if report else "暂无",
+            "window_end_display": report["window_end_display"] if report else "暂无",
+            "pending_domains_without_classifier": report["pending_domains_without_classifier"] if report else 0,
+            "cached_ai_domains_count": max(report["known_ai_domains"] if report else 0, cache["ai_domains"]),
+            "classification_cache": cache,
+            "recent_domains": sorted(report["domains"], key=lambda domain: domain["hits"], reverse=True)[:20] if report else [],
             "sync_error": str(sync_error or "").strip(),
         }
+
+    def query_classification_cache_summary(self):
+        with self.repository.connect() as conn:
+            exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_domain_classifications'").fetchone()
+            if exists:
+                rows = conn.execute("SELECT classification, COUNT(*) AS count FROM ai_domain_classifications GROUP BY classification").fetchall()
+                counts = {row["classification"]: int(row["count"]) for row in rows}
+                return {"status": "available", "total_domains": sum(counts.values()), "ai_domains": counts.get("ai", 0), "non_ai_domains": counts.get("not_ai", 0)}
+            count = conn.execute("SELECT COUNT(*) FROM ai_domains").fetchone()[0]
+            return {"status": "legacy", "total_domains": count, "ai_domains": count, "non_ai_domains": 0}
 
     def query_ai_domain_overview(self, sync_error=""):
         report = self.read_ai_domain_report()

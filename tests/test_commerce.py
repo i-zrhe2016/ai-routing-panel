@@ -118,6 +118,9 @@ def load_panel_module(temp_root):
 
 class CommerceFlowTest(unittest.TestCase):
     def setUp(self):
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.panel = load_panel_module(self.root)
@@ -143,7 +146,7 @@ class CommerceFlowTest(unittest.TestCase):
         with self.client.session_transaction() as session:
             return session["csrf_token"]
 
-    def register_customer(self, email="user@example.com", password="Password123!"):
+    def register_customer(self, email="user@example.com", password="DummyPassword123!"):
         self.client.get("/customer/register")
         response = self.client.post(
             "/customer/register",
@@ -159,7 +162,7 @@ class CommerceFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         return email, password
 
-    def login_customer(self, email="user@example.com", password="Password123!"):
+    def login_customer(self, email="user@example.com", password="DummyPassword123!"):
         self.client.get("/customer/login")
         response = self.client.post(
             "/customer/login",
@@ -200,6 +203,8 @@ class CommerceFlowTest(unittest.TestCase):
         dashboard = self.client.get("/customer/dashboard", follow_redirects=True)
         self.assertEqual(dashboard.status_code, 200)
         self.assertIn(email, dashboard.get_data(as_text=True))
+        overview = self.client.get("/api/customer/overview").get_json()["data"]
+        self.assertEqual(overview["meta"]["timezone_label"], "北京时间（UTC+08:00）")
 
         self.client.get("/customer/logout", follow_redirects=False)
         self.login_customer(email, password)

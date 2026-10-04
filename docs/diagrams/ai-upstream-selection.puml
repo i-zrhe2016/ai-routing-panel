@@ -4,12 +4,13 @@ title AI 出口模式与候选选择
 
 start
 :读取有效候选并归一化人工模式;
+:从 SQLite 与原子分类缓存复用已知域名;
 if (forced_fallback？) then (是)
   :移除动态 AI 路由\n普通数据面 freedom 直出;
 else (否)
-  :从普通数据面探测候选\n有 REALITY SNI 时做握手探测;
+  :独立执行主机使用候选凭据\n认证 VLESS + REALITY / HTTPS 204;
   if (管理通道探测异常？) then (是)
-    :移除动态 AI 路由\n报告 probe_error;
+    :保留此前选择与动态 AI 路由\n报告 probe_error;
   else (否)
   if (auto 模式？) then (是)
     if (存在可达候选？) then (是)
@@ -36,6 +37,7 @@ note right
   应用失败保留待应用状态供后续重试。
   人工切换成功后才持久化新模式。
   AI 回退不修改 DNS。
+  独立健康周期默认 30 秒，恢复后重用历史分类。
   没有已分类 AI 域名时不生成动态规则。
 end note
 stop

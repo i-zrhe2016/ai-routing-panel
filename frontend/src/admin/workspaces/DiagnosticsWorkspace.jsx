@@ -1,3 +1,4 @@
+import IncidentRecords from "../components/IncidentRecords.jsx";
 import { AvailabilityStrip, EventTimeline } from "../components/charts/index.jsx";
 import { DataTable, MetricCard, Panel, StatusPill, Tone } from "../components/ui.jsx";
 import { buildChecklist, summaryTone } from "../lib/diagnose.js";
@@ -6,7 +7,7 @@ import { usePanel } from "../state/PanelProvider.jsx";
 
 function realityLabel(port) {
   if (!port.reality) return "未检测";
-  if (port.reality.ok) return "握手成功";
+  if (port.reality.ok) return "认证请求成功";
   return `失败 · ${port.reality.error || "无原因"}`;
 }
 
@@ -29,9 +30,8 @@ export default function DiagnosticsWorkspace() {
     <div className="workspace-section">
       <section className="cc-page-intro">
         <div>
-          <p className="section-kicker">DIAGNOSTICS</p>
-          <h2>故障后排查</h2>
-          <p>先看当前结论，再按顺序核对探测记录、DNS 切换事件和数据面体检结果；所有结论都来自控制面已存储的数据。</p>
+          <h1>故障后排查</h1>
+          <p>从异常结论出发，核对探测记录、DNS 切换事件与数据面体检结果。</p>
         </div>
         <div className="cc-toolbar__group">
           <button
@@ -70,13 +70,15 @@ export default function DiagnosticsWorkspace() {
         />
         <MetricCard
           label="数据面体检"
-          value={diagnosis ? `${diagnosis.summary.ports_tcp_ok}/${diagnosis.summary.ports_total} TCP` : "未运行"}
-          note={diagnosis ? `Reality ${diagnosis.summary.ports_reality_ok}/${diagnosis.summary.ports_total}` : "点击右上角运行体检"}
+          value={diagnosis ? `${diagnosis.summary.ports_tcp_ok}/${diagnosis.summary.ports_total} 协议请求` : "未运行"}
+          note={diagnosis ? `VLESS+REALITY ${diagnosis.summary.ports_reality_ok}/${diagnosis.summary.ports_total}` : "点击右上角运行体检"}
           tone={diagnosis ? "info" : "neutral"}
         />
       </section>
 
-      <Panel kicker="CHECK FIRST" title="排查顺序" description="按严重程度排序，先处理会中断流量的项。">
+      <IncidentRecords />
+
+      <Panel title="排查顺序" description="按严重程度排序，先处理会中断流量的项。">
         <ul className="cc-checklist">
           {checklist.map((item) => (
             <li key={item.title} className={`cc-checklist__item is-${item.tone}`}>
@@ -91,7 +93,6 @@ export default function DiagnosticsWorkspace() {
       </Panel>
 
       <Panel
-        kicker="PROBE HISTORY"
         title="端口探测记录"
         description="每格是一次上游可达性探测，最近的在右侧。"
       >
@@ -117,7 +118,7 @@ export default function DiagnosticsWorkspace() {
       </Panel>
 
       <section className="cc-split">
-        <Panel kicker="FAILURES" title="最近失败" description="最新一次不可达的端口与原因。">
+        <Panel title="最近失败" description="最新一次不可达的端口与原因。">
           {probes?.recent_failures?.length ? (
             <ul className="cc-failure-list">
               {probes.recent_failures.map((failure) => (
@@ -136,18 +137,17 @@ export default function DiagnosticsWorkspace() {
           )}
         </Panel>
 
-        <Panel kicker="FAILOVER EVENTS" title="DNS 切换事件" description="探测、切换和回切的完整时间线（最近 40 条）。">
+        <Panel title="DNS 切换事件" description="探测、切换和回切的完整时间线（最近 40 条）。">
           <EventTimeline events={timelineEvents} emptyLabel={panel.insightsError || "暂无切换事件。"} />
         </Panel>
       </section>
 
       <Panel
-        kicker="DATA PLANE CHECK"
         title="数据面体检"
         description={
           diagnosis
             ? `生成于 ${diagnosis.generated_at} · ${diagnosis.data_plane_mode} 模式`
-            : "尚未运行。体检会验证端口 TCP 可达性、Reality 握手以及订阅下发参数与数据面实际配置是否一致。"
+            : "尚未运行。体检会通过独立探测主机验证 VLESS+REALITY 认证请求与预期 HTTPS 响应，并核对订阅与实际配置。"
         }
       >
         {diagnosis ? (
@@ -160,13 +160,13 @@ export default function DiagnosticsWorkspace() {
               </span>
               <span>节点 {diagnosis.node_host || "—"} · SNI {diagnosis.server_name || "—"}</span>
               <span>
-                TCP：
+                协议请求：
                 <Tone tone={summaryTone(diagnosis.summary.ports_tcp_ok, diagnosis.summary.ports_total)}>
                   {diagnosis.summary.ports_tcp_ok}/{diagnosis.summary.ports_total}
                 </Tone>
               </span>
               <span>
-                Reality：
+                VLESS+REALITY：
                 <Tone tone={summaryTone(diagnosis.summary.ports_reality_ok, diagnosis.summary.ports_total)}>
                   {diagnosis.summary.ports_reality_ok}/{diagnosis.summary.ports_total}
                 </Tone>
@@ -198,15 +198,15 @@ export default function DiagnosticsWorkspace() {
               <p className="cc-tone is-danger">无法比对：{diagnosis.consistency?.error || "未知原因"}</p>
             )}
 
-            <h4>端口连通性 / Reality 握手</h4>
+            <h4>端口认证请求 / HTTPS 响应</h4>
             <DataTable
-              caption="端口连通性与 Reality 握手结果"
+              caption="端口 VLESS+REALITY 认证请求结果"
               columns={[
                 { key: "listen_port", label: "端口", className: "mono" },
                 { key: "note", label: "备注", render: (row) => row.note || "—" },
                 {
                   key: "tcp_reachable",
-                  label: "TCP",
+                  label: "协议请求",
                   render: (row) => (
                     <Tone tone={row.tcp_reachable ? "success" : "danger"}>
                       {row.tcp_reachable ? "通" : `不通 · ${row.tcp_error || ""}`}
@@ -215,7 +215,7 @@ export default function DiagnosticsWorkspace() {
                 },
                 {
                   key: "reality",
-                  label: "Reality",
+                  label: "认证请求",
                   render: (row) => <Tone tone={row.reality?.ok ? "success" : row.reality ? "danger" : "neutral"}>{realityLabel(row)}</Tone>,
                 },
                 {

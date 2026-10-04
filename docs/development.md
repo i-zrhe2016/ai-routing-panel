@@ -204,9 +204,26 @@ JavaScript 构建工具。
 Admin 控制台源码和构建配置位于 `frontend/`。Admin 控制台是 React 应用
 （`frontend/src/admin/`，Vite + `@vitejs/plugin-react`），订阅者门户和 Landing 页仍是
 Vue 应用（`frontend/src/{portal,landing}/`，共用 `frontend/src/shared/` 的令牌、
-API 客户端和 `.vue` 组件）。控制台的八个工作区为：总览、主机、流量、故障排查、
-AI 路由、交付、订单与套餐、可观测；其中主机、流量和故障排查只读取 `/api/dashboard`
-与只读的 `/api/insights`。修改 Admin 前端后执行：
+API 客户端和 `.vue` 组件）。控制台的七个工作区为：总览、主机、流量、流量拓扑、故障排查、
+AI 路由、交付；其中主机、流量、流量拓扑和故障排查只读取 `/api/dashboard`
+与只读的 `/api/insights`。
+
+后台的导航分为“运行监控”和“配置与业务”，总览将流量趋势、异常和当前拓扑集中展示。
+后台样式由 `frontend/src/admin/admin.css` 维护，覆盖后台自己的颜色与布局令牌；
+不要通过修改共享令牌或 `shared/control-center.css` 改变客户门户的外观。
+流量拓扑根据 `meta.traffic_routing` 的当前路径与 AI 候选探测状态绘制入口、出口和待命分支；
+点击节点或使用 Tab 与 Enter/空格可查看节点详情。AI 流量探测与 SSH 管理通道状态分开呈现。
+若服务端状态为 `waiting_report`，拓扑保留已配置候选并显示“等待 AI 路由报告”，
+不使用管理通道派生的 AI 路径标记生效链路。
+拓扑同时展示普通直出与已分类 AI 分流；AI 回退应用成功后直出路径高亮，恢复后更新 AI 分支。全站速率由相邻 dashboard 累计流量差与采样间隔计算；仅全站入口在有新增流量时显示动画，不虚构分支吞吐量。计数回退或租户清单变化时重新采样。累计流量和连接统计仍在总览查看，流量工作区提供今日／近 7 天／近 30 天的区间统计。
+AI 路由工作区展示全部候选、业务探测时间和原因、模式与生效出口的区别、配置应用状态，以及历史分类缓存和当前窗口域名路由。
+订单与套餐、商业设置及 Prometheus/Grafana 内嵌内容已从管理后台移除；
+历史数据及商业后端/客户门户仍保留；独立 Prometheus/Grafana 监控服务已移除。
+每个工作区保留一个主标题，页面内的区块使用次级标题。
+交付工作区只展示 Clash/V2Ray 订阅、VLESS 直连分享及订阅地址重置，不展示租户登录地址、用户名、密码或其重置按钮。
+移动端导航在 840px 及以下使用抽屉；导航和确认弹窗支持 Escape、Tab 焦点约束及关闭后焦点恢复。
+
+修改 Admin 前端后执行：
 
 ```bash
 cd frontend
@@ -217,7 +234,8 @@ npm run build
 
 `npm run build` 会将 Admin 入口输出为 `app/static/admin/admin.js` 和
 `app/static/admin/admin.css`；构建产物必须随变更一起提交，Docker 不在镜像构建阶段安装
-Node 或 npm。
+Node 或 npm。后台资源 URL 的版本标识位于 `app/templates/index.html`；
+发布资源变化时应同步更新该标识及对应的缓存测试，确保浏览器请求新资源。
 
 后端测试用 pytest 直接跑现有 unittest：
 
@@ -232,9 +250,8 @@ PYTHONPATH=. .venv/bin/python -m pytest tests -q
 
 ## 持续集成
 
-`.github/workflows/ci.yml` 在**指向 `main` 的 PR** 和**推送到 `main`** 时运行。日报器会把
-归档提交直接推到 `main`，所以 `main` 自身也需要与 PR 相同的检查。两个 job 都只申请
-`contents: read` 权限，不需要任何 secret。
+`.github/workflows/ci.yml` 在**指向 `main` 的 PR** 和**推送到 `main`** 时运行，
+两个 job 都只申请 `contents: read` 权限，不需要任何 secret。
 
 `backend` job 使用与 `Dockerfile` 基础镜像一致的 Python 3.12，安装
 `requirements-dev.txt` 后执行：

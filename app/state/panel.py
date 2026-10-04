@@ -80,6 +80,8 @@ class PanelState:
         "ai_routing",
         "commerce",
         "diagnostics",
+        "incidents",
+        "incident_worker",
         "maintenance_worker",
         "dns_failover_worker",
         "lifecycle",

@@ -14,7 +14,6 @@ from unittest import mock
 from app.xray.node import DataPlaneConfig, DataPlaneController
 from app.xray.node.files import (
     REMOTE_FILE_DELTA_SCRIPT,
-    REMOTE_READ_HTTP_JSON_SCRIPT,
     build_temp_target_path,
 )
 from app.xray.operation_lock import exclusive_file_lock
@@ -918,41 +917,6 @@ class NodeControlTest(unittest.TestCase):
 
         self.assertTrue(result["skip_until_newline"])
         self.assertEqual(calls[0][-2:], ["", "1"])
-
-    def test_remote_metrics_payload_reads_loopback_endpoint(self):
-        controller = DataPlaneController(
-            DataPlaneConfig(
-                role="ai_node",
-                label="AI 节点",
-                ssh_target="root@example.com",
-            )
-        )
-        calls = []
-
-        def fake_run_remote(args, error_prefix, timeout=None, input_text=None):
-            calls.append((args, timeout))
-            return SimpleNamespace(
-                returncode=0,
-                stdout='{"stats": {"inbound": {}, "outbound": {}}}',
-                stderr="",
-            )
-
-        controller._run_remote = fake_run_remote
-
-        result = controller.read_metrics_payload("http://127.0.0.1:31097/debug/vars", 5)
-
-        self.assertEqual(result["stats"], {"inbound": {}, "outbound": {}})
-        self.assertEqual(calls[0][0][:3], ["python3", "-c", REMOTE_READ_HTTP_JSON_SCRIPT])
-        self.assertEqual(calls[0][0][-2:], ["http://127.0.0.1:31097/debug/vars", "5.0"])
-        self.assertEqual(calls[0][1], 5.0)
-
-    def test_remote_metrics_payload_rejects_non_loopback_endpoint(self):
-        controller = DataPlaneController(
-            DataPlaneConfig(role="ai_node", label="AI 节点", ssh_target="root@example.com")
-        )
-
-        with self.assertRaisesRegex(ValueError, "回环地址"):
-            controller.read_metrics_payload("http://metrics.example.com/debug/vars", 5)
 
     def test_remote_dynamic_routing_sync_updates_local_copy(self):
         local_path = self.root / "dynamic-routing.json"

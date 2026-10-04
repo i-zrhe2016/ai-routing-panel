@@ -53,6 +53,7 @@ def build_application_components():
     """
 
     from .dns_failover import DnsFailoverConfig, DnsFailoverManager
+    from .probe_incidents import CodexDiagnosisRunner, IncidentStore, IncidentWorker
     from .runtime import DNSFailoverWorker, MaintenanceWorker
     from .state.ai_routing import AiRoutingService
     from .state.commerce import CommerceService
@@ -67,6 +68,7 @@ def build_application_components():
     from .xray.ai_routing.launcher import AiDomainManagerRunner
     from .xray.apply import XrayApplyService
     from .xray.node import DataPlaneConfig, NodeController
+    from .xray.protocol_probe import build_probe_runner
     from .xray.stats import XrayStatsReader
 
     write_lock = threading.Lock()
@@ -195,6 +197,17 @@ def build_application_components():
         ai_node=ai_node,
     )
 
+    incidents = IncidentStore(
+        database, config.DATA_DIR / "probe-incidents" / "reports", failure_threshold=config.INCIDENT_FAILURE_THRESHOLD
+    )
+    incident_worker = IncidentWorker(incidents, CodexDiagnosisRunner(
+        config.INCIDENT_CODEX_AUTH_HOME,
+        image=config.INCIDENT_CODEX_IMAGE,
+        work_root=config.DATA_DIR / "probe-incidents" / "work",
+        host_work_root=config.INCIDENT_CODEX_HOST_WORK_ROOT,
+        timeout=config.INCIDENT_CODEX_TIMEOUT,
+    ), stop_event)
+    probe_runner = build_probe_runner(observation_hook=incidents.record)
     dns_failover_manager = DnsFailoverManager(
         DnsFailoverConfig(
             enabled=config.DNS_FAILOVER_ENABLED,
@@ -218,7 +231,7 @@ def build_application_components():
             peak_start=config.DNS_FAILOVER_PEAK_START,
             peak_end=config.DNS_FAILOVER_PEAK_END,
             peak_timezone=config.DNS_FAILOVER_PEAK_TIMEZONE,
-        )
+        ), probe_runner=probe_runner
     )
 
     xray_stats = XrayStatsReader(data_plane)
@@ -242,6 +255,7 @@ def build_application_components():
         write_lock=write_lock,
     )
     probes = ProbesService(
+        probe_runner=probe_runner,
         repository=database,
         write_lock=write_lock,
     )
@@ -270,6 +284,7 @@ def build_application_components():
         write_lock=write_lock,
     )
     diagnostics = DiagnosticsService(
+        probe_runner=probe_runner,
         ports=ports,
         node_controller=data_plane,
     )
@@ -306,6 +321,7 @@ def build_application_components():
         stop_event=stop_event,
         maintenance_worker=maintenance_worker,
         dns_failover_worker=dns_failover_worker,
+        incident_worker=incident_worker,
     )
 
     return {
@@ -327,6 +343,8 @@ def build_application_components():
         "ai_routing": ai_routing,
         "commerce": commerce,
         "diagnostics": diagnostics,
+        "incidents": incidents,
+        "incident_worker": incident_worker,
         "maintenance_worker": maintenance_worker,
         "dns_failover_worker": dns_failover_worker,
         "lifecycle": lifecycle,
@@ -350,6 +368,7 @@ class Application(PanelState):
         "dns_failover",
         "commerce",
         "diagnostics",
+        "incidents",
         "lifecycle",
     )
 
