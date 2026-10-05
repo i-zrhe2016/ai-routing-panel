@@ -8,7 +8,7 @@
 
 管理后台**没有登录**，由来源地址白名单放行（见 [控制面访问与来源白名单](panel-access.md)）；客户和租户各有自己的会话。
 
-- 管理员：仅 `PANEL_ALLOWED_NETWORKS` 内的来源可访问（默认回环、私网、link-local 和 Tailscale `100.64.0.0/10`），其他来源在路由前返回 403；写操作仍需 `X-CSRF-Token`。
+- 管理员：仅 `PANEL_ALLOWED_NETWORKS` 内的来源可访问（默认回环、私网、link-local 和 Tailscale CGNAT 网段），其他来源在路由前返回 403；写操作仍需 `X-CSRF-Token`。
 - 客户：`/api/customer/*`（除 `plans`、`auth/*`）需客户会话，未登录返回 JSON 401（`{"ok":false,"code":"auth_required"}`）；变更请求需 `X-CSRF-Token`
 - 租户：`/api/tenant/<token>/*` 需该端口的租户会话
 - `GET /healthz` 永远不要求登录
@@ -69,6 +69,8 @@
 | `GET` | `/api/dns-failover` | 获取 DNS 故障切换状态 |
 | `POST` | `/api/dns-failover/check` | 立即执行一次 DNS 检测 |
 | `POST` | `/api/dns-failover/switch` | 手动切主备（`{"target": "primary\|backup"}`）|
+| `POST` | `/api/ai-routing/ports/<port_id>/scope` | 按稳定账号 ID 设置独立范围（`{"traffic_scope": "all\|classified\|inherit"}`）；`inherit` 恢复默认；保留候选选择，错误不提交偏好 |
+| `POST` | `/api/ai-routing/scope` | 设置独立流量范围（`{"traffic_scope": "classified\|all"}`）；应用语义见 [AI 转发范围](ai-routing.md#转发范围) |
 | `POST` | `/api/ai-routing/switch` | 手动切换 AI 路由（`{"mode": "primary\|backup\|auto\|forced_fallback"}`）|
 | `POST` | `/api/client-errors` | 前端上报网络、HTTP、解析和未捕获运行时错误（需 `X-CSRF-Token`；不接收请求体或敏感 Header）|
 

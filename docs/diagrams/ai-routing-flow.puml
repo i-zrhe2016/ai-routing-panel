@@ -4,24 +4,24 @@ title AI 路由人工切换与数据面回退
 
 start
 partition "人工模式切换" {
-  :管理员选择 auto / primary / backup / forced_fallback;
-  :面板将目标模式一次性传给 AI 管理器;
+  :管理员选择候选模式或独立 默认及各端口 all / classified 范围;
+  :面板将目标模式或范围一次性传给 AI 管理器;
   :探测候选并生成完整普通数据面配置;
   :校验并直接应用，或交由外部 watcher 重载;
   if (配置应用成功？) then (是)
-    :提交目标模式到 panel.db app_state;
+    :提交目标模式或范围到 panel.db 的默认或账号偏好;
     if (状态提交成功？) then (是)
       :切换完成;
     else (否)
-      :尽力按之前的模式补偿应用;
+      :尽力按之前的模式或范围补偿应用;
     endif
   else (否)
-    :保留旧模式与待应用状态;
+    :保留旧偏好与待应用状态;
   endif
 }
 partition "请求转发" {
   :客户端连接普通数据面 Xray;
-  if (目标域名命中有效 AI 动态路由？) then (是)
+  if (租户流量命中有效 AI 动态规则？) then (是)
     :通过 ai_proxy 转发到已选 AI 上游;
     :AI 节点使用 freedom 访问目标;
   else (否)
@@ -32,7 +32,9 @@ note right
   候选探测和配置重算发生在独立健康周期或人工切换时，
   不在每个用户请求内执行。
   固定候选不可达时不静默改选，动态 AI 路由会被移除。
-  自动模式恢复可达后复用 SQLite 历史分类恢复分流。
+  端口 all 范围涵盖该账号代理 TCP/UDP（含未知域名和 IP），
+  classified 范围复用 SQLite 历史 AI 分类。
+  应急直出保留范围偏好；管理与阻断规则优先。
 end note
 stop
 @enduml

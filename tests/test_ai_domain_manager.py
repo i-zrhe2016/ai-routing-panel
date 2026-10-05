@@ -355,7 +355,7 @@ class AiDomainManagerTest(unittest.TestCase):
         self.assertEqual([item["candidate_type"] for item in result], ["template", "share_url"])
 
     def test_build_data_plane_controller_uses_remote_command_timeout(self):
-        args = mock.Mock(
+        args = mock.Mock(port_id=None, port_traffic_scope=None,
             ai_upstream_candidates=[{"upstream_host": "primary.example.com", "upstream_port": 27166}],
             data_plane_access_log_path="",
             data_plane_ssh_target="root@example.com",
@@ -415,7 +415,7 @@ class AiDomainManagerTest(unittest.TestCase):
             config_out.parent.mkdir()
             config_out.write_text("same", encoding="utf-8")
             dynamic_routing_path = root / "runtime" / "dynamic-routing.json"
-            args = mock.Mock(
+            args = mock.Mock(port_id=None, port_traffic_scope=None,
                 log_state_path=root / "log-state.json",
                 log_path=root / "access.log",
                 lookback_seconds=3600,
@@ -474,7 +474,7 @@ class AiDomainManagerTest(unittest.TestCase):
             root = Path(tmpdir)
             lock_path = root / "runtime" / ".ai-domain-manager.lock"
             lock_path.parent.mkdir()
-            args = mock.Mock(config_out=root / "runtime" / "config.json", apply_lock_path=lock_path)
+            args = mock.Mock(port_id=None, port_traffic_scope=None, config_out=root / "runtime" / "config.json", apply_lock_path=lock_path)
             with exclusive_file_lock(lock_path), self.assertRaises(LockBusyError):
                 manager.run_once(args, routing_only=True)
 
@@ -490,7 +490,7 @@ class AiDomainManagerTest(unittest.TestCase):
             config_out.parent.mkdir()
             config_out.write_text("old", encoding="utf-8")
             dynamic_routing_path = root / "runtime" / "dynamic-routing.json"
-            args = mock.Mock(
+            args = mock.Mock(port_id=None, port_traffic_scope=None,
                 log_state_path=root / "log-state.json",
                 log_path=root / "access.log",
                 lookback_seconds=3600,
@@ -551,7 +551,7 @@ class AiDomainManagerTest(unittest.TestCase):
             config_out = root / "runtime" / "config.json"
             config_out.parent.mkdir()
             config_out.write_text("old", encoding="utf-8")
-            args = mock.Mock(
+            args = mock.Mock(port_id=None, port_traffic_scope=None,
                 log_state_path=root / "log-state.json",
                 log_path=root / "access.log",
                 lookback_seconds=3600,
@@ -603,7 +603,7 @@ class AiDomainManagerTest(unittest.TestCase):
             config_out.parent.mkdir()
             config_out.write_text("old", encoding="utf-8")
             dynamic_routing_path = root / "runtime" / "dynamic-routing.json"
-            args = mock.Mock(
+            args = mock.Mock(port_id=None, port_traffic_scope=None,
                 log_state_path=root / "log-state.json",
                 log_path=root / "access.log",
                 lookback_seconds=3600,
@@ -682,7 +682,7 @@ class AiDomainManagerTest(unittest.TestCase):
                 if forced:
                     self.assertFalse(dynamic_routing_path.exists())
                 config_out.write_text("direct" if forced else "same", encoding="utf-8")
-            args = mock.Mock(
+            args = mock.Mock(port_id=None, port_traffic_scope=None,
                 log_state_path=root / "log-state.json",
                 log_path=root / "access.log",
                 lookback_seconds=3600,
@@ -992,7 +992,7 @@ class AiDomainManagerTest(unittest.TestCase):
         observed_domains = {"unknown.example"}
         with tempfile.TemporaryDirectory() as tmpdir:
             decisions_path = f"{tmpdir}/ai-domain-decisions.json"
-            args = mock.Mock(
+            args = mock.Mock(port_id=None, port_traffic_scope=None,
                 batch_size=50,
                 codex_classifier_enabled=False,
                 openai_classifier_enabled=True,
@@ -1113,7 +1113,7 @@ class AiDomainManagerTest(unittest.TestCase):
             )
             dynamic_routing_path.write_text('{"stale": true}', encoding="utf-8")
 
-            args = mock.Mock(
+            args = mock.Mock(port_id=None, port_traffic_scope=None,
                 log_state_path=log_state_path,
                 log_path=log_path,
                 lookback_seconds=3600,

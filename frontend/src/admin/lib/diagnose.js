@@ -43,8 +43,8 @@ export function buildChecklist(panel, insights, diagnosis) {
   if (Number(summary.expired_ports || 0) > 0 || Number(summary.quota_ports || 0) > 0) {
     push(
       "warning",
-      "存在过期或已达上限的端口",
-      `过期 ${summary.expired_ports || 0} · 已达上限 ${summary.quota_ports || 0} · 已停用 ${summary.disabled_ports || 0}`,
+      "存在过期或超额限速的端口",
+      `过期 ${summary.expired_ports || 0} · 超额 5 Mbps ${summary.quota_ports || 0} · 已停用 ${summary.disabled_ports || 0}`,
     );
   }
 

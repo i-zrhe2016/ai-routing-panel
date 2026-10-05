@@ -25,8 +25,10 @@ from ..config import (
 )
 from ..helpers import port_is_expired, utc_iso_now, utc_now
 from ..observability.logging import emit_business_event
+from .account_limits import limits_manifest, manifest_hash
 from .envfile import load_env_file
 from .file_io import write_bytes_atomic, write_text_atomic
+from .limit_client import reconcile_limits
 from .operation_lock import LockBusyError, exclusive_file_lock
 
 
@@ -95,6 +97,7 @@ class XrayApplyService:
                 if changed:
                     self._persist_and_reload_locked(conn, reload_xray=reload_xray)
                 else:
+                    self.reconcile_account_limits(conn, strict=False)
                     conn.commit()
                 return changed
         except LockBusyError:
@@ -140,16 +143,36 @@ class XrayApplyService:
         ).fetchall()
         changed = 0
         for row in rows:
-            usage_bytes = int(row["total_bytes_sent"]) + int(row["total_bytes_received"])
-            quota_reached = row["traffic_limit_bytes"] is not None and usage_bytes >= int(row["traffic_limit_bytes"])
             expired = port_is_expired(row["expires_at"], now_dt)
-            if expired or quota_reached:
+            if expired:
                 conn.execute(
                     "UPDATE ports SET enabled = 0, updated_at = ? WHERE id = ?",
                     (now_text, row["id"]),
                 )
                 changed += 1
         return changed + cleaned
+
+    def account_limits_enabled(self):
+        values = load_env_file(XRAY_ENV_FILE_PATH) if XRAY_ENV_FILE_PATH.exists() else {}
+        return str(values.get("XRAY_ACCOUNT_LIMITS_ENABLED", "0")).lower() in {"1", "true", "yes", "on"}
+
+    def reconcile_account_limits(self, conn, *, strict=False, payload=None):
+        if not self.account_limits_enabled():
+            return
+        payload = payload or self.render_panel_ports_payload(conn)
+        manifest = payload["accountLimits"]
+        try:
+            receipt = reconcile_limits(self.node_controller, manifest)
+        except Exception as exc:
+            receipt = {"desiredHash": manifest_hash(manifest), "checkedAt": utc_iso_now(),
+                       "error": str(exc)[:300], "policy": manifest}
+            self.repository.set_state(conn, "account_limits_receipt", json.dumps(receipt))
+            if strict:
+                raise
+        else:
+            self.repository.set_state(conn, "account_limits_receipt", json.dumps(receipt))
+        # Threshold and reset updates affect owned queues, never restart Xray.
+        self.write_json_file(XRAY_PANEL_PORTS_PATH, payload)
 
     def persist_and_reload(self, conn, reload_xray):
         try:
@@ -180,25 +203,39 @@ class XrayApplyService:
         try:
             self.write_json_file(XRAY_PANEL_PORTS_PATH, panel_ports_payload)
             self.render_xray_config()
-            self.xray_config_test()
-            if reload_xray and DATAPLANE_EXTERNAL_RELOADER_ENABLED:
+            synced_paths = self.xray_config_test() or []
+            current_config = XRAY_CONFIG_PATH.read_text(encoding="utf-8") if XRAY_CONFIG_PATH.exists() else None
+            config_changed = previous_config is None or previous_config != current_config
+            try:
+                previous_ports = json.loads(previous_panel_ports).get("ports", []) if previous_panel_ports else []
+            except (ValueError, AttributeError):
+                # An unreadable old inventory cannot establish an unchanged
+                # configuration. Preserve its bytes for rollback and reload.
+                previous_ports = None
+            config_changed = config_changed or previous_ports != panel_ports_payload["ports"]
+            config_changed = config_changed or str(self.node_controller.config.config_path or "") in synced_paths
+            if reload_xray and config_changed and DATAPLANE_EXTERNAL_RELOADER_ENABLED:
                 # Create the marker only after the complete config has been
                 # rendered and validated, so the watcher never restarts an
                 # old config merely because an apply is starting.
                 pending_apply_path.parent.mkdir(parents=True, exist_ok=True)
                 pending_apply_path.touch()
                 pending_marker_created = not pending_apply_preexisting
-            if CONTROL_PLANE_BACKUP_XRAY_ENABLED:
+            backup_changed = previous_backup_config != (backup_config_path.read_text(encoding="utf-8") if backup_config_path.exists() else None)
+            if CONTROL_PLANE_BACKUP_XRAY_ENABLED and backup_changed:
                 backup_restart_attempted = True
                 if not self.restart_backup_xray():
                     raise RuntimeError("控制面备用 Xray 重载失败，端口变更未提交。")
             # In external-reloader mode the watcher validates, restarts, and
             # removes the marker after the new process is observable. In direct
             # mode the panel owns the restart itself.
-            if reload_xray and not DATAPLANE_EXTERNAL_RELOADER_ENABLED:
+            if reload_xray and config_changed and not DATAPLANE_EXTERNAL_RELOADER_ENABLED:
                 data_plane_restart_attempted = True
                 if not self.restart_data_plane():
                     raise RuntimeError("数据面重载失败，端口变更未提交。")
+            self.reconcile_account_limits(
+                conn, strict=not DATAPLANE_EXTERNAL_RELOADER_ENABLED, payload=panel_ports_payload
+            )
             if not DATAPLANE_EXTERNAL_RELOADER_ENABLED:
                 pending_apply_path.unlink(missing_ok=True)
             conn.commit()
@@ -245,10 +282,14 @@ class XrayApplyService:
             try:
                 if self.node_controller.supports_sync():
                     self.node_controller.sync_generated_files(validate_config=True)
-                # A timeout can occur after the node has already loaded the new
-                # config. Restore its running state as well as the files.
                 if data_plane_restart_attempted and not self.restart_data_plane():
                     raise RuntimeError("数据面回滚重载失败。")
+                if self.account_limits_enabled() and previous_panel_ports:
+                    previous_payload = json.loads(previous_panel_ports)
+                    if "accountLimits" in previous_payload:
+                        reconcile_limits(self.node_controller, previous_payload["accountLimits"])
+                # A timeout can occur after the node has already loaded the new
+                # config. Restore its running state as well as the files.
             except Exception as exc:  # noqa: BLE001 - preserve the original apply/commit failure
                 emit_business_event(
                     "node.data_plane.rollback_failed",
@@ -263,23 +304,22 @@ class XrayApplyService:
     def render_panel_ports_payload(self, conn):
         rows = conn.execute(
             """
-            SELECT
-                p.listen_port
-            FROM ports
-            AS p
+            SELECT p.id, p.listen_port, p.traffic_limit_bytes,
+                COALESCE(t.total_bytes_sent, 0) + COALESCE(t.total_bytes_received, 0) AS usage
+            FROM ports p
             LEFT JOIN traffic_totals t ON t.listen_port = p.listen_port
-            WHERE p.enabled = 1
-              AND (p.expires_at IS NULL OR p.expires_at > ?)
-              AND (
-                    p.traffic_limit_bytes IS NULL
-                    OR COALESCE(t.total_bytes_sent, 0) + COALESCE(t.total_bytes_received, 0) < p.traffic_limit_bytes
-                  )
+            WHERE p.enabled = 1 AND (p.expires_at IS NULL OR p.expires_at > ?)
             ORDER BY p.listen_port ASC
-            """,
-            (utc_iso_now(),),
+            """, (utc_iso_now(),),
         ).fetchall()
         return {
             "ports": [int(row["listen_port"]) for row in rows],
+            "accounts": [{"id": int(row["id"]), "listen_port": int(row["listen_port"])} for row in rows],
+            "accountLimits": limits_manifest([
+                {"port": int(row["listen_port"]), "throttled": row["traffic_limit_bytes"] is not None
+                    and int(row["usage"]) >= int(row["traffic_limit_bytes"])}
+                for row in rows
+            ]),
         }
 
     def write_current_config(self):
@@ -311,13 +351,22 @@ class XrayApplyService:
         if DATAPLANE_EXTERNAL_RELOADER_ENABLED:
             # The external watcher owns process restarts. It observes the
             # atomically rendered config (and pending marker when applicable).
+            with self.repository.connect() as conn:
+                self.reconcile_account_limits(conn, strict=False)
+                conn.commit()
             return
         config_path = str(self.node_controller.config.config_path or "")
         if config_path not in changed_paths or not self.node_controller.supports_restart():
+            with self.repository.connect() as conn:
+                self.reconcile_account_limits(conn, strict=False)
+                conn.commit()
             return
         try:
             if not self.restart_data_plane():
                 raise RuntimeError("数据面配置已更新，但 Xray 未能重载。")
+            with self.repository.connect() as conn:
+                self.reconcile_account_limits(conn, strict=False)
+                conn.commit()
             emit_business_event(
                 "node.data_plane.restarted",
                 actor_type="system",

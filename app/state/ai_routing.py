@@ -19,7 +19,12 @@ from ..helpers import (
 from ..observability.logging import emit_business_event
 from ..xray.ai_routing.candidates import build_ai_upstream_candidates
 from ..xray.ai_routing.launcher import AiDomainManagerRunner
-from ..xray.ai_routing.repository import ensure_ai_domain_schema, normalize_ai_routing_manual_mode
+from ..xray.ai_routing.repository import (
+    ensure_ai_domain_schema,
+    normalize_ai_routing_manual_mode,
+    port_scope_policy,
+    scope_policy_signature,
+)
 from ..xray.envfile import load_env_file, read_env_or_file
 from ..xray.operation_lock import LockBusyError, exclusive_file_lock
 
@@ -301,6 +306,82 @@ class AiRoutingService:
     def _trigger_ai_domain_manager(self, manual_mode=None):
         return self.manager_runner.run(manual_mode=manual_mode)
 
+    def ai_routing_traffic_scope(self):
+        with self.repository.connect() as conn:
+            scope = self.repository.get_state(conn, "ai_routing_traffic_scope", "classified")
+        return "all" if scope == "all" else "classified"
+
+    def set_ai_routing_traffic_scope(self, scope):
+        scope = str(scope or "").strip().lower()
+        if scope not in {"classified", "all"}:
+            raise ValidationError("AI 流量范围仅支持 classified 或 all。")
+        if not AI_ROUTING_ENABLED or not self.node_controller.is_configured():
+            raise ValidationError("AI 路由或数据面未配置，无法应用流量范围。")
+        if scope == "all" and not self.ai_routing_manual_state()["candidates"]:
+            raise ValidationError("当前未配置可用 AI 节点，无法转发全部流量。")
+        try:
+            with exclusive_file_lock(self._manual_mode_lock_path()):
+                previous = self.ai_routing_traffic_scope()
+                self.manager_runner.run(traffic_scope=scope)
+                def operation(conn):
+                    self.repository.set_state(conn, "ai_routing_traffic_scope", scope)
+                    self.repository.set_state(conn, "ai_routing_scope_updated_at", utc_iso_now())
+                try:
+                    self.repository.apply_state_update(operation)
+                except Exception:
+                    if previous != scope:
+                        try:
+                            self.manager_runner.run(traffic_scope=previous)
+                        except Exception as rollback_exc:  # noqa: BLE001 - preserve state-commit failure
+                            emit_business_event("ai_routing.scope_switched", result="failure", actor_type="system",
+                                                error_code="state_commit_rollback_failed", message=str(rollback_exc))
+                    raise
+        except LockBusyError as exc:
+            raise RuntimeError("AI 路由正在应用配置，请稍后重试。") from exc
+        emit_business_event("ai_routing.scope_switched", actor_type="admin", resource_type="ai_routing",
+                            metadata={"traffic_scope": scope})
+        return self.ai_routing_status()
+
+    def ai_routing_port_policy(self):
+        with self.repository.connect() as conn:
+            return port_scope_policy(conn, self.ai_routing_traffic_scope())
+
+    def set_ai_routing_port_scope(self, port_id, scope):
+        scope = str(scope or '').strip().lower()
+        if type(port_id) is not int or port_id <= 0 or scope not in {'all', 'classified', 'inherit'}:
+            raise ValidationError('端口转发范围仅支持 all、classified 或 inherit。')
+        if not AI_ROUTING_ENABLED or not self.node_controller.is_configured():
+            raise ValidationError('AI 路由或数据面未配置，无法应用流量范围。')
+        try:
+            with exclusive_file_lock(self._manual_mode_lock_path()):
+                policy = self.ai_routing_port_policy()
+                previous = next((row for row in policy if row['id'] == port_id), None)
+                if previous is None:
+                    raise ValidationError('端口账号不存在。')
+                effective = self.ai_routing_traffic_scope() if scope == 'inherit' else scope
+                if effective == 'all' and not self.ai_routing_manual_state()['candidates']:
+                    raise ValidationError('当前未配置可用 AI 节点，无法转发全部流量。')
+                self.manager_runner.run(port_id=port_id, port_traffic_scope=scope)
+                def operation(conn):
+                    changed = conn.execute('UPDATE ports SET ai_traffic_scope=? WHERE id=?',
+                                           (None if scope == 'inherit' else scope, port_id)).rowcount
+                    if changed != 1:
+                        raise ValidationError('端口账号已变更，请刷新后重试。')
+                try:
+                    self.repository.apply_state_update(operation)
+                except Exception:
+                    try:
+                        self.manager_runner.run(port_id=port_id, port_traffic_scope=(
+                            'inherit' if previous['inherited'] else previous['traffic_scope']))
+                    except Exception as rollback_exc:  # noqa: BLE001 - retain original commit failure
+                        emit_business_event('ai_routing.scope_switched', result='failure', actor_type='system',
+                                            error_code='state_commit_rollback_failed', message=str(rollback_exc))
+                    raise
+        except LockBusyError as exc:
+            raise RuntimeError('AI 路由正在应用配置，请稍后重试。') from exc
+        emit_business_event('ai_routing.scope_switched', actor_type='admin', resource_type='port', resource_id=str(port_id))
+        return self.ai_routing_status()
+
     def _manual_mode_lock_path(self):
         configured = os.environ.get("AI_DOMAIN_MANAGER_MANUAL_LOCK_PATH", "").strip()
         if configured:
@@ -379,7 +460,7 @@ class AiRoutingService:
         if status_text == "fallback_to_primary":
             return "AI 节点不可达，已回退主链路"
         if status_text == "probe_error":
-            return "AI 节点探测失败，已停用动态 AI 路由"
+            return "AI 节点探测异常，保留此前路由"
         if status_text == "manual_fallback":
             return "人工强制回退到主链路"
         if status_text == "manual_target_unreachable":
@@ -433,7 +514,7 @@ class AiRoutingService:
         raw_route = raw_route if isinstance(raw_route, dict) else {}
         outbound = str(raw_route.get("outbound_tag", "unknown"))
         status = str(raw_route.get("status", "unknown"))
-        mode = "ai" if outbound == "ai_proxy" else (
+        mode = "per_port" if outbound == "per_port" else "ai" if outbound == "ai_proxy" else (
             "fallback" if outbound == "direct" and status in {"fallback_to_primary", "manual_fallback", "manual_target_unreachable", "probe_error"}
             else "direct" if outbound == "direct" else "unknown"
         )
@@ -519,6 +600,11 @@ class AiRoutingService:
             "generated_at": generated_at,
             "routing_checked_at": _report_timestamp(payload.get("routing_checked_at")) or generated_at,
             "config_apply_status": config_apply_status,
+            "traffic_scope": route_status.get("traffic_scope", "classified"),
+            "requested_port_scopes": route_status.get("requested_port_scopes", []),
+            "applied_port_scopes": route_status.get("applied_port_scopes", []),
+            "applied_traffic_scope": route_status.get("applied_traffic_scope", "classified" if route_status_code == "applied" else "direct"),
+            "route_preserved": route_status.get("route_preserved") is True,
             "generated_at_display": format_optional_display_time(generated_at),
             "window_start": str(payload.get("window_start") or "").strip() or None,
             "window_start_display": format_optional_display_time(payload.get("window_start")),
@@ -653,8 +739,31 @@ class AiRoutingService:
         probe_stamps = [stamp for candidate in manual["candidates"] if (stamp := _report_timestamp(candidate.get("checked_at")))]
         latest_probe = max(probe_stamps, key=lambda stamp: datetime.fromisoformat(stamp).timestamp(), default=None)
         cache = self.query_classification_cache_summary()
+        scope = self.ai_routing_traffic_scope()
+        report_scope = report.get("traffic_scope", "classified") if report else None
+        applied_scope = report.get("applied_traffic_scope", "classified") if report else "unknown"
+        scope_confirmed = bool(report and report["generated_at"] and status_code == report["route_status"] and report["config_apply_status"] in {"direct", "unchanged"} and not sync_error)
+        port_policy = self.ai_routing_port_policy()
+        signature = scope_policy_signature(port_policy)
+        policy_confirmed = bool(scope_confirmed and report_scope == scope and report.get('requested_port_scopes', []) == signature)
+        applied_policy = report.get('applied_port_scopes', []) if report else []
+        port_rows = []
+        for row in port_policy:
+            match = next((item for item in applied_policy if item.get('id') == row['id'] and item.get('listen_port') == row['listen_port']), None)
+            applied_port_scope = (applied_scope if applied_scope in {'direct', 'unknown'} else match.get('traffic_scope', 'unknown') if match else 'unknown') if scope_confirmed else 'unknown'
+            confirmed = policy_confirmed and (applied_port_scope == row['traffic_scope'] or applied_port_scope == 'direct')
+            port_rows.append({**row, 'applied_traffic_scope': applied_port_scope,
+                              'scope_apply_state': 'inactive' if not row['active'] else 'confirmed' if confirmed else 'pending'})
+        if not scope_confirmed:
+            applied_scope = "unknown"
         return {
             "configured": configured,
+            "port_scopes": port_rows,
+            "traffic_scope": scope,
+            "reported_traffic_scope": report_scope,
+            "applied_traffic_scope": applied_scope,
+            "scope_apply_state": "confirmed" if scope_confirmed and report_scope == scope else "pending",
+            "route_preserved": report.get("route_preserved", False) if report else False,
             "status": status_code,
             "status_label": status_label,
             "status_tone": tone,

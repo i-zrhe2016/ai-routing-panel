@@ -9,7 +9,7 @@ const STATUS_OPTIONS = [
   { value: "active", label: "运行中" },
   { value: "disabled", label: "已停用" },
   { value: "expired", label: "已过期" },
-  { value: "quota", label: "已达上限" },
+  { value: "throttled", label: "超额 5 Mbps" },
 ];
 
 export default function DeliveryWorkspace() {
@@ -252,7 +252,7 @@ export default function DeliveryWorkspace() {
             ) : null}
 
             <div className="action-row detail-actions">
-              {selected.status === "quota" ? (
+              {selected.status === "throttled" ? (
                 <button
                   className="a-btn secondary"
                   type="button"
@@ -260,24 +260,24 @@ export default function DeliveryWorkspace() {
                   onClick={() =>
                     confirm.ask({
                       title: `重置端口 ${selected.listen_port} 的流量？`,
-                      body: "累计流量会清零，端口会重新启用。",
+                      body: "累计流量会清零并解除超额限速。已停用的端口保持停用。",
                       tone: "danger",
                       confirmLabel: "确认重置",
                       onConfirm: () => panel.resetTraffic(selected),
                     })
                   }
                 >
-                  重置流量并启用
+                  重置流量并解除限速
                 </button>
               ) : null}
-              {selected.status === "active" || selected.status === "disabled" ? (
+              {["active", "throttled", "disabled"].includes(selected.status) ? (
                 <button
                   className="a-btn secondary"
                   type="button"
                   disabled={panel.isBusy(`toggle:${selected.id}`)}
                   onClick={() => panel.togglePort(selected)}
                 >
-                  {selected.status === "active" ? "停用端口" : "启用端口"}
+                  {selected.enabled ? "停用端口" : "启用端口"}
                 </button>
               ) : null}
               <button

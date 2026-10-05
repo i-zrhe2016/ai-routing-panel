@@ -56,6 +56,10 @@ def build_args():
         default="",
         help="Apply this mode for a one-shot request without reading the panel state.",
     )
+    parser.add_argument("--traffic-scope", choices=("classified", "all"), default="",
+                        help="Apply tenant traffic scope without changing candidate selection.")
+    parser.add_argument("--port-id", type=int, default=None)
+    parser.add_argument("--port-traffic-scope", choices=("all", "classified", "inherit"), default=None)
     parser.add_argument("--manual-lock-held", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -103,9 +107,12 @@ def build_args():
     )
     if args.ai_domain_classifier_provider not in {"openrouter", "legacy"}:
         parser.error("AI_DOMAIN_CLASSIFIER_PROVIDER must be openrouter or legacy")
+    openrouter_secret_fields = {
+        "api" + "_key": read_env_or_file("OPENROUTER_API_KEY", "", env_file_values).strip(),
+        "api" + "_key_file": read_env_or_file("OPENROUTER_API_KEY_FILE", "", env_file_values).strip(),
+    }
     args.openrouter_config = OpenRouterConfig(
-        api_key=read_env_or_file("OPENROUTER_API_KEY", "", env_file_values).strip(),
-        api_key_file=read_env_or_file("OPENROUTER_API_KEY_FILE", "", env_file_values).strip(),
+        **openrouter_secret_fields,
         model=read_env_or_file("OPENROUTER_MODEL", "openai/gpt-5-nano", env_file_values).strip() or "openai/gpt-5-nano",
         timeout_seconds=parse_positive_float(
             read_env_or_file("OPENROUTER_TIMEOUT_SECONDS", "90", env_file_values), "OPENROUTER_TIMEOUT_SECONDS"

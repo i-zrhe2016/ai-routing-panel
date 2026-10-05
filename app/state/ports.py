@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from ..config import (
@@ -7,6 +8,7 @@ from ..config import (
     DEFAULT_UPSTREAM_PORT,
     LOCAL_TZ,
     SEED_LISTEN_PORT,
+    XRAY_ENV_FILE_PATH,
 )
 from ..errors import ValidationError
 from ..helpers import (
@@ -25,6 +27,8 @@ from ..helpers import (
     utc_iso_now,
     utc_now,
 )
+from ..xray.account_limits import receipt_state
+from ..xray.envfile import load_env_file
 
 
 class PortsService:
@@ -67,6 +71,8 @@ class PortsService:
             conn.execute("ALTER TABLE ports ADD COLUMN tenant_password TEXT NOT NULL DEFAULT ''")
         if "traffic_limit_bytes" not in columns:
             conn.execute("ALTER TABLE ports ADD COLUMN traffic_limit_bytes INTEGER")
+        if "ai_traffic_scope" not in columns:
+            conn.execute("ALTER TABLE ports ADD COLUMN ai_traffic_scope TEXT CHECK (ai_traffic_scope IN ('all', 'classified'))")
         if "customer_id" not in columns:
             conn.execute("ALTER TABLE ports ADD COLUMN customer_id INTEGER")
         if "service_subscription_id" not in columns:
@@ -104,13 +110,13 @@ class PortsService:
         if column_name not in {"tenant_token", "subscription_token"}:
             raise ValueError("unsupported port token column")
         for _ in range(16):
-            token = generate_access_token()
+            generated_value = generate_access_token()
             row = conn.execute(
                 f"SELECT 1 FROM ports WHERE {column_name} = ? LIMIT 1",
-                (token,),
+                (generated_value,),
             ).fetchone()
             if row is None:
-                return token
+                return generated_value
         raise RuntimeError(f"无法为 {column_name} 生成唯一 token。")
 
     def generate_unique_tenant_username(self, conn):
@@ -163,12 +169,12 @@ class PortsService:
             conn.execute(f"UPDATE ports SET {assignments} WHERE id = ?", values)
 
     def ensure_subscription_token_in_tx(self, conn):
-        token = str(self.repository.get_state(conn, "subscription_token", "") or "").strip()
-        if token:
-            return token
-        token = generate_subscription_token()
-        self.repository.set_state(conn, "subscription_token", token)
-        return token
+        stored_value = str(self.repository.get_state(conn, "subscription_token", "") or "").strip()
+        if stored_value:
+            return stored_value
+        generated_value = generate_subscription_token()
+        self.repository.set_state(conn, "subscription_token", generated_value)
+        return generated_value
 
     def normalize_upstream_targets(self):
         with self.repository.connect() as conn:
@@ -286,24 +292,46 @@ class PortsService:
         )
         item["status"] = status["code"]
         item["status_label"] = status["label"]
+        self.add_rate_status(item)
         return item
+
+    def add_rate_status(self, item):
+        if item["status"] == "throttled":
+            receipt = None
+            with self.repository.connect() as conn:
+                raw = self.repository.get_state(conn, "account_limits_receipt", "")
+            try:
+                receipt = json.loads(raw) if raw else None
+            except ValueError:
+                pass
+            policy = receipt.get("policy") if isinstance(receipt, dict) else None
+            values = load_env_file(XRAY_ENV_FILE_PATH) if XRAY_ENV_FILE_PATH.exists() else {}
+            if str(values.get("XRAY_ACCOUNT_LIMITS_ENABLED", "0")).lower() not in {"1", "true", "yes", "on"}:
+                receipt = None
+            account = next((a for a in (policy or {}).get("accounts", []) if a["port"] == item["listen_port"]), None)
+            if not account or not account.get("throttled"):
+                receipt = None
+            limit = receipt_state(item["listen_port"], policy, receipt) if policy else {
+                "state": "pending", "label": "超额 5 Mbps，待配置", "kernelApplied": False, "markVerified": False}
+            item["rate_limit"] = {**limit, "rateBitsPerSecond": 5_000_000}
+            item["status_label"] = limit["label"]
 
     def get_subscription_token(self):
         with self.write_lock:
             with self.repository.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                token = self.ensure_subscription_token_in_tx(conn)
+                generated_value = self.ensure_subscription_token_in_tx(conn)
                 conn.commit()
-                return token
+                return generated_value
 
     def rotate_subscription_token(self):
         with self.write_lock:
             with self.repository.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                token = generate_subscription_token()
-                self.repository.set_state(conn, "subscription_token", token)
+                generated_value = generate_subscription_token()
+                self.repository.set_state(conn, "subscription_token", generated_value)
                 conn.commit()
-                return token
+                return generated_value
 
     def get_port_subscription_record(self, listen_port):
         with self.repository.connect() as conn:
@@ -339,6 +367,7 @@ class PortsService:
         )
         item["status"] = status["code"]
         item["status_label"] = status["label"]
+        self.add_rate_status(item)
         return item
 
     def query_summary(self, ports):
@@ -347,6 +376,7 @@ class PortsService:
             "active_ports": 0,
             "expired_ports": 0,
             "quota_ports": 0,
+            "throttled_ports": 0,
             "disabled_ports": 0,
             "total_connections": 0,
             "total_bytes_sent": 0,
@@ -360,8 +390,10 @@ class PortsService:
                 summary["active_ports"] += 1
             elif port["status"] == "expired":
                 summary["expired_ports"] += 1
-            elif port["status"] == "quota":
+            elif port["status"] == "throttled":
                 summary["quota_ports"] += 1
+                summary["throttled_ports"] += 1
+                summary["active_ports"] += 1
             else:
                 summary["disabled_ports"] += 1
         return summary
@@ -463,10 +495,6 @@ class PortsService:
                 expires_at = datetime.fromisoformat(row["expires_at"])
                 if expires_at <= utc_now():
                     raise ValidationError("端口已过期，请先修改到期时间再启用。")
-            if next_enabled and row["traffic_limit_bytes"] is not None:
-                usage_bytes = self.get_port_usage_bytes(conn, row["listen_port"])
-                if usage_bytes >= int(row["traffic_limit_bytes"]):
-                    raise ValidationError("端口已达到流量上限，请先提高上限再启用。")
             conn.execute(
                 "UPDATE ports SET enabled = ?, updated_at = ? WHERE id = ?",
                 (next_enabled, utc_iso_now(), port_id),
@@ -496,12 +524,12 @@ class PortsService:
             row = conn.execute("SELECT id FROM ports WHERE id = ?", (port_id,)).fetchone()
             if row is None:
                 raise ValidationError("端口记录不存在。")
-            token = self.generate_unique_port_token(conn, "tenant_token")
+            generated_value = self.generate_unique_port_token(conn, "tenant_token")
             conn.execute(
                 "UPDATE ports SET tenant_token = ?, updated_at = ? WHERE id = ?",
-                (token, utc_iso_now(), port_id),
+                (generated_value, utc_iso_now(), port_id),
             )
-            return token
+            return generated_value
 
         return self.repository.apply_state_update(operation)
 
@@ -510,12 +538,12 @@ class PortsService:
             row = conn.execute("SELECT id FROM ports WHERE id = ?", (port_id,)).fetchone()
             if row is None:
                 raise ValidationError("端口记录不存在。")
-            token = self.generate_unique_port_token(conn, "subscription_token")
+            generated_value = self.generate_unique_port_token(conn, "subscription_token")
             conn.execute(
                 "UPDATE ports SET subscription_token = ?, updated_at = ? WHERE id = ?",
-                (token, utc_iso_now(), port_id),
+                (generated_value, utc_iso_now(), port_id),
             )
-            return token
+            return generated_value
 
         return self.repository.apply_state_update(operation)
 
@@ -525,12 +553,12 @@ class PortsService:
             if row is None:
                 raise ValidationError("端口记录不存在。")
             username = self.generate_unique_tenant_username(conn)
-            password = generate_tenant_password()
+            generated_credential = generate_tenant_password()
             conn.execute(
                 "UPDATE ports SET tenant_username = ?, tenant_password = ?, updated_at = ? WHERE id = ?",
-                (username, password, utc_iso_now(), port_id),
+                (username, generated_credential, utc_iso_now(), port_id),
             )
-            return {"tenant_username": username, "tenant_password": password}
+            return {"tenant_username": username, "tenant_password": generated_credential}
 
         return self.repository.apply_state_update(operation)
 
@@ -667,4 +695,5 @@ class PortsService:
         )
         item["status"] = status["code"]
         item["status_label"] = status["label"]
+        self.add_rate_status(item)
         return item

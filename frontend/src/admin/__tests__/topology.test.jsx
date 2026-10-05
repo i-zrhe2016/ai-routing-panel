@@ -267,3 +267,14 @@ describe("accessible traffic topology", () => {
     expect(screen.queryByRole("button", { name: /AI 节点/ })).toBeNull();
   });
 });
+
+
+it("all-AI applied scope deactivates ordinary direct and includes IP/unknown traffic", () => {
+  const panel = snapshot("normal_ai");
+  panel.aiRoutingStatus.applied_traffic_scope = "all";
+  const graph = buildTrafficTopology(panel);
+  expect(activeEdges(graph)).toEqual(["client>normal", "normal>ai-0", "ai-0>ai-exit"]);
+  expect(graph.edges.find((edge) => edge.to === "ai-0").trafficClass).toBe("全部代理 TCP/UDP");
+  expect(graph.nodes.find((node) => node.id === "normal-direct").state).toBe("standby");
+  expect(graph.nodes.find((node) => node.id === "ai-exit").label).toBe("全部代理目标");
+});

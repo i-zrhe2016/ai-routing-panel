@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -42,6 +42,8 @@ function snapshot(overrides = {}) {
     },
     isBusy: () => false,
     switchAiRoutingMode: vi.fn(),
+    switchAiRoutingScope: vi.fn(),
+    switchPortAiRoutingScope: vi.fn(),
     ...overrides,
   };
 }
@@ -122,6 +124,45 @@ describe("detailed AI routing", () => {
     expect(within(third).queryByRole("button")).toBeNull();
   });
 
+  it("reverses all scope independently of the fixed candidate and prevents duplicate in-flight actions", async () => {
+    const user = userEvent.setup();
+    const panel = snapshot();
+    let finish;
+    panel.switchAiRoutingScope.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const view = show(panel);
+    const control = screen.getByRole("switch", { name: "启用全部转发到 AI 节点" });
+    expect(control.getAttribute("aria-checked")).toBe("false");
+    await user.click(control);
+    expect(screen.getByRole("switch", { name: "应用中…" }).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "固定主 AI" }).disabled).toBe(true);
+    await user.click(control);
+    expect(panel.switchAiRoutingScope).toHaveBeenCalledTimes(1);
+    expect(panel.switchAiRoutingScope).toHaveBeenCalledWith("all");
+    await act(async () => finish());
+    panel.aiRoutingStatus = { ...panel.aiRoutingStatus, manual_mode: "primary", traffic_scope: "all", applied_traffic_scope: "all", scope_apply_state: "confirmed" };
+    usePanel.mockReturnValue(panel);
+    view.rerender(<RoutingWorkspace />);
+    const reverse = await screen.findByRole("switch", { name: "关闭全部转发，恢复域名分流" });
+    expect(reverse.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("当前应用：全部代理流量转发到 AI 节点。")).toBeTruthy();
+    await user.click(reverse);
+    expect(panel.switchAiRoutingScope).toHaveBeenLastCalledWith("classified");
+    await act(async () => finish());
+    expect(panel.switchAiRoutingMode).not.toHaveBeenCalled();
+  });
+
+  it("does not describe a saved or delegated scope as applied and disables unavailable activation", () => {
+    const panel = snapshot();
+    panel.aiRoutingStatus = { ...panel.aiRoutingStatus, traffic_scope: "all", scope_apply_state: "pending", applied_traffic_scope: "unknown", config_apply_status: "delegated" };
+    const view = show(panel);
+    expect(screen.getByText("应用结果待确认，请查看配置应用与最近报告。")).toBeTruthy();
+    expect(screen.queryByText("当前应用：全部代理流量转发到 AI 节点。")).toBeNull();
+    panel.aiRoutingStatus = { configured: true, traffic_scope: "classified", ai_candidates: [] };
+    usePanel.mockReturnValue(panel);
+    view.rerender(<RoutingWorkspace />);
+    expect(screen.getByRole("switch", { name: "启用全部转发到 AI 节点" }).disabled).toBe(true);
+  });
+
   it("keeps missing reports and classification data explicitly unconfirmed", () => {
     show(snapshot({ trafficRouting: { path: "unknown" }, aiRoutingStatus: {} }));
     expect(within(metric("当前出口")).getByText("出口待确认")).toBeTruthy();
@@ -148,5 +189,40 @@ describe("detailed AI routing", () => {
     usePanel.mockReturnValue(recovered);
     view.rerender(<RoutingWorkspace />);
     expect(within(metric("当前出口")).getByText("主 AI")).toBeTruthy();
+  });
+});
+
+
+describe("per-port AI forwarding", () => {
+  it("toggles only the selected account, keeps other controls consistent and prevents duplicate apply", async () => {
+    const user=userEvent.setup();const panel=snapshot();
+    panel.aiRoutingStatus.port_scopes=[
+      {id:1,listen_port:31001,traffic_scope:"classified",active:true,inherited:true,scope_apply_state:"confirmed",applied_traffic_scope:"classified"},
+      {id:2,listen_port:31002,traffic_scope:"all",active:true,inherited:false,scope_apply_state:"pending",applied_traffic_scope:"unknown"}];
+    let finish;panel.switchPortAiRoutingScope.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+    const view=show(panel);const first=screen.getByRole("switch",{name:"端口 31001 全部转发到 AI 节点"});
+    const other=screen.getByRole("switch",{name:"端口 31002 全部转发到 AI 节点"});
+    expect(first.getAttribute("aria-checked")).toBe("false");expect(other.getAttribute("aria-checked")).toBe("true");
+    await user.click(first);expect(other.disabled).toBe(true);await user.click(first);
+    expect(panel.switchPortAiRoutingScope).toHaveBeenCalledTimes(1);expect(panel.switchPortAiRoutingScope).toHaveBeenCalledWith(1,"all");
+    expect(panel.switchAiRoutingScope).not.toHaveBeenCalled();expect(panel.switchAiRoutingMode).not.toHaveBeenCalled();
+    await act(async()=>finish());
+    panel.aiRoutingStatus.port_scopes[0]={...panel.aiRoutingStatus.port_scopes[0],traffic_scope:"all",inherited:false};
+    view.rerender(<RoutingWorkspace/>);await user.click(screen.getByRole("switch",{name:"端口 31001 全部转发到 AI 节点"}));
+    expect(panel.switchPortAiRoutingScope).toHaveBeenLastCalledWith(1,"classified");await act(async()=>finish());
+    await user.click(screen.getByRole("button",{name:"端口 31001 恢复默认策略"}));
+    expect(panel.switchPortAiRoutingScope).toHaveBeenLastCalledWith(1,"inherit");await act(async()=>finish());
+  });
+
+  it("retains unchecked state on rejected apply and distinguishes fallback/inactive accounts", async()=>{
+    const user=userEvent.setup();const panel=snapshot();
+    panel.switchPortAiRoutingScope.mockResolvedValue(false);
+    panel.aiRoutingStatus.port_scopes=[
+      {id:1,listen_port:31001,traffic_scope:"classified",active:true,inherited:true,scope_apply_state:"confirmed",applied_traffic_scope:"direct"},
+      {id:2,listen_port:31002,traffic_scope:"all",active:false,inherited:false,scope_apply_state:"inactive",applied_traffic_scope:"unknown"}];
+    show(panel);const first=screen.getByRole("switch",{name:"端口 31001 全部转发到 AI 节点"});await user.click(first);
+    expect(first.getAttribute("aria-checked")).toBe("false");expect(first.disabled).toBe(false);
+    expect(screen.getByRole("switch",{name:"端口 31002 全部转发到 AI 节点"}).disabled).toBe(true);
+    expect(screen.getByText("故障回退 / 应急直出")).toBeTruthy();expect(screen.getByText("账号未启用或已到期")).toBeTruthy();
   });
 });

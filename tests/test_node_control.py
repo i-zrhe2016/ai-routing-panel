@@ -62,6 +62,9 @@ def load_state_module(temp_root):
         reverse=True,
     ):
         sys.modules.pop(module_name, None)
+    # XrayApplyService also captures paths/reloader flags at import time.
+    # Other collected modules can import it before this sandbox exists.
+    sys.modules.pop("app.xray.apply", None)
     return importlib.import_module("app.state")
 
 
@@ -301,7 +304,8 @@ class NodeControlTest(unittest.TestCase):
         state_module = load_state_module(self.root)
         state = state_module.PanelState()
         state.init_db()
-        state.render_xray_config = lambda: None
+        config = self.root / "xray" / "runtime" / "config.json"
+        state.render_xray_config = lambda: config.write_text('{"inbounds": []}', encoding="utf-8")
         state.xray_config_test = lambda: None
         state.restart_data_plane = mock.Mock(return_value=True)
         pending = self.root / "xray" / "runtime" / "config.json.pending-apply"

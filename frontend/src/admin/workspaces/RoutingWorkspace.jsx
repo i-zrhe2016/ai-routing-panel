@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 import TrafficTopology from "../components/TrafficTopology.jsx";
 import { DataTable, MetricCard, Panel, StatusPill } from "../components/ui.jsx";
@@ -21,7 +22,7 @@ const APPLY_LABELS = {
 const CACHE_LABELS = { available: "数据库可用", legacy: "仅有历史 AI 分类", unavailable: "分类数据库不可用" };
 const CLASSIFICATION_LABELS = { ai: "AI 域名", not_ai: "普通域名", non_ai: "普通域名", unknown: "待分类" };
 const SOURCE_LABELS = { builtin: "内置分类", codex: "Codex 分类器", openai: "OpenAI 分类器", cache: "历史缓存", database: "历史数据库", llm: "AI 分类器", ai: "AI 分类器", pending: "待分类", history: "历史分类" };
-const DOMAIN_ROUTE_LABELS = { fallback: "普通数据面回退", direct: "普通数据面直出", ai: "AI 节点路由", ai_route: "AI 节点路由", unknown: "路由待确认" };
+const DOMAIN_ROUTE_LABELS = { fallback: "普通数据面回退", direct: "普通数据面直出", ai: "AI 节点路由", ai_route: "AI 节点路由", unknown: "路由待确认", per_port: "按端口转发" };
 
 function candidateAddress(candidate) {
   if (!candidate) return "地址待确认";
@@ -67,6 +68,22 @@ export default function RoutingWorkspace() {
   const candidates = Array.isArray(routing.ai_candidates)
     ? routing.ai_candidates.filter((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate)) : [];
   const manualMode = routing.manual_mode || "auto";
+  const allTraffic = routing.traffic_scope === "all";
+  const portScopes = Array.isArray(routing.port_scopes) ? routing.port_scopes : [];
+  const [scopeBusy, setScopeBusy] = useState(false);
+  const routingBusy = scopeBusy || portScopes.some((port) => panel.isBusy(`switch-ai-port-${port.id}`)) || ["scope", "auto", "primary", "backup", "forced_fallback"].some((mode) => panel.isBusy(`switch-ai-${mode}`));
+  async function switchScope() {
+    if (routingBusy) return;
+    setScopeBusy(true);
+    try { await panel.switchAiRoutingScope(allTraffic ? "classified" : "all"); }
+    finally { setScopeBusy(false); }
+  }
+  async function switchPortScope(port, scope) {
+    if (routingBusy) return;
+    setScopeBusy(true);
+    try { await panel.switchPortAiRoutingScope(port.id, scope); }
+    finally { setScopeBusy(false); }
+  }
   const selectedCandidate = candidates.find((candidate) => candidate.selected === true) || null;
   const healthyCount = candidates.filter((candidate) => candidate.is_reachable === true).length;
   const routeTone = toneFromStatus(routing.status_tone);
@@ -86,7 +103,7 @@ export default function RoutingWorkspace() {
         ? "恢复自动探测？"
         : `确认切换到${candidate?.label || "该 AI 节点"}？`;
     const body = mode === "forced_fallback"
-      ? "动态 AI 路由会被移除，AI 域名回到普通数据面的 freedom 直出。恢复 AI 节点路由需要手动恢复自动探测。"
+      ? "动态 AI 路由会被移除，进入服务器的代理流量回到普通数据面的 freedom 直出；保留转发范围偏好。恢复 AI 节点路由需要手动恢复自动探测。"
       : mode === "auto"
         ? "控制面将恢复按全部候选的优先级与可达性自动选择，不再固定当前人工目标。"
         : `${candidateAddress(candidate)} · ${candidateStatus(candidate).label}。此操作固定 AI 目标，健康探测仍会继续；不可达时回退普通数据面，恢复后继续使用固定目标。`;
@@ -128,12 +145,43 @@ export default function RoutingWorkspace() {
         {routing.sync_error ? <p className="cc-tone is-warning">管理同步：{routing.sync_error}</p> : null}
       </Panel>
 
+      <Panel title="AI 转发范围" description="范围与出口选择独立；候选故障时沿用当前回退策略，恢复可达后继续转发。">
+        <p><strong>默认策略：{allTraffic ? "全部转发到 AI 节点" : "按域名分流"}</strong> · 未单独设置的端口沿用此策略。</p>
+        <p className="cc-route-card__note" id="ai-traffic-scope-help">启用后，进入托管租户入口的 TCP/UDP 代理流量（含普通、未分类域名及 IP 目标）使用所选 AI 出口，保留管理与阻断规则。客户端 DIRECT 流量不经过服务器，此设置无法接管。</p>
+        <p className="cc-route-card__note" role="status">{routing.scope_apply_state === "confirmed"
+          ? routing.applied_traffic_scope === "mixed" ? "当前应用：按端口转发，已开启的端口全部走 AI，其余按域名分流。" : routing.applied_traffic_scope === "all" ? "当前应用：全部代理流量转发到 AI 节点。" : routing.applied_traffic_scope === "direct" ? "当前应用：数据面直出；保留已选择的转发范围。" : "当前应用：仅已分类 AI 域名转发。"
+          : "应用结果待确认，请查看配置应用与最近报告。"}</p>
+        {manualMode === "forced_fallback" ? <p className="cc-route-card__note">应急直出优先于转发范围；恢复出口选择后继续使用此范围。</p> : null}
+        <button className="a-btn secondary" type="button" role="switch" aria-checked={allTraffic} aria-describedby="ai-traffic-scope-help"
+          disabled={!routing.configured || routingBusy || (!allTraffic && !candidates.length)} onClick={switchScope}>
+          {routingBusy ? "应用中…" : allTraffic ? "关闭全部转发，恢复域名分流" : "启用全部转发到 AI 节点"}
+        </button>
+        <p className="cc-route-card__note">按端口独立设置；统一 443 入口按端口对应的账号生效。关闭某个端口的全部转发会恢复该端口的域名分流。</p>
+        <DataTable caption="端口 AI 转发设置" rows={portScopes} rowKey={(port) => port.id}
+          empty="暂无可设置的端口。"
+          columns={[
+            { key: "listen_port", label: "端口", render: (port) => <strong>{port.listen_port}</strong> },
+            { key: "traffic_scope", label: "设置", render: (port) => `${port.traffic_scope === "all" ? "全部走 AI" : "域名分流"}${port.inherited ? " · 沿用默认" : " · 单独设置"}` },
+            { key: "applied", label: "当前应用", render: (port) => !port.active ? "账号未启用或已到期" : port.scope_apply_state !== "confirmed" ? "应用结果待确认" : port.applied_traffic_scope === "direct" ? "故障回退 / 应急直出" : port.applied_traffic_scope === "all" ? "全部走 AI" : "域名分流" },
+            { key: "actions", label: "全部转发到 AI 节点", render: (port) => <div className="a-actions">
+              <button type="button" className="a-btn secondary" role="switch" aria-checked={port.traffic_scope === "all"}
+                aria-label={`端口 ${port.listen_port} 全部转发到 AI 节点`} aria-describedby="ai-traffic-scope-help"
+                disabled={!port.active || !routing.configured || routingBusy || (port.traffic_scope !== "all" && !candidates.length)}
+                onClick={() => switchPortScope(port, port.traffic_scope === "all" ? "classified" : "all")}>
+                {port.traffic_scope === "all" ? "已开启" : "已关闭"}
+              </button>
+              {!port.inherited ? <button type="button" className="a-btn ghost" disabled={routingBusy || !routing.configured}
+                aria-label={`端口 ${port.listen_port} 恢复默认策略`} onClick={() => switchPortScope(port, "inherit")}>恢复默认</button> : null}
+            </div> },
+          ]} />
+      </Panel>
+
       <Panel
         title="AI 出口控制"
         description="按候选优先级自动选择；固定目标时继续健康探测，不可达则回退普通数据面。"
         actions={
           manualMode !== "auto" ? (
-            <button className="a-btn secondary" type="button" disabled={panel.isBusy("switch-ai-auto")} onClick={() => requestSwitch("auto")}>
+            <button className="a-btn secondary" type="button" disabled={routingBusy} onClick={() => requestSwitch("auto")}>
               {panel.isBusy("switch-ai-auto") ? "恢复中…" : "恢复自动探测"}
             </button>
           ) : null
@@ -162,7 +210,7 @@ export default function RoutingWorkspace() {
                   <button
                     className={`a-btn ${fixed ? "ghost" : "secondary"}`}
                     type="button"
-                    disabled={fixed || !routing.configured || panel.isBusy(`switch-ai-${mode}`)}
+                    disabled={fixed || !routing.configured || routingBusy}
                     onClick={() => requestSwitch(mode, candidate)}
                   >
                     {panel.isBusy(`switch-ai-${mode}`) ? "切换中…" : fixed ? "已固定此目标" : candidate.index === 0 ? "固定主 AI" : "切换到备用 AI"}
@@ -177,11 +225,11 @@ export default function RoutingWorkspace() {
         <details className="cc-advanced">
           <summary>高级应急</summary>
           <div className="cc-advanced__body">
-            <p><strong>数据面直出</strong>：移除动态 AI 路由，让 AI 域名回普通数据面 freedom 直出。</p>
+            <p><strong>数据面直出</strong>：移除动态 AI 路由，让代理流量回普通数据面 freedom 直出，保留转发范围偏好。</p>
             <button
               className="a-btn danger"
               type="button"
-              disabled={!routing.configured || manualMode === "forced_fallback" || panel.isBusy("switch-ai-forced_fallback")}
+              disabled={!routing.configured || manualMode === "forced_fallback" || routingBusy}
               onClick={() => requestSwitch("forced_fallback")}
             >
               {panel.isBusy("switch-ai-forced_fallback") ? "处理中…" : manualMode === "forced_fallback" ? "已启用数据面直出" : "强制直出"}

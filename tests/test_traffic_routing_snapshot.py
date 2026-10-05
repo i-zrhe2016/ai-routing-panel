@@ -212,6 +212,8 @@ def test_ai_status_preserves_report_timestamp_and_application_metadata(tmp_path,
     )
     monkeypatch.setattr(ai_routing, "AI_ROUTING_ENABLED", True)
     monkeypatch.setattr(service, "query_ai_domain_aggregate", lambda: {"total_ai_domains": 0})
+    monkeypatch.setattr(service, "ai_routing_traffic_scope", lambda: "classified")
+    monkeypatch.setattr(service, "ai_routing_port_policy", list)
     # These tests isolate report/application metadata from the classification store.
     monkeypatch.setattr(service, "query_classification_cache_summary", lambda: {
         "status": "available", "total_domains": 0, "ai_domains": 0, "non_ai_domains": 0,
@@ -281,6 +283,8 @@ def test_ai_status_does_not_reuse_applied_evidence_for_a_different_manual_or_dis
         node_controller=SimpleNamespace(mode="local", config=SimpleNamespace(source_ai_report_path=str(path)))
     )
     monkeypatch.setattr(service, "query_ai_domain_aggregate", lambda: {"total_ai_domains": 0})
+    monkeypatch.setattr(service, "ai_routing_traffic_scope", lambda: "classified")
+    monkeypatch.setattr(service, "ai_routing_port_policy", list)
     # These tests isolate report/application metadata from the classification store.
     monkeypatch.setattr(service, "query_classification_cache_summary", lambda: {
         "status": "available", "total_domains": 0, "ai_domains": 0, "non_ai_domains": 0,
@@ -330,3 +334,49 @@ def test_malformed_dns_target_keeps_entry_unknown(target):
     result = routing(dns={"enabled": True, "configured": True, "current_target": target})
     assert result["path"] == "unknown"
     assert result["ordinary_direct_state"] == result["ai_branch_state"] == "unknown"
+
+
+def test_all_traffic_snapshot_has_only_ai_active_with_applied_scope():
+    result = routing(applied_traffic_scope="all", traffic_scope="all")
+    assert result["path"] == "normal_ai"
+    assert result["traffic_scope"] == "all_traffic"
+    assert result["ordinary_direct_state"] == "standby"
+    assert result["ai_branch_state"] == "active"
+    pending = routing(apply="delegated", applied_traffic_scope="unknown", traffic_scope="all")
+    assert pending["path"] == "normal_ai_pending"
+    assert pending["ai_branch_state"] == "unknown"
+
+
+def test_preserved_all_route_management_error_never_claims_direct_fallback():
+    result = routing(status="probe_error", route_preserved=True, applied_traffic_scope="all")
+    assert result["path"] == "normal_ai"
+    assert result["ordinary_direct_state"] == "standby"
+
+
+@pytest.mark.parametrize('applied,expected', [('mixed','all'), ('direct','direct'), ('unknown','unknown')])
+def test_per_port_status_uses_account_specific_evidence_and_never_confirms_stale_policy(monkeypatch, applied, expected):
+    from app.state.ai_routing import AiRoutingService
+    service=AiRoutingService(node_controller=SimpleNamespace(is_configured=lambda:True,mode="local"))
+    policy=[{'id':1,'listen_port':31001,'traffic_scope':'all','inherited':False,'active':True},
+            {'id':2,'listen_port':31002,'traffic_scope':'classified','inherited':True,'active':True}]
+    from app.xray.ai_routing.repository import scope_policy_signature
+    monkeypatch.setattr(service,'ai_routing_port_policy',lambda:policy)
+    monkeypatch.setattr(service,'ai_routing_traffic_scope',lambda:'classified')
+    monkeypatch.setattr(service,'query_ai_domain_aggregate',lambda:{'total_ai_domains':0})
+    monkeypatch.setattr(service,'query_classification_cache_summary',lambda:{'ai_domains':0})
+    monkeypatch.setattr(service,'sync_data_plane_ai_state',dict)
+    monkeypatch.setattr(service,'ai_routing_manual_state',lambda:{'mode':'auto','mode_label':'auto','updated_at':'','updated_at_display':'','candidates':[],'candidate_count':0})
+    report={'generated_at':STAMP,'route_status':'applied','route_status_label':'applied','route_status_tone':'ok',
+            'config_apply_status':'direct' if applied!='unknown' else 'delegated','traffic_scope':'classified','applied_traffic_scope':applied,
+            'requested_port_scopes':scope_policy_signature(policy),'applied_port_scopes':scope_policy_signature(policy)}
+    # Existing full report fixture supplies unrelated presentation fields.
+    base={'generated_at_display':STAMP,'routing_checked_at':STAMP,'route_status_reason':'','ai_domain_count':0,'unique_domains':0,
+          'window_start_display':'','window_end_display':'','total_events':0,'domain_hits':0,'domains':[],
+          'pending_domains_without_classifier':0,'known_ai_domains':0,'config_changed':False,'config_retried':False}
+    report={**base,**report}
+    monkeypatch.setattr(service,'read_ai_domain_report',lambda:report)
+    result=service.ai_routing_status()
+    assert result['port_scopes'][0]['applied_traffic_scope']==expected
+    if applied=='unknown': assert result['port_scopes'][0]['scope_apply_state']=='pending'
+    policy[0]={**policy[0],'traffic_scope':'classified'}
+    assert service.ai_routing_status()['port_scopes'][0]['scope_apply_state']=='pending'

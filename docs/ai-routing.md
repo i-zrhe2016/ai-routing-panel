@@ -21,7 +21,7 @@ AI 路由由控制面容器中的 `xray-ai-domain-manager` 驱动，通过内网
 3. 对未知域名调用 OpenRouter 分类器
 4. 分类失败的域名保留待分类状态，已有分类记录继续使用
 5. 所有已知 `ai` / `not_ai` 分类先持久化到 `panel.db` 的 `ai_domain_classifications`；仅将已观测 AI 域名的命中统计写入 `ai_domains` 和 `ai_domain_observations`
-6. 生成只包含 AI 域名的动态路由、小时报表
+6. 默认生成只包含 AI 域名的动态路由、小时报表
 7. 探测主、备 AI 候选并按当前模式选择目标
 8. 路由变化时重新渲染并重启数据面
 
@@ -31,7 +31,30 @@ JSON 分类缓存缺失或损坏时从数据库恢复；已有 `ai_domains` 也�
 
 内建强制 AI 域名族覆盖 ChatGPT/OpenAI（`chatgpt.com`、`openai.com`、`oaistatic.com`、`oaiusercontent.com`）、Claude/Anthropic（`claude.ai`、`anthropic.com`、`claude.com`、`claudeusercontent.com`）和 AWS。AWS 规则覆盖服务端点（`amazonaws.com`、`amazonaws.com.cn`、`amazonwebservices.com.cn`、`api.aws`、`on.aws`）、控制台与静态资源（`aws.amazon.com`、`awsstatic.com`、`awsplayer.com`、`awscloud.com`）、Identity Center（`awsapps.com`、`awsapps.cn`）以及 AWS 专用域名族（`aws.dev`、`aws`、`aws.a2z.com`、`aws.a2z.org.cn`）。这些域名的子域名也会匹配；`amazon.com`、`cloudfront.net` 和 `live-video.net` 属于共享范围较大的域名族，未纳入全量规则，以免把非 AWS 流量一并转发；实际观测到的域名才写入数据库聚合表。
 
-AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。非 AI 域名以及尚未完成分类的域名不进入动态规则，继续使用普通 DMIT 数据面的默认 `freedom` outbound 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产仅保留台湾 AI 节点作为主候选 `redacted-ip-004:27166`；原主候选 `nat.qq.pw:27166` 已移除，不再作为备用候选。
+AI 域名流量最终由 `dynamic-routing.json` 送入 `ai_proxy` VLESS + REALITY outbound，再转发到选中的 AI 上游并由其 freedom 直出。默认 classified 范围下，非 AI 域名以及尚未完成分类的域名不进入动态规则，继续使用普通 DMIT 数据面的默认 `freedom` outbound 直出。该 outbound 必须使用与对应 AI inbound 独立且完整匹配的凭据，不能从普通数据面 `XRAY_*` 盲目派生。当前生产仅保留台湾 AI 节点作为主候选 `redacted-ip-004:27166`；原主候选 `nat.qq.pw:27166` 已移除，不再作为备用候选。
+
+## 转发范围
+
+控制台「AI 转发范围」按端口提供可逆的「全部转发到 AI 节点」开关。每个端口可独立选择 `all` 或 `classified`，也可恢复默认策略；
+未单独设置的端口沿用全局默认。默认 `classified` 保持域名分流；
+`all` 将进入托管租户入口的 TCP/UDP 代理流量转发到所选 AI 上游，包含普通域名、未分类域名和 IP 目标，
+即使没有已分类 AI 域名也生效。渲染器按账号绑定当前 `panel-*` 和 `unified-*` 租户入口；未单独设置的新增账号沿用全局默认，健康周期重新应用；
+API/管理入口不参与全量规则，静态阻断规则（包括启用时的 UDP 443 / QUIC 阻断）仍优先。
+客户端订阅中的 DIRECT 流量不经过服务器，此设置无法接管，也不会改写订阅规则。
+
+全局默认保存在 `app_state.ai_routing_traffic_scope`；端口覆盖保存在 `ports.ai_traffic_scope`（空值表示沿用默认），绑定稳定账号 ID。改号保留账号偏好，删除并复用端口不继承旧账号设置。
+全量规则分别匹配旧入口的 `panel-<port>` 与统一入口的认证 `panel-user-<port>`，不会捕获统一 443 的其他账号；渲染时以当前账号清单重绑身份。账号限流标记在这些路由选择后继续生效。
+范围独立于 `auto` / `primary` / `backup` / `forced_fallback`。
+应急直出优先于范围，但保留范围偏好；AI 不可达时沿用已有回退，恢复后重新应用所选范围。
+人工请求持有共享人工配置锁，先调用管理器应用范围，再提交数据库；提交失败尽力补偿旧范围。
+显式范围应用失败恢复旧片段与配置；无法确认补偿重载时保留 pending 标记并将报告应用状态设为未知。
+
+报告 `route_status.traffic_scope` 表示本次请求的范围，`applied_traffic_scope` 表示确认配置的
+`classified` / `all` / `mixed` / `direct`，委托外部重载时为 `unknown`。
+`requested_port_scopes` 与 `applied_port_scopes` 保存账号 ID、端口、有效范围和启用状态；面板逐端口比较，旧报告或状态不匹配时显示待确认。
+混合范围下，普通域名的汇总出口标记为按端口选择，具体出口以端口应用状态为准。控制台同时显示保存偏好与应用状态；
+仅保存或委托同步不表示已生效。管理执行器错误保留此前路由，标记 `route_preserved`；它不证明上游不可达。
+拓扑中的全量 AI 路径不将普通直出标为活动出口，域名报告仍保留分类来源并按实际应用范围展示出口。
 
 ## 输入与输出
 
@@ -138,13 +161,13 @@ AI 节点恢复后，下一轮探测到可达，重新生成 `dynamic-routing.js
 - `__PANEL_UPSTREAM_PORT__`
 - `__PANEL_LISTEN_PORT__`
 
-如果模板不存在，管理器会回退到内建 `freedom redirect`。
+classified 范围下，如果模板不存在，管理器会回退到内建 `freedom redirect`。all 范围要求有效的代理模板或分享链接覆盖；缺少模板、占位模板或无候选时拒绝启用，保留此前范围和路由。
 
 ## 域名分类器
 
 默认分类器和密钥文件部署方式见 [域名分类器配置](configuration.md#域名分类器)。内建已知 AI 域名先匹配，已缓存的历史分类保持其原始来源和模型；只对未知域名请求分类器。每个成功批次原子接受完整结果并持久化，后续批次失败时保留已完成的批次和剩余待分类域名。小时报告保留每个域名的分类来源与实际模型。
 
-未知域名分类失败时不加入 AI 动态路由，继续普通数据面的默认直出。已有 AI 域名历史不因 provider 不可用而清除。
+classified 范围下，未知域名分类失败时不加入 AI 动态路由，继续普通数据面的默认直出。已有 AI 域名历史不因 provider 不可用而清除。
 
 旧 Codex/OpenAI 兼容路径仍可显式启用；Compose 保留 `/root/.codex` 只读挂载供该路径使用。非默认宿主机路径需调整挂载或配置 `CODEX_CLI_JS` / `CODEX_BIN`。
 

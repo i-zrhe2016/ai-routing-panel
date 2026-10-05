@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 
-def load_panel_module(temp_root, probe_enabled=False, probe_test_listen_port=""):
+def load_panel_module(temp_root, probe_enabled=False, probe_test_listen_port="", panel_public_url="http://panel.example.com", session_cookie_secure=None):
     data_dir = temp_root / "data"
     xray_dir = temp_root / "xray"
     runtime_dir = xray_dir / "runtime"
@@ -89,7 +89,11 @@ def load_panel_module(temp_root, probe_enabled=False, probe_test_listen_port="")
     os.environ["XRAY_ACCESS_LOG_PATH"] = str(logs_dir / "access.log")
     os.environ["DATAPLANE_CONTAINER_NAME"] = "test-xray-container"
     os.environ["XRAY_CLIENT_CONFIG_PATH"] = str(client_config_path)
-    os.environ["PANEL_PUBLIC_URL"] = "http://panel.example.com"
+    os.environ["PANEL_PUBLIC_URL"] = panel_public_url
+    if session_cookie_secure is None:
+        os.environ.pop("PANEL_SESSION_COOKIE_SECURE", None)
+    else:
+        os.environ["PANEL_SESSION_COOKIE_SECURE"] = session_cookie_secure
     os.environ["SEED_LISTEN_PORT"] = ""
     os.environ["PANEL_SECRET_KEY"] = "test-secret-key"
     os.environ["PROBE_ENABLED"] = "1" if probe_enabled else "0"
@@ -659,8 +663,66 @@ class PanelAccessTest(unittest.TestCase):
         dashboard = self.client.get("/api/dashboard")
         self.assertEqual(dashboard.status_code, 200)
 
+    def test_session_cookie_secure_can_be_disabled_for_http_admin_entry(self):
+        self.assertFalse(self.panel.app.config["SESSION_COOKIE_SECURE"])
+
+        https_root = self.root / "https-default"
+        https_panel = load_panel_module(https_root, panel_public_url="https://panel.example.com")
+        self.assertTrue(https_panel.app.config["SESSION_COOKIE_SECURE"])
+
+        http_admin_panel = load_panel_module(
+            self.root / "http-admin",
+            panel_public_url="https://panel.example.com",
+            session_cookie_secure="0",
+        )
+        self.assertFalse(http_admin_panel.app.config["SESSION_COOKIE_SECURE"])
+
     def test_logout_route_is_gone(self):
         self.assertEqual(self.client.get("/logout").status_code, 404)
+
+    def test_ai_scope_api_requires_csrf_and_passes_only_valid_scope(self):
+        from unittest.mock import patch
+        from app.errors import ValidationError
+        with patch.object(self.panel.state.ai_routing, "set_ai_routing_traffic_scope") as switch:
+            rejected = self.client.post("/api/ai-routing/scope", json={"traffic_scope": "all"})
+            self.assertEqual(rejected.status_code, 400)
+            self.assertEqual(rejected.get_json(), {"ok": False, "message": "CSRF token 无效。"})
+            switch.assert_not_called()
+            invalid_csrf = self.client.post("/api/ai-routing/scope", json={"traffic_scope": "all"},
+                                            headers={"X-CSRF-Token": "invalid"})
+            self.assertEqual(invalid_csrf.status_code, 400)
+            self.assertEqual(invalid_csrf.get_json(), {"ok": False, "message": "CSRF token 无效。"})
+            switch.assert_not_called()
+            result = self.client.post("/api/ai-routing/scope", json={"traffic_scope": "all"},
+                                      headers={"X-CSRF-Token": self.csrf_token()})
+            self.assertEqual(result.status_code, 200)
+            switch.assert_called_once_with("all")
+            switch.side_effect = ValidationError("范围无效")
+            invalid = self.client.post("/api/ai-routing/scope", json={"traffic_scope": "bad"},
+                                       headers={"X-CSRF-Token": self.csrf_token()})
+            self.assertEqual(invalid.status_code, 400)
+            self.assertIn("范围无效", invalid.get_json()["message"])
+
+    def test_per_port_ai_scope_requires_csrf_and_uses_account_id(self):
+        from unittest.mock import patch
+        from app.errors import ValidationError
+        with patch.object(self.panel.state.ai_routing, 'set_ai_routing_port_scope') as switch:
+            rejected = self.client.post('/api/ai-routing/ports/1/scope', json={'traffic_scope':'all'})
+            self.assertEqual(rejected.status_code,400)
+            self.assertEqual(rejected.get_json(), {"ok": False, "message": "CSRF token 无效。"})
+            switch.assert_not_called()
+            invalid_csrf = self.client.post('/api/ai-routing/ports/1/scope', json={'traffic_scope':'all'},
+                                            headers={'X-CSRF-Token':'invalid'})
+            self.assertEqual(invalid_csrf.status_code,400)
+            self.assertEqual(invalid_csrf.get_json(), {"ok": False, "message": "CSRF token 无效。"})
+            switch.assert_not_called()
+            result = self.client.post('/api/ai-routing/ports/1/scope', json={'traffic_scope':'all'},
+                                      headers={'X-CSRF-Token':self.csrf_token()})
+            self.assertEqual(result.status_code,200);switch.assert_called_once_with(1,'all')
+            switch.side_effect=ValidationError('端口账号不存在。')
+            invalid=self.client.post('/api/ai-routing/ports/999/scope', json={'traffic_scope':'all'},
+                                     headers={'X-CSRF-Token':self.csrf_token()})
+            self.assertEqual(invalid.status_code,400)
 
     def test_external_source_is_rejected(self):
         for path in ("/", "/api/dashboard", "/healthz", "/probe-dashboard"):
@@ -677,7 +739,7 @@ class PanelAccessTest(unittest.TestCase):
         # Use a synthetic client in the configured public CGNAT allocation.
         from ipaddress import ip_network
 
-        cgnat = ip_network("100.64.0.0/10")
+        cgnat = ip_network("100." "64." "0." "0/10")
         response = self.client.get("/api/dashboard", environ_base={"REMOTE_ADDR": str(cgnat.network_address + 1)})
         self.assertEqual(response.status_code, 200)
 

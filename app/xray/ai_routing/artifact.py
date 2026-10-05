@@ -11,6 +11,7 @@ from app.xray.config import DEFAULT_RENDER_MODULE
 
 from .candidates import join_host_port
 from .common import PLACEHOLDER_RE, env_bool, env_int, format_timestamp, load_json, save_json
+from .repository import effective_traffic_scope, scope_policy_signature
 from .selector import summarize_ai_target_for_report
 
 UNSET_PROXY_PROTOCOL = "replace_me"
@@ -153,30 +154,43 @@ def resolve_probe_server_name(template_path, candidate, panel_target, explicit_s
     return extract_probe_server_name(proxy_payload)
 
 
-def write_routing_fragment(path, ai_domains, proxy_payload):
-    if not ai_domains or proxy_payload is None:
+def write_routing_fragment(path, ai_domains, proxy_payload, traffic_scope="classified", port_policy=None):
+    all_ports = [row['listen_port'] for row in (port_policy or []) if row['active'] and row['traffic_scope'] == 'all']
+    has_all = bool(all_ports) if port_policy is not None else traffic_scope == 'all'
+    if (not ai_domains and not has_all) or proxy_payload is None:
         path.unlink(missing_ok=True)
         return False
-    fragment = {
-        "routing": {
-            "domainStrategy": "AsIs",
-            "rules": [
-                {
-                    "type": "field",
-                    "domain": [f"domain:{domain}" for domain in sorted(ai_domains)],
-                    "outboundTag": "ai_proxy",
-                }
-            ],
-        },
-        "outbounds": proxy_payload["outbounds"],
-    }
+    rules = []
+    base = {'type': 'field', 'outboundTag': 'ai_proxy'}
+    if port_policy is not None:
+        for port in all_ports:
+            rules.append(dict(base, network='tcp,udp', inboundTag=[f'panel-{port}']))
+            rules.append(dict(base, network='tcp,udp', user=[f'panel-user-{port}']))
+        if ai_domains:
+            rules.append(dict(base, domain=[f'domain:{domain}' for domain in sorted(ai_domains)]))
+    elif traffic_scope == 'all':
+        rules.append(dict(base, network='tcp,udp'))
+    else:
+        rules.append(dict(base, domain=[f'domain:{domain}' for domain in sorted(ai_domains)]))
+    fragment = {'traffic_scope': effective_traffic_scope(port_policy or [], traffic_scope),
+                'routing': {'domainStrategy': 'AsIs', 'rules': rules}, 'outbounds': proxy_payload['outbounds']}
+    if port_policy is not None:
+        fragment['all_ports'] = all_ports
+        fragment['port_scopes'] = scope_policy_signature(port_policy)
     save_json(path, fragment)
     return True
 
 
 def build_traffic_route(classification, ai_target, route_status):
     route_status_code = str(route_status.get("status", "unknown") or "unknown").strip()
-    if classification != "ai":
+    applied_scope = route_status.get("applied_traffic_scope", "classified")
+    if applied_scope == "unknown":
+        return {"outbound_tag": "unknown", "path": "unknown", "target": None,
+                "status": route_status_code, "reason": "config_application_unconfirmed"}
+    if classification != 'ai' and applied_scope == 'mixed':
+        return {'outbound_tag': 'per_port', 'path': 'per_port', 'target': None,
+                'status': route_status_code, 'reason': 'port_scope_selects_route'}
+    if classification != "ai" and applied_scope != "all":
         return {
             "outbound_tag": "direct",
             "path": "normal_data_plane",
@@ -184,7 +198,7 @@ def build_traffic_route(classification, ai_target, route_status):
             "status": route_status_code,
             "reason": "classification_not_ai",
         }
-    if route_status_code == "applied":
+    if route_status_code == "applied" or (route_status_code == "probe_error" and applied_scope in {"all", "classified", "mixed"} and route_status.get("route_preserved")):
         target = None
         if isinstance(ai_target, dict):
             target_host = str(ai_target.get("upstream_host", "")).strip()

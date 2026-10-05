@@ -330,6 +330,10 @@ export function PanelProvider({
       runDnsFailoverCheck: () => mutate("dns-failover-check", () => client.post("/api/dns-failover/check")),
       switchDnsTarget: (target) =>
         mutate(`dns-failover-switch:${target}`, () => client.post("/api/dns-failover/switch", { target })),
+      switchPortAiRoutingScope: (port_id, traffic_scope) =>
+        mutate(`switch-ai-port-${port_id}`, () => client.post(`/api/ai-routing/ports/${port_id}/scope`, { traffic_scope })),
+      switchAiRoutingScope: (traffic_scope) =>
+        mutate("switch-ai-scope", () => client.post("/api/ai-routing/scope", { traffic_scope })),
       switchAiRoutingMode: (mode) =>
         mutate(`switch-ai-${mode}`, () => client.post("/api/ai-routing/switch", { mode })),
       restartDataPlane: () =>

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import copy
 import json
 import re
 import sys
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse
 
+from app.xray.account_limits import mark_account_routes
 from app.xray.config import BASE_DIR, REQUIRED_ENV_KEYS, RUNTIME_DIR
 from app.xray.envfile import load_env_file
 from app.xray.file_io import write_text_atomic
@@ -111,6 +113,25 @@ def load_panel_ports(path: Path | None) -> list[int]:
     return normalized
 
 
+
+def bind_port_scope_accounts(payload, accounts):
+    """Never apply a previous account's catch-all to a reused listen port."""
+    if not payload or 'all_ports' not in payload:
+        return payload
+    payload = copy.deepcopy(payload)
+    current = {row['id']: row['listen_port'] for row in accounts}
+    ports = [current[row['id']] for row in payload.get('port_scopes', [])
+             if row.get('active') and row.get('traffic_scope') == 'all' and row.get('id') in current]
+    catchalls = []
+    for port in ports:
+        base = {'type': 'field', 'outboundTag': 'ai_proxy', 'network': 'tcp,udp'}
+        catchalls.append(dict(base, inboundTag=[f'panel-{port}']))
+        catchalls.append(dict(base, user=[f'panel-user-{port}']))
+    domain_rules = [rule for rule in payload['routing']['rules'] if 'domain' in rule]
+    payload['routing']['rules'] = catchalls + domain_rules
+    payload['all_ports'] = ports
+    return payload
+
 def merge_dynamic_routing(config: dict, dynamic_payload: dict | None) -> dict:
     if not dynamic_payload:
         return config
@@ -137,6 +158,32 @@ def merge_dynamic_routing(config: dict, dynamic_payload: dict | None) -> dict:
             # priority over the dynamic AI-domain rules. A QUIC packet to an AI
             # domain matches both the block rule and the AI-domain rule; xray
             # uses first-match, so the block must win to force a TCP fallback.
+            if dynamic_payload.get("traffic_scope") == "all" and "all_ports" not in dynamic_payload:
+                # Bind at render time so new accounts and unified entry are
+                # covered without ever capturing API/management inbounds.
+                tenant_tags = [inbound["tag"] for inbound in config.get("inbounds", [])
+                               if inbound.get("protocol") == "vless" and
+                               str(inbound.get("tag", "")).startswith(("panel-", "unified-"))]
+                if not tenant_tags:
+                    raise ValueError("All-AI routing requires managed tenant inbounds")
+                rules = [dict(rule, inboundTag=tenant_tags) for rule in rules]
+            if 'all_ports' in dynamic_payload:
+                tenant_tags = {inbound['tag'] for inbound in config.get('inbounds', [])
+                               if inbound.get('protocol') == 'vless' and str(inbound.get('tag', '')).startswith('panel-')}
+                unified_tags = [inbound['tag'] for inbound in config.get('inbounds', [])
+                                if inbound.get('protocol') == 'vless' and str(inbound.get('tag', '')).startswith('unified-')]
+                scoped_rules = []
+                for rule in rules:
+                    if rule.get('user'):
+                        if unified_tags:
+                            scoped_rules.append(dict(rule, inboundTag=unified_tags))
+                    elif rule.get('inboundTag'):
+                        tags = [tag for tag in rule['inboundTag'] if tag in tenant_tags]
+                        if tags:
+                            scoped_rules.append(dict(rule, inboundTag=tags))
+                    else:
+                        scoped_rules.append(rule)
+                rules = scoped_rules
             routing["rules"] = list(routing["rules"]) + list(rules)
 
     return config
@@ -338,7 +385,10 @@ def build_server_config(
     }
     if routing_rules:
         config["routing"] = {"rules": routing_rules}
-    return merge_dynamic_routing(config, dynamic_payload)
+    config = merge_dynamic_routing(config, dynamic_payload)
+    if env_bool(values, "XRAY_ACCOUNT_LIMITS_ENABLED", False):
+        config = mark_account_routes(config, panel_ports)
+    return config
 
 
 def build_ai_node_values(values: dict[str, str]) -> dict[str, str]:
@@ -531,6 +581,8 @@ def main() -> int:
         validate_env(values)
         dynamic_payload = load_optional_json(Path(args.dynamic_routing_file))
         panel_ports = load_panel_ports(Path(args.panel_ports_file))
+        inventory = load_optional_json(Path(args.panel_ports_file)) or {}
+        dynamic_payload = bind_port_scope_accounts(dynamic_payload, inventory.get('accounts', []))
         backup_config_out = str(args.backup_config_out or "").strip()
         backup_upstream_url = str(args.backup_upstream_url or "").strip()
         relay_outbound = (
