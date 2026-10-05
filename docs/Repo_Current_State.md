@@ -1,10 +1,10 @@
 # Repository Current State
 
-Last verified: 2026-10-04 @ working tree
+Last verified: 2026-10-04 @ 83886d6
 
 ## Current Focus
 
-- [Plan 158](https://github.com/i-zrhe2016/ai-routing-panel/issues/158)：软配额限流与按端口全部 AI 转发已完成部署验收，Git 交付仍待完成。
+- None.
 
 ## Implemented
 
@@ -17,12 +17,13 @@ Last verified: 2026-10-04 @ working tree
 - 统一入口在 Docker 启动前清理失效 Unix socket，保留活跃 socket、普通文件和符号链接，见 [统一入口部署](unified-entry.md)。
 - 面板仅允许内网/Tailscale 来源，无管理员登录；来源白名单、宿主机防火墙与 CSRF 保留，租户/客户登录不变，见 [面板访问](panel-access.md)。
 - 灾备通过隔离 broker/只读 SSH 采集节点材料；新上传保存原始归档，历史加密归档仍需原密码恢复。中文配置工具仅管理 R2 凭据并保留历史解密密码，见 [灾备上传](db-backup-uploader.md) 和 [节点恢复](node-recovery.md)。
+- 达到配置配额后端口保持连接，按认证账号限制上下行 5 Mbps；每个端口可独立切换分类 AI 或全部 AI 转发，普通/统一入口按账号隔离，当前端口沿用分类分流默认值。
 - DO 生产 Admin 已通过桌面和移动浏览器检查；页面正常加载，逐端口 AI 转发开关可见，无页面错误或整页横向溢出。
 - CI 对指向 `main` 的 PR 与 `main` 推送执行 backend/frontend 门禁，包含后端测试、前端测试/构建及已提交 Admin 产物一致性检查。
 
 ## In Progress
 
-- [Plan 158](https://github.com/i-zrhe2016/ai-routing-panel/issues/158) 工作树已部署：达到配置配额后保持连接并按账号分别限制上下行 5 Mbps；每个端口可独立切换全部 AI 转发，统一入口按认证账号隔离。当前端口沿用原分类分流。实现、测试和回滚证据在对应 Ticket，尚未提交或合并。
+- None.
 
 ## Known Issues / Failing Checks
 
@@ -43,4 +44,4 @@ Last verified: 2026-10-04 @ working tree
 
 ## Next
 
-- [Plan 158](https://github.com/i-zrhe2016/ai-routing-panel/issues/158) 的 Git 交付与合并后状态同步。
+- None.
