@@ -7,6 +7,7 @@ from .core import (
     build_dashboard_state,
     collect_insights_state,
     json_error_response,
+    json_validate_csrf,
     json_snapshot_success_response,
     json_success_response,
     log_business_event,
@@ -201,6 +202,20 @@ def api_ai_routing_switch():
         return json_error_response(str(exc), status_code=400)
 
 
+@route("/api/ai-routing/scope", methods=["POST"])
+def api_ai_routing_scope():
+    csrf_error = json_validate_csrf()
+    if csrf_error is not None:
+        return csrf_error
+    try:
+        state.set_ai_routing_traffic_scope(request_payload().get("traffic_scope"))
+        return json_snapshot_success_response("AI 流量范围已更新；实际应用状态以路由报告为准。")
+    except (ValidationError, RuntimeError) as exc:
+        log_business_event("ai_routing.scope_switched", result="failure", error_code="switch_failed",
+                           message=str(exc), resource_type="ai_routing")
+        return json_error_response(str(exc), status_code=400)
+
+
 @route("/api/subscriptions/rotate", methods=["POST"])
 def api_rotate_subscription():
     state.rotate_subscription_token()
@@ -374,4 +389,18 @@ def api_restart_ai_node_by_id(node_id):
         return json_success_response("AI 节点已执行重启。")
     except (ValidationError, RuntimeError) as exc:
         log_business_event("node.ai.restarted", result="failure", error_code="restart_failed", message=str(exc), resource_type="node", resource_id=node_id)
+        return json_error_response(str(exc), status_code=400)
+
+
+@route('/api/ai-routing/ports/<int:port_id>/scope', methods=['POST'])
+def api_ai_routing_port_scope(port_id):
+    csrf_error = json_validate_csrf()
+    if csrf_error is not None:
+        return csrf_error
+    try:
+        state.set_ai_routing_port_scope(port_id, request_payload().get('traffic_scope'))
+        return json_snapshot_success_response('端口 AI 转发范围已更新；实际应用状态以路由报告为准。')
+    except (ValidationError, RuntimeError) as exc:
+        log_business_event('ai_routing.scope_switched', result='failure', error_code='switch_failed',
+                           message=str(exc), resource_type='port', resource_id=str(port_id))
         return json_error_response(str(exc), status_code=400)

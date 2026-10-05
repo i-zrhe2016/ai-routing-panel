@@ -49,6 +49,8 @@ GET,HEAD,OPTIONS|/tenant/<tenant_token>|tenant_panel|app.web.tenant_views|source
 GET,HEAD,OPTIONS|/|index|app.web.admin_views|source-allowlist
 OPTIONS,POST|/api/ai-node/restart|api_restart_ai_node|app.web.admin_api|source-allowlist
 OPTIONS,POST|/api/ai-nodes/<node_id>/restart|api_restart_ai_node_by_id|app.web.admin_api|source-allowlist
+OPTIONS,POST|/api/ai-routing/ports/<int:port_id>/scope|api_ai_routing_port_scope|app.web.admin_api|source-allowlist
+OPTIONS,POST|/api/ai-routing/scope|api_ai_routing_scope|app.web.admin_api|source-allowlist
 OPTIONS,POST|/api/ai-routing/switch|api_ai_routing_switch|app.web.admin_api|source-allowlist
 OPTIONS,POST|/api/client-errors|api_client_errors|app.web.client_errors|source-allowlist
 OPTIONS,POST|/api/customer/auth/login|api_customer_login|app.web.customer_api|source-allowlist

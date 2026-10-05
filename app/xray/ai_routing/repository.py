@@ -411,6 +411,80 @@ def read_ai_routing_manual_mode(panel_db_path):
     return mode if mode in {"auto", "primary", "backup", "forced_fallback"} else "auto"
 
 
+def read_ai_routing_traffic_scope(panel_db_path):
+    """Old databases intentionally retain classified routing."""
+    path = str(panel_db_path or "").strip()
+    if not path or not Path(path).is_file():
+        return "classified"
+    def read_scope():
+        conn = connect_panel_db(path)
+        try:
+            return conn.execute("SELECT value FROM app_state WHERE key = 'ai_routing_traffic_scope'").fetchone()
+        finally:
+            conn.close()
+    try:
+        row = run_with_sqlite_lock_retry(read_scope)
+    except (OSError, sqlite3.Error):
+        return "classified"
+    return "all" if row and row[0] == "all" else "classified"
+
+
+
+def port_scope_policy(conn, default_scope, override=None):
+    """Resolve stable account preferences; old schemas inherit the global default."""
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(ports)')}
+    if not {'id', 'listen_port', 'enabled'} <= columns:
+        if override is not None:
+            raise ValueError('Unknown managed port account')
+        return []
+    scope_column = 'ai_traffic_scope' if 'ai_traffic_scope' in columns else 'NULL AS ai_traffic_scope'
+    expiry_column = 'expires_at' if 'expires_at' in columns else 'NULL AS expires_at'
+    rows = conn.execute(f'SELECT id, listen_port, enabled, {expiry_column}, {scope_column} FROM ports ORDER BY listen_port').fetchall()
+    result = []
+    found = override is None
+    for row in rows:
+        account_id, port, enabled, expiry, preference = row
+        if override is not None and account_id == override[0]:
+            preference = None if override[1] == 'inherit' else override[1]
+            found = True
+        if preference not in {None, 'all', 'classified'}:
+            raise ValueError('Invalid managed port traffic scope')
+        active = bool(enabled)
+        if expiry:
+            parsed = datetime.fromisoformat(expiry)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            active = active and parsed > utc_now()
+        result.append({'id': account_id, 'listen_port': port, 'traffic_scope': preference or default_scope,
+                       'inherited': preference is None, 'active': active})
+    if not found:
+        raise ValueError('Unknown managed port account')
+    return result
+
+
+def read_port_scope_policy(panel_db_path, default_scope, override=None):
+    path = str(panel_db_path or '').strip()
+    if not path or not Path(path).is_file():
+        if override is not None:
+            raise ValueError('Unknown managed port account')
+        return []
+    def read():
+        conn = connect_panel_db(path)
+        try:
+            return port_scope_policy(conn, default_scope, override)
+        finally:
+            conn.close()
+    return run_with_sqlite_lock_retry(read)
+
+
+def scope_policy_signature(policy):
+    return [{key: row[key] for key in ('id', 'listen_port', 'traffic_scope', 'active')} for row in policy]
+
+
+def effective_traffic_scope(policy, default_scope):
+    scopes = {row['traffic_scope'] for row in policy if row['active']}
+    return 'mixed' if len(scopes) > 1 else next(iter(scopes), default_scope)
+
 def normalize_ai_routing_manual_mode(panel_db_path, candidate_count):
     """Promote a stale backup override when the configured pool has one node."""
     path = Path(str(panel_db_path or "").strip())

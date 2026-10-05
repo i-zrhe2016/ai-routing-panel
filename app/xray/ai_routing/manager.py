@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from app.probe_incidents import database_incident_observer
+from app.xray.file_io import write_text_atomic
 from app.xray.node import DataPlaneConfig, NodeController
 from app.xray.operation_lock import LockBusyError, exclusive_file_lock
 from app.xray.protocol_probe import build_probe_runner
@@ -29,13 +30,17 @@ from .classifier import (
 from .common import format_timestamp, load_json, save_json, utc_now
 from .observations import load_log_state, purge_old_events, save_log_state, sync_log
 from .repository import (
+    effective_traffic_scope,
     load_classifications,
     normalize_ai_routing_manual_mode,
     normalize_classifications,
     read_ai_routing_manual_mode,
+    read_ai_routing_traffic_scope,
     read_panel_target,
+    read_port_scope_policy,
     save_ai_domains_to_panel_db,
     save_classifications,
+    scope_policy_signature,
 )
 from .selector import select_ai_target, should_fallback_to_primary_route
 
@@ -144,16 +149,67 @@ def run_once(args, *, routing_only=False):
     """Run an hourly analysis or a health-only apply with shared cross-process locks."""
     manual_mode_override = getattr(args, "manual_mode", None)
     has_manual_override = isinstance(manual_mode_override, str) and bool(manual_mode_override.strip())
+    scope_override = getattr(args, "traffic_scope", None)
+    has_manual_override = has_manual_override or (isinstance(scope_override, str) and bool(scope_override.strip()))
+    has_manual_override = has_manual_override or type(getattr(args, "port_id", None)) is int
     # Manual switches must also stay responsive and reuse existing classifications.
     analysis = None if routing_only or has_manual_override else analyze_domains(args)
     lock_path = _resolve_lock_path(args, "apply_lock_path", ".ai-domain-manager.lock")
     manual_lock_held = getattr(args, "manual_lock_held", False)
     if has_manual_override and manual_lock_held is True:
         with exclusive_file_lock(lock_path):
-            return _run_once_locked(args, analysis)
+            return _run_with_scope_compensation(args, analysis)
     manual_lock_path = _resolve_lock_path(args, "manual_lock_path", ".ai-domain-manager-manual.lock")
     with exclusive_file_lock(manual_lock_path), exclusive_file_lock(lock_path):
+        return _run_with_scope_compensation(args, analysis)
+
+
+def _run_with_scope_compensation(args, analysis):
+    """Keep failed explicit scope requests out of the next persisted-state cycle."""
+    scope = getattr(args, "traffic_scope", "")
+    if (not isinstance(scope, str) or not scope.strip()) and getattr(args, "port_id", None) is None:
         return _run_once_locked(args, analysis)
+    paths = [args.dynamic_routing_path, args.config_out]
+    previous = {path: path.read_text(encoding="utf-8") if path.is_file() else None for path in paths}
+    try:
+        return _run_once_locked(args, analysis)
+    except Exception:
+        config_changed = (args.config_out.read_text(encoding="utf-8") if args.config_out.is_file() else None) != previous[args.config_out]
+        for path, contents in previous.items():
+            if contents is None:
+                path.unlink(missing_ok=True)
+            else:
+                write_text_atomic(path, contents)
+        if config_changed:
+            pending = args.config_out.with_name(args.config_out.name + ".pending-apply")
+            pending.touch()
+            try:
+                controller = build_data_plane_controller(args)
+                if controller.supports_sync():
+                    controller.sync_generated_files(validate_config=True)
+                if controller.supports_restart():
+                    if not controller.restart():
+                        raise RuntimeError("compensating reload failed")
+                elif args.restart_command:
+                    restart_xray_command(args.restart_command, args.docker_timeout_seconds)
+                elif args.restart_container_name:
+                    restart_xray_container(args.restart_container_name, args.docker_timeout_seconds)
+                else:
+                    raise RuntimeError("compensating reload unavailable")
+                pending.unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001 - failed compensation must preserve original error
+                # The request remains failed, with explicit uncertainty rather
+                # than a stale report claiming the old node config is applied.
+                report_path = args.report_output_dir / "latest.json"
+                report = load_json(report_path, {})
+                if report:
+                    status = report.setdefault("route_status", {})
+                    status["config_apply_status"] = "unknown"
+                    status["applied_traffic_scope"] = "unknown"
+                    status["reason"] = "scope_apply_rollback_unconfirmed"
+                    save_json(report_path, report)
+                print("[ai_domain_manager] scope rollback unconfirmed", file=sys.stderr, flush=True)
+        raise
 
 
 def _run_once_locked(args, analysis=None):
@@ -161,6 +217,23 @@ def _run_once_locked(args, analysis=None):
     data_plane_controller = build_data_plane_controller(args)
     decisions = load_routing_decisions(args)
     save_classifications(args.panel_db_path, decisions)
+    scope_override = getattr(args, "traffic_scope", "")
+    scope_override = scope_override.strip().lower() if isinstance(scope_override, str) else ""
+    if scope_override and scope_override not in {"all", "classified"}:
+        raise ValueError("Invalid AI traffic scope")
+    traffic_scope = scope_override or read_ai_routing_traffic_scope(args.panel_db_path)
+    port_id = getattr(args, 'port_id', None)
+    port_scope = getattr(args, 'port_traffic_scope', None)
+    if port_id is not None and (type(port_id) is not int or port_id <= 0 or port_scope not in {'all', 'classified', 'inherit'}):
+        raise ValueError('Invalid managed port traffic scope')
+    port_override = (port_id, port_scope) if port_id is not None else None
+    port_policy = read_port_scope_policy(args.panel_db_path, traffic_scope, port_override)
+    scoped_policy = port_policy if any(not row['inherited'] for row in port_policy) else None
+    effective_scope = effective_traffic_scope(port_policy, traffic_scope)
+    has_all_traffic = any(row['active'] and row['traffic_scope'] == 'all' for row in port_policy) if port_policy else traffic_scope == 'all'
+    explicit_scope_request = bool(scope_override) or port_override is not None
+    previous_fragment = load_json(args.dynamic_routing_path, {})
+    previous_scope = previous_fragment.get("traffic_scope", "classified") if previous_fragment else "direct"
     panel_target = read_panel_target(args.panel_db_path, args.panel_route_listen_port)
     manual_mode_override = getattr(args, "manual_mode", None)
     if not isinstance(manual_mode_override, str):
@@ -173,6 +246,33 @@ def _run_once_locked(args, analysis=None):
             manual_mode = "primary" if len(args.ai_upstream_candidates) == 1 else "auto"
         else:
             manual_mode = normalize_ai_routing_manual_mode(args.panel_db_path, len(args.ai_upstream_candidates))
+    if has_all_traffic and (manual_mode != "forced_fallback" or explicit_scope_request):
+        if not args.ai_upstream_candidates:
+            raise RuntimeError("未配置可用 AI 节点，保持此前流量范围。")
+        # All mode requires a proxy, including explicit templates and overrides.
+        # Validate before route mutation. Emergency direct must remain usable
+        # even if a previously configured AI credential is now unavailable.
+        for candidate in args.ai_upstream_candidates:
+            payload, _reason = render_proxy_template(args.proxy_template_path, candidate, None)
+            proxy_protocol = next((str(outbound.get("protocol", "")).strip().lower()
+                                   for outbound in (payload or {}).get("outbounds", [])
+                                   if isinstance(outbound, dict) and outbound.get("tag") == "ai_proxy"), "")
+            missing_auth = False
+            for outbound in (payload or {}).get("outbounds", []):
+                if outbound.get("protocol") == "vless":
+                    servers = outbound.get("settings", {}).get("vnext", [])
+                    missing_auth = not servers or any(
+                        not server.get("users") or any(not str(user.get("id", "")).strip() or "__" in str(user.get("id", ""))
+                                                      for user in server.get("users", [])) for server in servers)
+                    stream = outbound.get("streamSettings", {})
+                    if stream.get("security") == "reality":
+                        reality = stream.get("realitySettings", {})
+                        missing_auth = missing_auth or any(not str(reality.get(key, "")).strip() or "__" in str(reality.get(key, ""))
+                                                           for key in ("serverName", "publicKey", "shortId"))
+                    if missing_auth:
+                        break
+            if not proxy_protocol or proxy_protocol in {"freedom", "blackhole", "dns", "loopback"} or missing_auth:
+                raise RuntimeError("AI 代理凭据或模板不可用，无法全部转发；请配置认证 AI 出口。")
     if manual_mode == "forced_fallback":
         ai_target = {
             "probe_status": "manual_fallback",
@@ -207,7 +307,7 @@ def _run_once_locked(args, analysis=None):
     ai_domains = sorted(domain for domain, item in decisions["domains"].items() if item.get("classification") == "ai")
 
     proxy_payload = None
-    if ai_domains:
+    if ai_domains or has_all_traffic:
         if manual_mode == "forced_fallback":
             args.dynamic_routing_path.unlink(missing_ok=True)
             route_status = {"status": "manual_fallback", "reason": "manual_override"}
@@ -235,10 +335,13 @@ def _run_once_locked(args, analysis=None):
         else:
             proxy_payload, proxy_error = render_proxy_template(args.proxy_template_path, ai_target, panel_target)
             if proxy_payload is None:
+                if explicit_scope_request:
+                    raise RuntimeError("AI 代理凭据或模板不可用，保持此前流量范围。")
                 args.dynamic_routing_path.unlink(missing_ok=True)
                 route_status = {"status": "pending_proxy_template", "reason": proxy_error}
             else:
-                applied = write_routing_fragment(args.dynamic_routing_path, ai_domains, proxy_payload)
+                applied = write_routing_fragment(args.dynamic_routing_path, ai_domains, proxy_payload,
+                                                 traffic_scope=traffic_scope, port_policy=scoped_policy)
                 route_status = {
                     "status": "applied" if applied else "disabled",
                     "reason": proxy_error if applied else "no_ai_domains",
@@ -315,11 +418,20 @@ def _run_once_locked(args, analysis=None):
         pending_apply_path.unlink(missing_ok=True)
     elif apply_needed:
         config_apply_status = "delegated" if external_reloader_enabled else "unmanaged"
-        if config_apply_status == "unmanaged" and manual_mode_override.strip():
+        if config_apply_status == "unmanaged" and (manual_mode_override.strip() or explicit_scope_request):
             raise RuntimeError("AI 路由配置重载未配置，保留待应用状态以便重试。")
         if config_apply_status != "delegated":
             pending_apply_path.unlink(missing_ok=True)
 
+    route_status["traffic_scope"] = traffic_scope
+    route_status["applied_traffic_scope"] = (
+        previous_scope if probe_management_error else effective_scope if route_status["status"] == "applied" else "direct"
+    ) if config_apply_status in {"direct", "unchanged", "not_needed"} else "unknown"
+    route_status['requested_port_scopes'] = scope_policy_signature(port_policy)
+    route_status['applied_port_scopes'] = (
+        previous_fragment.get('port_scopes', []) if probe_management_error else scope_policy_signature(port_policy)
+    ) if config_apply_status in {'direct', 'unchanged', 'not_needed'} else []
+    route_status["route_preserved"] = probe_management_error
     route_status.update(
         {
             "checked_at": format_timestamp(now),
@@ -370,7 +482,7 @@ def _run_once_locked(args, analysis=None):
             "config_changed": config_changed or remote_config_changed,
             "config_retried": config_retried,
         }
-    if probe_management_error and manual_mode_override.strip():
+    if probe_management_error and (manual_mode_override.strip() or explicit_scope_request):
         raise RuntimeError("独立探测执行异常，保留此前人工模式与路由。")
     return {
         "status": "applied",

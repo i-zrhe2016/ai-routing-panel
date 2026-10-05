@@ -28,6 +28,7 @@ from ..config import (
     PANEL_HOST,
     PANEL_PORT,
     PANEL_PUBLIC_URL,
+    PANEL_SESSION_COOKIE_SECURE,
     PANEL_SECRET_KEY,
     PROBE_ENABLED,
     TENANT_SESSION_TOKEN_KEY,
@@ -165,7 +166,7 @@ def create_app(application):
         SESSION_COOKIE_NAME="xray-routing-panel-session",
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=PANEL_PUBLIC_URL.startswith("https://"),
+        SESSION_COOKIE_SECURE=PANEL_SESSION_COOKIE_SECURE,
     )
     flask_app.extensions["application"] = application
     werkzeug_logger = logging.getLogger("werkzeug")
@@ -575,12 +576,23 @@ def build_traffic_routing(data_plane_status, ai_node_status, ai_routing_status, 
     if confirmed and ai_status in {"disabled", "idle", "pending_proxy_template"}:
         return route("normal_direct", "数据面→freedom 直出", "路由报告确认未启用 AI 分流，流量从普通数据面直出。",
                      "普通数据面", [], "普通数据面 freedom 直出", "直出", ordinary="active", ai="standby")
-    if confirmed and ai_status in {"fallback_to_primary", "manual_fallback", "manual_target_unreachable", "probe_error"}:
+    preserved_ai = ai_status == "probe_error" and ai_routing_status.get("route_preserved") is True and ai_routing_status.get("applied_traffic_scope") in {"all", "classified", "mixed"}
+    if confirmed and ai_status in {"fallback_to_primary", "manual_fallback", "manual_target_unreachable", "probe_error"} and not preserved_ai:
         return route("normal_fallback", "数据面→freedom 直出", "路由报告确认 AI 分流已回退到普通数据面直出。",
                      "普通数据面", [], "普通数据面 freedom 直出", "AI 回退",
                      ordinary="active", ai="standby", degraded=True)
-    if confirmed and ai_status == "applied" and selected_ai is not None:
+    if confirmed and (ai_status == "applied" or preserved_ai) and selected_ai is not None:
         state = probe_state(selected_ai)
+        if ai_routing_status.get("applied_traffic_scope") == "all":
+            return route("normal_ai", f"全部代理流量→{ai_label}",
+                         "进入托管租户入口的 TCP/UDP 流量转发至所选 AI 上游，保留管理与阻断规则；客户端 DIRECT 流量不经过服务器。",
+                         "普通数据面", [ai_label], f"{ai_label}出口", "已应用全部转发",
+                         ordinary="standby", ai=state, scope="all_traffic", degraded=state != "active")
+        if ai_routing_status.get('applied_traffic_scope') == 'mixed':
+            return route('normal_ai', f'按端口分流 + AI→{ai_label}',
+                         '所选端口账号的全部代理流量走 AI，其余账号按域名分流；统一入口按账号隔离。',
+                         '普通数据面', [ai_label], f'按端口直出 / {ai_label}出口', '已应用端口策略',
+                         ordinary='active', ai=state, scope='per_port', degraded=state != 'active')
         return route("normal_ai", f"普通直出 + AI→{ai_label}",
                      "普通及未分类域名走数据面直出；已分类 AI 域名按已应用规则转发到所选 AI 上游。",
                      "普通数据面", [ai_label], f"普通直出 / {ai_label}出口", "已应用分流",
@@ -874,7 +886,7 @@ def build_subscription_response(token, listen_port, output_format):
         abort(404)
 
     port = state.get_port_subscription_record(listen_port)
-    if port is None:
+    if port is None or port.get("status") not in {"active", "throttled"}:
         abort(404)
     if profile.get("unified_port") and str(listen_port) not in profile["user_uuids"]:
         abort(404)
@@ -903,7 +915,7 @@ def build_port_token_subscription_response(subscription_token, output_format):
         abort(404)
 
     port = state.get_port_subscription_record_by_token(subscription_token)
-    if port is None or port.get("status") != "active":
+    if port is None or port.get("status") not in {"active", "throttled"}:
         abort(404)
     if profile.get("unified_port") and str(port["listen_port"]) not in profile["user_uuids"]:
         abort(404)

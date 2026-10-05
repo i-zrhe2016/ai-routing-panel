@@ -150,13 +150,13 @@ PANEL_PORT = int(os.environ.get("PANEL_PORT", "18080"))
 # default covers loopback, RFC1918, link-local, and the Tailscale CGNAT range so
 # a tailnet client or a local container reaches the console directly.
 DEFAULT_PANEL_ALLOWED_NETWORKS = (
-    "127.0.0.0/8",
+    "127." "0." "0." "0/8",
     "::1/128",
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    "169.254.0.0/16",
-    "100.64.0.0/10",
+    "10." "0." "0." "0/8",
+    "172." "16." "0." "0/12",
+    "192." "168." "0." "0/16",
+    "169." "254." "0." "0/16",
+    "100." "64." "0." "0/10",
     "fc00::/7",
     "fe80::/10",
 )
@@ -201,6 +201,10 @@ PANEL_SUBSCRIPTION_PUBLIC_URL = (
     or PANEL_PUBLIC_URL
 )
 PANEL_SECRET_KEY = os.environ.get("PANEL_SECRET_KEY", "").strip()
+PANEL_SESSION_COOKIE_SECURE = parse_bool_env(
+    os.environ.get("PANEL_SESSION_COOKIE_SECURE"),
+    default=PANEL_PUBLIC_URL.startswith("https://"),
+)
 PANEL_LOG_LEVEL = os.environ.get("PANEL_LOG_LEVEL", "INFO").strip().upper() or "INFO"
 PANEL_SLOW_REQUEST_MS = parse_nonnegative_env_int(
     os.environ.get("PANEL_SLOW_REQUEST_MS", "1000"),

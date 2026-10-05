@@ -480,3 +480,310 @@ def test_manual_selection_does_not_succeed_on_executor_failure(health_workspace)
         manager.run_once(args, routing_only=True)
     with sqlite3.connect(args.panel_db_path) as conn:
         assert conn.execute("SELECT value FROM app_state WHERE key='ai_routing_manual_mode'").fetchone() is None
+
+
+
+def configure_authenticated_scope(args):
+    args.proxy_template_path.write_text(json.dumps({"outbounds": [{
+        "tag": "ai_proxy", "protocol": "vless",
+        "settings": {"vnext": [{"address": "__AI_UPSTREAM_HOST__", "port": 443,
+                                "users": [{"id": "11111111-1111-1111-1111-111111111111", "encryption": "none"}]}]},
+        "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {
+            "serverName": "www.example.com", "fingerprint": "chrome", "publicKey": "synthetic-public-key", "shortId": "0123456789abcdef"}}
+    }]}))
+
+
+def test_all_scope_routes_unclassified_and_ip_with_empty_classifications(health_workspace):
+    args, controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    manager.run_once(args, routing_only=True)
+    fragment = json.loads(args.dynamic_routing_path.read_text())
+    assert fragment['traffic_scope'] == 'all'
+    rule = fragment['routing']['rules'][0]
+    assert rule == {'type': 'field', 'network': 'tcp,udp', 'outboundTag': 'ai_proxy'}
+    config = json.loads(args.config_out.read_text())
+    assert config['routing']['rules'][-1]['inboundTag'] == ['panel-31098', 'panel-32001']
+    assert 'domain' not in config['routing']['rules'][-1]
+    assert config['routing']['rules'][0]['outboundTag'] == 'block'
+    report = json.loads((args.report_output_dir / 'latest.json').read_text())
+    assert report['route_status']['traffic_scope'] == 'all'
+    assert report['route_status']['applied_traffic_scope'] == 'all'
+    assert report['route_status']['known_ai_domains'] == 0
+    assert artifact.build_traffic_route('unknown', {}, report['route_status'])['outbound_tag'] == 'ai_proxy'
+
+
+def test_all_scope_survives_health_failure_emergency_and_recovery(health_workspace):
+    args, controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    with sqlite3.connect(args.panel_db_path) as conn:
+        conn.execute("INSERT INTO app_state VALUES ('ai_routing_traffic_scope', 'all')")
+    manager.run_once(args, routing_only=True)
+    assert args.dynamic_routing_path.exists()
+    controller.probe_outbound.return_value = {'ok': False, 'method': 'tcp', 'management_error': False}
+    manager.run_once(args, routing_only=True)
+    assert not args.dynamic_routing_path.exists()
+    assert repository.read_ai_routing_traffic_scope(args.panel_db_path) == 'all'
+    report = json.loads((args.report_output_dir / 'latest.json').read_text())
+    assert report['route_status']['status'] == 'fallback_to_primary'
+    assert report['route_status']['applied_traffic_scope'] == 'direct'
+    args.manual_mode = 'forced_fallback'
+    args.manual_lock_held = True
+    manager.run_once(args, routing_only=True)
+    assert repository.read_ai_routing_traffic_scope(args.panel_db_path) == 'all'
+    args.manual_mode = ''
+    controller.probe_outbound.return_value = {'ok': True, 'method': 'tcp', 'management_error': False}
+    manager.run_once(args, routing_only=True)
+    assert args.dynamic_routing_path.exists()
+
+
+def test_all_scope_render_binds_unified_and_future_accounts(health_workspace):
+    from app.xray.render_config import build_server_config, load_env_file
+    args, _controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    manager.run_once(args, routing_only=True)
+    fragment = json.loads(args.dynamic_routing_path.read_text())
+    values = load_env_file(args.env_file)
+    values['XRAY_UNIFIED_PORT'] = '443'
+    values['XRAY_UNIFIED_UUID_SECRET'] = 'synthetic-test-secret-with-32-characters'
+    config = build_server_config(values, fragment, [31098, 32001, 32002])
+    assert config['routing']['rules'][-1]['inboundTag'] == ['panel-31098', 'panel-32001', 'panel-32002', 'unified-443']
+    # A management/API inbound is never a catch-all tenant target.
+    from app.xray.render_config import merge_dynamic_routing
+    config['inbounds'].append({'tag': 'management', 'protocol': 'dokodemo-door'})
+    merge_dynamic_routing(config, fragment)
+    assert 'management' not in config['routing']['rules'][-1]['inboundTag']
+
+
+def test_scope_executor_failure_preserves_actual_all_route(health_workspace):
+    args, controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    manager.run_once(args, routing_only=True)
+    previous = args.dynamic_routing_path.read_bytes()
+    controller.probe_outbound.return_value = {'ok': False, 'method': 'tcp', 'management_error': True, 'error': 'executor unavailable'}
+    args.traffic_scope = ''
+    manager.run_once(args, routing_only=True)
+    assert args.dynamic_routing_path.read_bytes() == previous
+    status = json.loads((args.report_output_dir / 'latest.json').read_text())['route_status']
+    assert status['status'] == 'probe_error'
+    assert status['route_preserved'] is True
+    assert status['applied_traffic_scope'] == 'all'
+    assert artifact.build_traffic_route('not_ai', {}, status)['outbound_tag'] == 'ai_proxy'
+
+
+def test_failed_scope_reload_restores_fragment_and_config_and_marks_uncertain(health_workspace):
+    args, controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    manager.run_once(args, routing_only=True)
+    previous_config = args.config_out.read_bytes()
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    controller.restart.return_value = False
+    with pytest.raises(RuntimeError, match='重载失败'):
+        manager.run_once(args, routing_only=True)
+    assert not args.dynamic_routing_path.exists()
+    assert args.config_out.read_bytes() == previous_config
+    assert args.config_out.with_name('config.json.pending-apply').exists()
+    status = json.loads((args.report_output_dir / 'latest.json').read_text())['route_status']
+    assert status['applied_traffic_scope'] == 'unknown'
+
+
+def test_scope_override_obeys_scheduled_manual_gate(health_workspace):
+    args, _controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    args.traffic_scope = 'all'
+    with exclusive_file_lock(args.config_out.with_name('.ai-domain-manager-manual.lock')):
+        with pytest.raises(LockBusyError):
+            manager.run_once(args, routing_only=True)
+    assert not args.dynamic_routing_path.exists()
+
+
+def test_all_scope_rejects_missing_template_before_route_mutation(health_workspace):
+    args, _controller, _now = health_workspace
+    manager.run_once(args, routing_only=True)
+    config = args.config_out.read_bytes()
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    with pytest.raises(RuntimeError, match='凭据或模板不可用'):
+        manager.run_once(args, routing_only=True)
+    assert args.config_out.read_bytes() == config
+    assert not args.dynamic_routing_path.exists()
+
+
+@pytest.mark.parametrize('protocol', ['freedom', 'blackhole', 'dns', 'loopback'])
+@pytest.mark.parametrize('payload_source', ['template', 'candidate_override'])
+def test_all_scope_rejects_non_proxy_outbound_before_route_mutation(health_workspace, protocol, payload_source):
+    args, controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    manager.run_once(args, routing_only=True)
+    previous_config = args.config_out.read_bytes()
+    previous_fragment = args.dynamic_routing_path.read_bytes()
+    previous_report = (args.report_output_dir / 'latest.json').read_bytes()
+    controller.reset_mock()
+    payload = {'outbounds': [{'tag': 'ai_proxy', 'protocol': protocol,
+                             'settings': {'redirect': 'ai.example.com:443'}}]}
+    if payload_source == 'template':
+        args.proxy_template_path.write_text(json.dumps(payload))
+    else:
+        args.ai_upstream_candidates[0]['proxy_payload_override'] = payload
+    with pytest.raises(RuntimeError, match='凭据或模板不可用'):
+        manager.run_once(args, routing_only=True)
+    assert args.config_out.read_bytes() == previous_config
+    assert args.dynamic_routing_path.read_bytes() == previous_fragment
+    assert (args.report_output_dir / 'latest.json').read_bytes() == previous_report
+    controller.probe_outbound.assert_not_called()
+    controller.restart.assert_not_called()
+
+
+def test_all_scope_accepts_custom_proxy_with_auxiliary_direct_outbound(health_workspace):
+    args, _controller, _now = health_workspace
+    args.proxy_template_path.write_text(json.dumps({'outbounds': [
+        {'tag': 'ai_proxy', 'protocol': 'socks', 'settings': {
+            'servers': [{'address': '__AI_UPSTREAM_HOST__', 'port': 443,
+                         'users': [{'user': 'synthetic-user', 'pass': 'synthetic-password'}]}]}},
+        {'tag': 'auxiliary-direct', 'protocol': 'freedom'},
+    ]}))
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    manager.run_once(args, routing_only=True)
+    fragment = json.loads(args.dynamic_routing_path.read_text())
+    assert fragment['traffic_scope'] == 'all'
+    assert fragment['outbounds'][0]['protocol'] == 'socks'
+    assert fragment['outbounds'][1]['protocol'] == 'freedom'
+
+
+def test_classified_scope_preserves_explicit_legacy_freedom_redirect(health_workspace):
+    args, _controller, _now = health_workspace
+    args.proxy_template_path.write_text(json.dumps({'outbounds': [{
+        'tag': 'ai_proxy', 'protocol': 'freedom',
+        'settings': {'redirect': 'ai.example.com:443'},
+    }]}))
+    repository.save_classifications(args.panel_db_path, {'domains': {
+        'custom-ai.example': {'classification': 'ai', 'source': 'codex', 'reason': 'known AI'},
+    }})
+    manager.run_once(args, routing_only=True)
+    fragment = json.loads(args.dynamic_routing_path.read_text())
+    assert fragment['traffic_scope'] == 'classified'
+    assert fragment['outbounds'][0]['protocol'] == 'freedom'
+    assert 'domain:custom-ai.example' in fragment['routing']['rules'][0]['domain']
+
+
+@pytest.mark.parametrize('auth_field', ['id', 'publicKey'])
+def test_all_scope_rejects_incomplete_vless_credentials(health_workspace, auth_field):
+    args, _controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    payload = json.loads(args.proxy_template_path.read_text())
+    outbound = payload['outbounds'][0]
+    if auth_field == 'id':
+        outbound['settings']['vnext'][0]['users'][0]['id'] = '__MISSING_UUID__'
+    else:
+        outbound['streamSettings']['realitySettings'].pop('publicKey')
+    args.proxy_template_path.write_text(json.dumps(payload))
+    args.traffic_scope = 'all'
+    with pytest.raises(RuntimeError, match='凭据或模板不可用'):
+        manager.run_once(args, routing_only=True)
+    assert not args.dynamic_routing_path.exists()
+    assert not args.config_out.exists()
+
+
+def test_emergency_direct_remains_available_when_all_credentials_are_removed(health_workspace):
+    args, _controller, _now = health_workspace
+    with sqlite3.connect(args.panel_db_path) as conn:
+        conn.execute("INSERT INTO app_state VALUES ('ai_routing_traffic_scope', 'all')")
+    args.manual_mode = 'forced_fallback'
+    args.manual_lock_held = True
+    manager.run_once(args, routing_only=True)
+    status = json.loads((args.report_output_dir / 'latest.json').read_text())['route_status']
+    assert status['status'] == 'manual_fallback'
+    assert status['applied_traffic_scope'] == 'direct'
+    assert repository.read_ai_routing_traffic_scope(args.panel_db_path) == 'all'
+
+
+def test_delegated_all_scope_never_claims_domain_route_applied(health_workspace):
+    args, _controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    args.traffic_scope = 'all'
+    args.manual_lock_held = True
+    args.data_plane_external_reloader_enabled = True
+    manager.run_once(args, routing_only=True)
+    status = json.loads((args.report_output_dir / 'latest.json').read_text())['route_status']
+    assert status['traffic_scope'] == 'all'
+    assert status['config_apply_status'] == 'delegated'
+    assert status['applied_traffic_scope'] == 'unknown'
+    for classification in ['ai', 'not_ai', 'unknown']:
+        assert artifact.build_traffic_route(classification, {}, status)['outbound_tag'] == 'unknown'
+
+
+def configure_port_scopes(args):
+    with sqlite3.connect(args.panel_db_path) as conn:
+        conn.execute('ALTER TABLE ports ADD COLUMN id INTEGER')
+        conn.execute('ALTER TABLE ports ADD COLUMN ai_traffic_scope TEXT')
+        conn.executemany('INSERT INTO ports(id, listen_port, enabled, ai_traffic_scope) VALUES (?, ?, 1, ?)',
+                         [(1, 31098, 'all'), (2, 32001, 'classified')])
+    (args.config_out.parent/'panel-ports.json').write_text(json.dumps({'ports':[31098,32001], 'accounts':[{'id':1,'listen_port':31098},{'id':2,'listen_port':32001}]}))
+
+
+def test_mixed_port_scope_has_no_shared_unified_catchall(health_workspace):
+    from app.xray.render_config import build_server_config, load_env_file
+    args, _controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    configure_port_scopes(args)
+    manager.run_once(args, routing_only=True)
+    fragment = json.loads(args.dynamic_routing_path.read_text())
+    values = load_env_file(args.env_file)
+    values['XRAY_UNIFIED_PORT'] = '443'
+    values['XRAY_UNIFIED_UUID_SECRET'] = 'synthetic-test-secret-with-32-characters'
+    config = build_server_config(values, fragment, [31098, 32001])
+    catches = [r for r in config['routing']['rules'] if r.get('outboundTag') == 'ai_proxy' and r.get('network') == 'tcp,udp' and 'domain' not in r]
+    assert catches == [
+        {'type':'field','outboundTag':'ai_proxy','network':'tcp,udp','inboundTag':['panel-31098']},
+        {'type':'field','outboundTag':'ai_proxy','network':'tcp,udp','user':['panel-user-31098'],'inboundTag':['unified-443']}]
+    report = json.loads((args.report_output_dir/'latest.json').read_text())['route_status']
+    assert report['applied_traffic_scope'] == 'mixed'
+    assert report['applied_port_scopes'] == [
+        {'id':1,'listen_port':31098,'traffic_scope':'all','active':True},
+        {'id':2,'listen_port':32001,'traffic_scope':'classified','active':True}]
+    assert artifact.build_traffic_route('not_ai', {}, report)['outbound_tag'] == 'per_port'
+
+
+def test_port_override_applies_before_db_commit_and_failure_preserves_fragment(health_workspace):
+    args, controller, _now = health_workspace
+    configure_authenticated_scope(args)
+    configure_port_scopes(args)
+    args.port_id = 1; args.port_traffic_scope='classified'; args.manual_lock_held=True
+    manager.run_once(args, routing_only=True)
+    assert not args.dynamic_routing_path.exists()
+    assert repository.read_port_scope_policy(args.panel_db_path, 'classified')[0]['traffic_scope'] == 'all'
+    args.port_traffic_scope='all'
+    manager.run_once(args, routing_only=True)
+    before=args.dynamic_routing_path.read_bytes()
+    controller.restart.return_value=False
+    args.port_id=2
+    with pytest.raises(RuntimeError, match='重载失败'): manager.run_once(args, routing_only=True)
+    assert args.dynamic_routing_path.read_bytes() == before
+
+
+def test_port_scope_health_fallback_and_executor_preserve_preference(health_workspace):
+    args, controller, _now=health_workspace
+    configure_authenticated_scope(args); configure_port_scopes(args)
+    manager.run_once(args, routing_only=True)
+    before=args.dynamic_routing_path.read_bytes()
+    controller.probe_outbound.return_value={'ok':False,'management_error':True,'error_code':'executor'}
+    manager.run_once(args,routing_only=True)
+    assert args.dynamic_routing_path.read_bytes()==before
+    report=json.loads((args.report_output_dir/'latest.json').read_text())['route_status']
+    assert report['applied_traffic_scope']=='mixed' and report['route_preserved']
+    controller.probe_outbound.return_value={'ok':False,'management_error':False}
+    manager.run_once(args,routing_only=True)
+    assert not args.dynamic_routing_path.exists()
+    assert repository.read_port_scope_policy(args.panel_db_path,'classified')[0]['traffic_scope']=='all'
+    controller.probe_outbound.return_value={'ok':True,'management_error':False}
+    manager.run_once(args,routing_only=True)
+    assert args.dynamic_routing_path.read_bytes()==before

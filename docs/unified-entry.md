@@ -103,3 +103,51 @@ XRAY_TEST_BINARY=/path/to/xray python -m pytest -q tests/test_unified_entry_inte
 若切换失败，先暂停配置写入与路径监听，停止 `xray-entry`，恢复备份的多端口
 Xray 配置、`.env`、客户端订阅文件及原订阅服务启动配置，再重启 Xray 和
 `verge-sub`。必须同时恢复订阅输出，避免仍发布未监听的 443 代理节点。
+
+## 超额账号的 5 Mbps 限速
+
+启用账号限速后，到达配置配额的账号保留旧端口、新 UUID 和订阅下载；手动停用与
+到期仍不可用。`100G` 沿用现有二进制单位，等于 `107374182400` 字节，上传与下载
+累计之和达到配额即进入超额状态。限速是上传、下载**各** `5000000` bits/sec，
+同一账号所有并发连接与旧端口/443 共用预算；协议和 IP 头开销计入内核速率，应用
+吞吐略低于 5 Mbps。重置流量或增加配额后解除限速，累计流量不因限速清零。
+历史 `enabled=0` 记录没有可靠的停用原因，不自动恢复；重置不启用已停用账号。
+
+Xray 26.5.3 没有原生账号速率配置。`XRAY_ACCOUNT_LIMITS_ENABLED=1` 将认证后的
+账号路由到带标记的独立普通/AI 出站；旧兼容入站与统一用户邮件标识绑定同一标记。
+所有启用账号始终标记，只有超额账号加入队列，因此跨过配额和解除限速不需要重启
+Xray。静态 QUIC 禁止规则优先，原 AI 域名/全部流量范围保持不变。不能使用共享
+443 端口或客户源 IP 代替认证账号；不支持链式 dialerProxy/proxySettings 或 balancer。
+
+普通数据面安装 `scripts/apply_account_limits.py` 和 `app/xray/account_limits.py`
+至同一受保护目录，例如 `/usr/local/lib/xray-account-limits/`。节点需 `ip`、`tc`、
+`nft`、IFB/HTB/flower/act_ct；脚本以 root 执行。实际 Xray 容器须 host 网络、绑定
+被检查配置，进程具备 SO_MARK 权限（CAP_NET_ADMIN，或 Linux >=5.17 的 CAP_NET_RAW）。
+只读配置校验不能证明套接字标记已生效。
+
+在控制面进程配置 `DATAPLANE_ACCOUNT_LIMITS_COMMAND`，使用已有数据面 SSH 传输：
+
+```text
+python3 /usr/local/lib/xray-account-limits/apply_account_limits.py --apply --interfaces eth0 tailscale0 --config /root/xray-routing-panel/app/xray/runtime/config.json --xray-container xray-reality-local
+```
+
+命令从 stdin 接收版本化的账号策略，不包含 UUID、密码或流量计数。先在隔离环境
+验证并完成独立预检，再一致启用标记渲染与节点命令。默认渲染开关关闭；开关未启用、
+命令缺失或能力不足时超额账号显示待配置/失败，不能宣称真实限速。控制面备用入口
+需另行安装等价能力，普通数据面的回执不能证明备用节点生效。
+
+脚本只管理 `inet xray_account_limits`、`xral-up`/`xral-down` IFB 和 tc 优先级
+49150/49151、链 49150，以及 IFB 内部分类器优先级 49152；标记 `0x50000000 | account_port` 使用掩码 `0xff00ffff`，
+保留 Tailscale 的 `0x00ff0000`。上传及返回下载分别汇入跨 eth0/tailscale0 共享的
+账号 HTB 类，rate=ceil=5Mbit，不替换物理网卡已有根队列。外来同名资源阻止应用。
+
+维护周期检查策略 hash、节点 boot ID、真实进程权限、规则及速率，并更新回执。
+只有该账号上传/下载类计数均实际增加才显示已生效；无连接时显示“已配置，待连接
+验证”。回执过期或策略不一致显示待应用。节点重启后内核队列丢失，维护周期重建；
+新队列需要连接验证。新旧版本策略或应用失败不会伪造成功回执。
+
+回退时暂停控制面配置写入，使用同一接口/配置/状态路径执行 `--remove`（不传
+`--apply`）。仅删除该脚本拥有的规则与 IFB；原已存在 clsact 与根队列保留。恢复
+旧源代码、`.env`、配置和订阅产物后按原流程重新加载 Xray。禁止只关闭渲染开关却
+留存孤立内核规则。首次部署与回退均验证 HTTPS、管理入口、未超额账号和真实认证
+账号双向传输；配置已接受与实测生效是两个不同结果。

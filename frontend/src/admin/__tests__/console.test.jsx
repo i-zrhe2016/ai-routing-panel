@@ -174,3 +174,19 @@ describe("api client", () => {
     delete window.__BOOT__;
   });
 });
+
+
+it("failed scope API keeps the existing switch value and exposes the error", async () => {
+  const user = userEvent.setup();
+  const api = createFakeApi();
+  api.post = vi.fn(async () => { throw new Error("路由重载失败，请重试。"); });
+  renderConsole(api);
+  const nav = await screen.findByRole("navigation", { name: "控制台工作区" });
+  await user.click(within(nav).getByRole("button", { name: /^AI 路由/ }));
+  await user.click(screen.getByRole("switch", { name: "启用全部转发到 AI 节点" }));
+  expect(await screen.findByText("路由重载失败，请重试。")).toBeTruthy();
+  const control = screen.getByRole("switch", { name: "启用全部转发到 AI 节点" });
+  expect(control.getAttribute("aria-checked")).toBe("false");
+  expect(control.disabled).toBe(false);
+  expect(api.post).toHaveBeenCalledWith("/api/ai-routing/scope", { traffic_scope: "all" });
+});

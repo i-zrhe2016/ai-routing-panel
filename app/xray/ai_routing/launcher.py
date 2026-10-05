@@ -35,7 +35,7 @@ class AiDomainManagerRunner:
             project_root = Path(__file__).resolve().parents[2]
         return project_root
 
-    def build_command(self, manual_mode=None):
+    def build_command(self, manual_mode=None, traffic_scope=None, port_id=None, port_traffic_scope=None):
         if self.execution_mode == "local":
             command = [self.python_executable, "-m", "app.xray.ai_routing.runner", "--once"]
         else:
@@ -51,11 +51,18 @@ class AiDomainManagerRunner:
                 "--once",
             ]
         if manual_mode is not None:
-            command.extend(("--manual-mode", str(manual_mode), "--manual-lock-held"))
+            command.extend(("--manual-mode", str(manual_mode)))
+        if traffic_scope is not None:
+            command.extend(("--traffic-scope", str(traffic_scope)))
+        if port_id is not None:
+            command.extend(("--port-id", str(port_id), "--port-traffic-scope", str(port_traffic_scope)))
+        if manual_mode is not None or traffic_scope is not None or port_id is not None:
+            command.append("--manual-lock-held")
         return command
 
-    def run(self, manual_mode=None):
-        command = self.build_command(manual_mode=manual_mode)
+    def run(self, manual_mode=None, traffic_scope=None, port_id=None, port_traffic_scope=None):
+        command = self.build_command(manual_mode=manual_mode, traffic_scope=traffic_scope,
+                                     port_id=port_id, port_traffic_scope=port_traffic_scope)
         run_options = {}
         if self.execution_mode == "local":
             run_options["cwd"] = str(self._local_project_root())

@@ -887,7 +887,8 @@ class CommerceService:
         )
         item["status"] = status["code"]
         item["status_label"] = status["label"]
-        item["renewal_allowed"] = item["status"] in {"expired", "quota"}
+        self.ports.add_rate_status(item)
+        item["renewal_allowed"] = item["status"] in {"expired", "throttled"}
         item["expires_at_display"] = format_display_time(item.get("expires_at"))
         item["traffic_limit_display"] = (
             human_bytes(item.get("traffic_limit_bytes")) if item.get("traffic_limit_bytes") is not None else "无限制"

@@ -195,11 +195,11 @@ def status_payload(enabled, expires_at, traffic_limit_bytes=None, traffic_usage_
         expired = datetime.fromisoformat(expires_at) <= utc_now()
     if expired:
         return {"code": "expired", "label": "已过期"}
+    if not enabled:
+        return {"code": "disabled", "label": "已停用"}
     if traffic_limit_bytes is not None and traffic_usage_bytes >= int(traffic_limit_bytes):
-        return {"code": "quota", "label": "已达流量上限"}
-    if enabled:
-        return {"code": "active", "label": "运行中"}
-    return {"code": "disabled", "label": "已停用"}
+        return {"code": "throttled", "label": "超额 5 Mbps，待配置", "rateBitsPerSecond": 5_000_000}
+    return {"code": "active", "label": "运行中"}
 
 
 def port_is_expired(expires_at, now_dt=None):

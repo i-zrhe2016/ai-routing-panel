@@ -198,7 +198,9 @@ class CommerceFlowTest(unittest.TestCase):
         return {"X-CSRF-Token": self.csrf_token(), "Content-Type": "application/json"}
 
     def test_existing_package_order_can_be_fulfilled(self):
-        email, password = self.register_customer()
+        credentials = self.register_customer()
+        email = credentials[0]
+        customer_credential = credentials[1]
 
         dashboard = self.client.get("/customer/dashboard", follow_redirects=True)
         self.assertEqual(dashboard.status_code, 200)
@@ -207,7 +209,7 @@ class CommerceFlowTest(unittest.TestCase):
         self.assertEqual(overview["meta"]["timezone_label"], "北京时间（UTC+08:00）")
 
         self.client.get("/customer/logout", follow_redirects=False)
-        self.login_customer(email, password)
+        self.login_customer(email, customer_credential)
 
         order = self.create_existing_order()
         self.assertEqual(order["status"], "pending_payment")
@@ -306,7 +308,9 @@ class CommerceFlowTest(unittest.TestCase):
             self.assertEqual(
                 conn.execute("SELECT enabled FROM ports WHERE id = ?", (active["port_id"],)).fetchone()[0], 1
             )
-            self.assertEqual(self.panel.state.render_panel_ports_payload(conn), {"ports": [active["listen_port"]]})
+            payload = self.panel.state.render_panel_ports_payload(conn)
+            self.assertEqual(payload["ports"], [active["listen_port"]])
+            self.assertEqual([a["port"] for a in payload["accountLimits"]["accounts"]], [active["listen_port"]])
         renewed = self.panel.state.get_customer_service_subscription(1, expired["id"])
         self.assertTrue(renewed["renewal_allowed"])
         self.assertEqual(renewed["subscription_token"], expired["subscription_token"])
@@ -345,7 +349,9 @@ class CommerceFlowTest(unittest.TestCase):
             conn.commit()
         self.panel.state.disable_auto_stopped_ports(reload_xray=False)
         quota_service = self.panel.state.query_customer_service_subscriptions(1)[0]
-        self.assertEqual(quota_service["status"], "quota")
+        self.assertEqual(quota_service["status"], "throttled")
+        self.assertEqual(quota_service["enabled"], 1)
+        self.assertEqual(quota_service["rate_limit"]["state"], "pending")
 
         renewal_order_no = self.panel.state.create_order(
             1,

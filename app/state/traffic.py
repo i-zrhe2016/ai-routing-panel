@@ -308,17 +308,10 @@ class TrafficService:
             )
 
             now_dt = utc_now()
-            expired = False
-            if row["expires_at"]:
-                expired = datetime.fromisoformat(row["expires_at"]) <= now_dt
-            usage_bytes = int(row["total_bytes_sent"]) + int(row["total_bytes_received"])
-            quota_reached = row["traffic_limit_bytes"] is not None and usage_bytes >= int(row["traffic_limit_bytes"])
-
+            # Disabled rows have no reliable historical stop reason. A usage
+            # reset must never implicitly enable a manually disabled account.
             next_enabled = int(row["enabled"])
             restored = False
-            if quota_reached and not expired:
-                next_enabled = 1
-                restored = True
 
             conn.execute(
                 "UPDATE ports SET enabled = ?, updated_at = ? WHERE id = ?",

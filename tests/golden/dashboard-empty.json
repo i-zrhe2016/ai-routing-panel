@@ -141,6 +141,7 @@
       "disabled_ports": 0,
       "expired_ports": 0,
       "quota_ports": 0,
+      "throttled_ports": 0,
       "total_bytes_received": 0,
       "total_bytes_sent": 0,
       "total_connections": 0,
